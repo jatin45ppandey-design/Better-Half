@@ -13,7 +13,7 @@ export const supabase = createClient(supabaseUrl, supabasePublishableKey, {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
-    detectSessionInUrl: true,
+    // OAuth callback codes are exchanged explicitly by /auth/callback.\n    detectSessionInUrl: false,
     storage: typeof window !== 'undefined' ? window.localStorage : undefined,
   },
 });
