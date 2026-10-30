@@ -7,6 +7,8 @@ import { gameSessionService } from '../src/modules/games/core/gameSession.servic
 import { gameEngineFactory } from '../src/modules/games/core/gameEngineFactory.js';
 import { gameStateService } from '../src/modules/games/core/gameState.service.js';
 import { prisma } from '../src/config/prisma.js';
+import { safeSocketError } from '../src/socket/safeError.js';
+import { AppError } from '../src/utils/errors.js';
 
 describe('PlaySpace Phase 3 — All 11 Server Game Engines & Real-time Integration', () => {
   let server: http.Server;
@@ -912,6 +914,15 @@ describe('PlaySpace Phase 3 — All 11 Server Game Engines & Real-time Integrati
       expect(resumeDataB.sessionId).toBe(session.sessionId);
     });
   });
+  describe('Socket error safety', () => {
+    it('preserves typed application errors and hides unexpected internal messages', () => {
+      expect(safeSocketError(new AppError('Only the host can start this game.', 403), 'Action failed.'))
+        .toBe('Only the host can start this game.');
+      expect(safeSocketError(new Error('password=secret; SQL SELECT * FROM UserProfile'), 'Action failed.'))
+        .toBe('Action failed.');
+    });
+  });
+
   describe('Session private projection authorization', () => {
     it('returns each participant only their own private state and denies outsiders', () => {
       const sessionId = 'wave1-private-projection-test';

@@ -9,6 +9,7 @@ import { gameStateService } from '../modules/games/core/gameState.service.js';
 import { gameActionService } from '../modules/games/core/gameAction.service.js';
 import { gameSessionService } from '../modules/games/core/gameSession.service.js';
 import { presenceManager } from './presence.js';
+import { safeSocketError } from './safeError.js';
 
 export function registerGameHandlers(
   io: Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>,
@@ -51,7 +52,7 @@ export function registerGameHandlers(
         privateState,
       });
     } catch (err: any) {
-      callback?.({ success: false, error: err.message || 'Failed to join game session.' });
+      callback?.({ success: false, error: safeSocketError(err, 'Failed to join game session.') });
     }
   });
 
@@ -124,7 +125,7 @@ export function registerGameHandlers(
         });
       }
     } catch (err: any) {
-      callback?.({ success: false, error: err.message || 'Action execution error.' });
+      callback?.({ success: false, error: safeSocketError(err, 'Action execution error.') });
     }
   });
 
@@ -142,7 +143,7 @@ export function registerGameHandlers(
 
       callback?.({ success: true });
     } catch (err: any) {
-      callback?.({ success: false, error: err.message || 'Failed to pause match.' });
+      callback?.({ success: false, error: safeSocketError(err, 'Failed to pause match.') });
     }
   });
 
@@ -160,7 +161,7 @@ export function registerGameHandlers(
 
       callback?.({ success: true });
     } catch (err: any) {
-      callback?.({ success: false, error: err.message || 'Failed to resume match.' });
+      callback?.({ success: false, error: safeSocketError(err, 'Failed to resume match.') });
     }
   });
 
@@ -177,7 +178,7 @@ export function registerGameHandlers(
 
       callback?.({ success: true, newSessionId: newSession.sessionId });
     } catch (err: any) {
-      callback?.({ success: false, error: err.message || 'Failed to initiate rematch.' });
+      callback?.({ success: false, error: safeSocketError(err, 'Failed to initiate rematch.') });
     }
   });
 

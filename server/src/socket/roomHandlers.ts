@@ -3,6 +3,7 @@ import { roomsService } from '../modules/rooms/rooms.service.js';
 import { gameSessionService } from '../modules/games/core/gameSession.service.js';
 import { presenceManager } from './presence.js';
 import { prisma } from '../config/prisma.js';
+import { safeSocketError } from './safeError.js';
 import type {
   ClientToServerEvents,
   ServerToClientEvents,
@@ -86,7 +87,7 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
 
       callback?.({ success: true, room: roomSnapshot });
     } catch (err: any) {
-      callback?.({ success: false, error: err?.message || 'Failed to join room' });
+      callback?.({ success: false, error: safeSocketError(err, 'Failed to join room') });
     }
   });
 
@@ -119,7 +120,7 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
 
       callback?.({ success: true });
     } catch (err: any) {
-      callback?.({ success: false, error: err?.message || 'Failed to leave room' });
+      callback?.({ success: false, error: safeSocketError(err, 'Failed to leave room') });
     }
   });
 
@@ -149,7 +150,7 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
         isReady: participant ? participant.isReady : isReady,
       });
     } catch (err: any) {
-      callback?.({ success: false, error: err?.message || 'Failed to update ready status' });
+      callback?.({ success: false, error: safeSocketError(err, 'Failed to update ready status') });
     }
   });
 
@@ -172,7 +173,7 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
 
       callback?.({ success: true, votes: updatedRoom.gameVotes });
     } catch (err: any) {
-      callback?.({ success: false, error: err?.message || 'Failed to submit vote' });
+      callback?.({ success: false, error: safeSocketError(err, 'Failed to submit vote') });
     }
   });
 
@@ -193,7 +194,7 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
 
       callback?.({ success: true });
     } catch (err: any) {
-      callback?.({ success: false, error: err?.message || 'Failed to select game' });
+      callback?.({ success: false, error: safeSocketError(err, 'Failed to select game') });
     }
   });
 
@@ -226,7 +227,7 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
         );
         sessionId = session.sessionId;
       } catch (err: any) {
-        callback?.({ success: false, error: err.message || 'Failed to create game session' });
+        callback?.({ success: false, error: safeSocketError(err, 'Failed to create game session') });
         return;
       }
 
@@ -244,7 +245,7 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
 
       callback?.({ success: true });
     } catch (err: any) {
-      callback?.({ success: false, error: err?.message || 'Failed to start game' });
+      callback?.({ success: false, error: safeSocketError(err, 'Failed to start game') });
     }
   });
 
@@ -266,7 +267,7 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
 
       callback?.({ success: true });
     } catch (err: any) {
-      callback?.({ success: false, error: err?.message || 'Failed to transfer host' });
+      callback?.({ success: false, error: safeSocketError(err, 'Failed to transfer host') });
     }
   });
 
@@ -289,7 +290,7 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
 
       callback?.({ success: true });
     } catch (err: any) {
-      callback?.({ success: false, error: err?.message || 'Failed to kick player' });
+      callback?.({ success: false, error: safeSocketError(err, 'Failed to kick player') });
     }
   });
 
@@ -306,7 +307,7 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
 
       callback?.({ success: true, message: createdMessage });
     } catch (err: any) {
-      callback?.({ success: false, error: err?.message || 'Failed to send message' });
+      callback?.({ success: false, error: safeSocketError(err, 'Failed to send message') });
     }
   });
 
