@@ -29,7 +29,7 @@ export const updateProfileSchema = z.object({
     .trim()
     .max(3)
     .optional(),
-});
+}).strict();
 
 export const searchProfileSchema = z.object({
   q: z

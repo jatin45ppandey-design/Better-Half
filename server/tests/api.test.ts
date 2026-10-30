@@ -3,6 +3,7 @@ import request from 'supertest';
 import { createApp } from '../src/app.js';
 import { prisma } from '../src/config/prisma.js';
 import { supabase } from '../src/config/supabase.js';
+import { gameStateService } from '../src/modules/games/core/gameState.service.js';
 
 const app = createApp();
 
@@ -204,4 +205,67 @@ describe('PlaySpace Backend API — Phase 1 Test Suite', () => {
       expect(res.body.message).toContain('Cannot block yourself');
     });
   });
+  describe('Wave 1 — Object-level authorization and input allowlists', () => {
+    it('denies non-participants before reading game session projections', async () => {
+      vi.spyOn(gameStateService, 'getSession').mockReturnValue({ participants: [{ userId: 'another-player' }] } as any);
+      const publicProjection = vi.spyOn(gameStateService, 'getPublicProjection').mockReturnValue({ sessionId: 'private-session' });
+      const res = await request(app).get('/api/v1/games/sessions/private-session/state')
+        .set('Authorization', 'Bearer test-mock-token-user-test-uuid');
+      expect(res.status).toBe(403);
+      expect(publicProjection).not.toHaveBeenCalled();
+    });
+
+    it('rejects protected profile properties', async () => {
+      const res = await request(app).patch('/api/v1/profiles/me')
+        .set('Authorization', 'Bearer test-mock-token-user-test-uuid')
+        .send({ displayName: 'Updated Name', roles: ['ADMIN'], accountStatus: 'SUSPENDED' });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('Validation failed');
+    });
+
+    it('rejects protected settings properties', async () => {
+      const res = await request(app).patch('/api/v1/settings')
+        .set('Authorization', 'Bearer test-mock-token-user-test-uuid')
+        .send({ ghostMode: true, accountStatus: 'SUSPENDED', userId: 'another-user' });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('Validation failed');
+    });
+
+    it('returns a safe room preview to non-members without internal IDs or private data', async () => {
+      vi.spyOn(prisma.room, 'findFirst').mockResolvedValueOnce({
+        id: 'internal-room-id', code: 'SAFE22', name: 'Private Game Night', mode: 'friend',
+        status: 'WAITING', maxPlayers: 4, selectedGameId: 'uno-style', hostId: 'host-user',
+        expiresAt: new Date(Date.now() + 60_000), host: { displayName: 'Room Host' },
+        participants: [{ userId: 'host-user', role: 'HOST', isReady: true, user: {
+          displayName: 'Room Host', avatarUrl: null, avatarInitials: 'RH', avatarColor: '#9670E8',
+        }}],
+      } as any);
+      vi.spyOn(prisma.blockedUser, 'findFirst').mockResolvedValueOnce(null);
+      const res = await request(app).get('/api/v1/rooms/code/SAFE22')
+        .set('Authorization', 'Bearer test-mock-token-user-test-uuid');
+      expect(res.status).toBe(200);
+      expect(res.body.isJoinPreview).toBe(true);
+      expect(res.body.canJoin).toBe(true);
+      expect(res.body.participantCount).toBe(1);
+      expect(res.body).not.toHaveProperty('id');
+      expect(res.body).not.toHaveProperty('hostId');
+      expect(res.body).not.toHaveProperty('gameVotes');
+      expect(res.body).not.toHaveProperty('chatMessages');
+      expect(res.body.participants[0]).not.toHaveProperty('userId');
+    });
+
+    it('blocks non-members from reading or posting room chat', async () => {
+      vi.spyOn(prisma.room, 'findFirst')
+        .mockResolvedValueOnce({ id: 'chat-room', status: 'WAITING', code: 'CHAT22' } as any)
+        .mockResolvedValueOnce({ id: 'chat-room', status: 'WAITING', code: 'CHAT22' } as any);
+      vi.spyOn(prisma.roomParticipant, 'findUnique').mockResolvedValueOnce(null).mockResolvedValueOnce(null);
+      const read = await request(app).get('/api/v1/rooms/chat-room/messages')
+        .set('Authorization', 'Bearer test-mock-token-user-test-uuid');
+      const post = await request(app).post('/api/v1/rooms/chat-room/messages')
+        .set('Authorization', 'Bearer test-mock-token-user-test-uuid').send({ message: 'Not a member' });
+      expect(read.status).toBe(403);
+      expect(post.status).toBe(403);
+    });
+  });
+
 });
