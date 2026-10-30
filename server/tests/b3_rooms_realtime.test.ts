@@ -322,4 +322,78 @@ describe('PlaySpace Wave 2 — B3 Rooms, Realtime, Invitations, Chat & Presence 
       expect(responseEmpty.error).toContain('Message cannot be empty');
     });
   });
+
+  describe('Host Lifecycle Policy & Expiry Cleanup', () => {
+    it('transfers host role to oldest active non-suspended participant when host is suspended', async () => {
+      vi.spyOn(prisma.room, 'findMany').mockResolvedValueOnce([
+        {
+          id: 'room-susp-1',
+          code: 'SUSP01',
+          hostId: 'suspended-host-id',
+          status: 'WAITING',
+          participants: [
+            {
+              id: 'part-next-host',
+              userId: 'active-guest-id',
+              joinedAt: new Date(Date.now() - 10000),
+              user: { displayName: 'NextHost', accountStatus: 'ACTIVE' },
+            },
+          ],
+        },
+      ] as any);
+
+      const txSpy = vi.spyOn(prisma, '$transaction').mockResolvedValueOnce([{}, {}, {}, {}] as any);
+
+      const result = await roomsService.handleUserSuspension('suspended-host-id');
+      expect(result.affectedRooms).toBe(1);
+      expect(result.transferredRooms).toBe(1);
+      expect(txSpy).toHaveBeenCalled();
+    });
+
+    it('closes room when host is suspended and no active non-suspended participants remain', async () => {
+      vi.spyOn(prisma.room, 'findMany').mockResolvedValueOnce([
+        {
+          id: 'room-susp-empty',
+          code: 'SUSP02',
+          hostId: 'suspended-host-id',
+          status: 'WAITING',
+          participants: [],
+        },
+      ] as any);
+
+      const updateSpy = vi.spyOn(prisma.room, 'update').mockResolvedValueOnce({} as any);
+
+      const result = await roomsService.handleUserSuspension('suspended-host-id');
+      expect(result.affectedRooms).toBe(1);
+      expect(result.closedRooms).toBe(1);
+      expect(updateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'room-susp-empty' },
+          data: { status: 'CLOSED' },
+        })
+      );
+    });
+
+    it('cleans up expired rooms and pending invitations idempotently', async () => {
+      vi.spyOn(prisma.room, 'updateMany').mockResolvedValueOnce({ count: 3 } as any);
+      vi.spyOn(prisma.roomInvitation, 'updateMany').mockResolvedValueOnce({ count: 5 } as any);
+
+      const res = await roomsService.cleanupExpiredRooms();
+      expect(res.expiredCount).toBe(3);
+    });
+
+    it('paginates active rooms with limit and offset options', async () => {
+      const findManySpy = vi.spyOn(prisma.roomParticipant, 'findMany').mockResolvedValueOnce([]);
+
+      await roomsService.getUserActiveRooms('test-user-paged', { limit: 5, offset: 10 });
+
+      expect(findManySpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          take: 5,
+          skip: 10,
+        })
+      );
+    });
+  });
 });
+

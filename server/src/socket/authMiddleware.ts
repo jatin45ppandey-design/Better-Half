@@ -57,6 +57,36 @@ export async function socketAuthMiddleware(
     socket.data.email = email;
     socket.data.accountStatus = profile.accountStatus;
 
+    // Extract token expiration if standard JWT
+    try {
+      const parts = token.split('.');
+      if (parts.length === 3) {
+        const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf-8'));
+        if (payload && typeof payload.exp === 'number') {
+          const expMs = payload.exp * 1000;
+          if (Date.now() >= expMs) {
+            return next(new Error('Authentication failed: Token has expired'));
+          }
+          socket.data.tokenExp = expMs;
+
+          // Proactive disconnection when token expires during live connection
+          const timeToExpiry = expMs - Date.now();
+          if (timeToExpiry > 0) {
+            const timer = setTimeout(() => {
+              socket.emit('room:error', {
+                code: 'TOKEN_EXPIRED',
+                message: 'Authentication token has expired. Please re-authenticate.',
+              });
+              socket.disconnect(true);
+            }, timeToExpiry);
+            socket.on('disconnect', () => clearTimeout(timer));
+          }
+        }
+      }
+    } catch {
+      // Non-JWT token (e.g. test token)
+    }
+
     // Load user privacy settings for presence
     try {
       const settings = await prisma.userSettings.findUnique({

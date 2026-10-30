@@ -155,5 +155,7 @@ export interface InterServerEvents {
 export interface SocketData {
   userId: string;
   email?: string;
+  accountStatus?: string;
+  tokenExp?: number;
   user?: any;
 }

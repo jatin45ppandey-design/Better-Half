@@ -1,8 +1,51 @@
 import { Request, Response, NextFunction } from 'express';
 
-interface RateLimitRecord {
+export interface RateLimitRecord {
   count: number;
   resetAt: number;
+}
+
+/**
+ * Interface for distributed rate limit stores (e.g. Redis, Postgres, or In-Memory).
+ * In single-instance Render deployments, MemoryRateLimitStore provides zero-latency in-memory tracking.
+ * For horizontally-scaled clusters, an adapter implementing IRateLimitStore (e.g. RedisRateLimitStore)
+ * can be plugged in without changing middleware semantics.
+ */
+export interface IRateLimitStore {
+  get(key: string): Promise<RateLimitRecord | undefined> | RateLimitRecord | undefined;
+  set(key: string, record: RateLimitRecord): Promise<void> | void;
+  delete(key: string): Promise<void> | void;
+}
+
+export class MemoryRateLimitStore implements IRateLimitStore {
+  private map = new Map<string, RateLimitRecord>();
+
+  constructor(cleanupIntervalMs = 120000) {
+    setInterval(() => {
+      const now = Date.now();
+      for (const [key, record] of this.map.entries()) {
+        if (now > record.resetAt) {
+          this.map.delete(key);
+        }
+      }
+    }, cleanupIntervalMs).unref();
+  }
+
+  get(key: string): RateLimitRecord | undefined {
+    return this.map.get(key);
+  }
+
+  set(key: string, record: RateLimitRecord): void {
+    this.map.set(key, record);
+  }
+
+  delete(key: string): void {
+    this.map.delete(key);
+  }
+
+  clear(): void {
+    this.map.clear();
+  }
 }
 
 export function getClientIp(req: Request): string {
@@ -22,29 +65,19 @@ export interface RateLimiterOptions {
   message?: string;
   keyGenerator?: (req: Request) => string;
   skipInTest?: boolean;
+  store?: IRateLimitStore;
 }
 
 /**
- * Standard in-memory rate limiter with Render reverse-proxy IP handling
- * and standard RateLimit response headers.
+ * Standard rate limiter with Render reverse-proxy IP handling,
+ * pluggable store adapter, and standard RateLimit response headers.
  */
 export function rateLimiter(options: RateLimiterOptions = {}) {
   const windowMs = options.windowMs || 60 * 1000; // 1 minute default
   const max = options.max || 120; // 120 requests per window default
   const message = options.message || 'Too many requests, please try again later.';
   const skipInTest = options.skipInTest ?? true;
-
-  const storageMap = new Map<string, RateLimitRecord>();
-
-  // Periodically clean up expired entries
-  setInterval(() => {
-    const now = Date.now();
-    for (const [key, record] of storageMap.entries()) {
-      if (now > record.resetAt) {
-        storageMap.delete(key);
-      }
-    }
-  }, windowMs * 2).unref();
+  const store = options.store || new MemoryRateLimitStore(windowMs * 2);
 
   return (req: Request, res: Response, next: NextFunction): void => {
     // In test environment, skip throttling unless explicitly enabled
@@ -58,36 +91,46 @@ export function rateLimiter(options: RateLimiterOptions = {}) {
       : (req.user?.id || getClientIp(req));
 
     const now = Date.now();
-    const record = storageMap.get(key);
+    const handleRecord = (record: RateLimitRecord | undefined): void => {
+      if (!record || now > record.resetAt) {
+        store.set(key, { count: 1, resetAt: now + windowMs });
+        res.setHeader('X-RateLimit-Limit', max);
+        res.setHeader('X-RateLimit-Remaining', max - 1);
+        res.setHeader('X-RateLimit-Reset', Math.ceil((now + windowMs) / 1000));
+        next();
+        return;
+      }
 
-    if (!record || now > record.resetAt) {
-      storageMap.set(key, { count: 1, resetAt: now + windowMs });
+      record.count += 1;
+      store.set(key, record);
+      const remaining = Math.max(0, max - record.count);
+      const retryAfter = Math.ceil((record.resetAt - now) / 1000);
+
       res.setHeader('X-RateLimit-Limit', max);
-      res.setHeader('X-RateLimit-Remaining', max - 1);
-      res.setHeader('X-RateLimit-Reset', Math.ceil((now + windowMs) / 1000));
+      res.setHeader('X-RateLimit-Remaining', remaining);
+      res.setHeader('X-RateLimit-Reset', Math.ceil(record.resetAt / 1000));
+
+      if (record.count > max) {
+        res.setHeader('Retry-After', retryAfter);
+        res.status(429).json({
+          error: 'Too Many Requests',
+          message,
+          retryAfter,
+        });
+        return;
+      }
+
       next();
-      return;
+    };
+
+    const maybePromise = store.get(key);
+    if (maybePromise && typeof (maybePromise as any).then === 'function') {
+      (maybePromise as Promise<RateLimitRecord | undefined>)
+        .then(handleRecord)
+        .catch(next);
+    } else {
+      handleRecord(maybePromise as RateLimitRecord | undefined);
     }
-
-    record.count += 1;
-    const remaining = Math.max(0, max - record.count);
-    const retryAfter = Math.ceil((record.resetAt - now) / 1000);
-
-    res.setHeader('X-RateLimit-Limit', max);
-    res.setHeader('X-RateLimit-Remaining', remaining);
-    res.setHeader('X-RateLimit-Reset', Math.ceil(record.resetAt / 1000));
-
-    if (record.count > max) {
-      res.setHeader('Retry-After', retryAfter);
-      res.status(429).json({
-        error: 'Too Many Requests',
-        message,
-        retryAfter,
-      });
-      return;
-    }
-
-    next();
   };
 }
 

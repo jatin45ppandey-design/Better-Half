@@ -61,7 +61,9 @@ export async function getRoomByCode(req: Request, res: Response, next: NextFunct
 export async function getMyActiveRooms(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const userId = req.user!.id;
-    const rooms = await roomsService.getUserActiveRooms(userId);
+    const limit = req.query.limit ? Math.min(Math.max(1, parseInt(req.query.limit as string, 10) || 20), 100) : undefined;
+    const offset = req.query.offset ? Math.max(0, parseInt(req.query.offset as string, 10) || 0) : undefined;
+    const rooms = await roomsService.getUserActiveRooms(userId, { limit, offset });
     res.status(200).json({ rooms });
   } catch (error) {
     next(error);

@@ -7,6 +7,7 @@ import {
   recordFailedRoomLookup,
   isRoomLookupBlocked,
   resetRoomLookupTracker,
+  IRateLimitStore,
 } from '../src/middleware/rateLimiter.js';
 
 const app = createApp();
@@ -117,6 +118,38 @@ describe('PlaySpace Wave 2 — S2 Authentication, Realtime Security & Abuse Prev
       expect(status10.blocked).toBe(true);
       expect(status10.retryAfterSeconds).toBeGreaterThan(60);
       expect(status10.retryAfterSeconds).toBeLessThanOrEqual(300);
+    });
+
+    it('supports custom distributed store adapter implementing IRateLimitStore', async () => {
+      const mockStore: IRateLimitStore = {
+        get: vi.fn().mockResolvedValue({ count: 1, resetAt: Date.now() + 60000 }),
+        set: vi.fn().mockResolvedValue(undefined),
+        delete: vi.fn().mockResolvedValue(undefined),
+      };
+
+      const customLimiter = rateLimiter({
+        windowMs: 60000,
+        max: 5,
+        skipInTest: false,
+        store: mockStore,
+      });
+
+      const mockReq = { ip: '192.168.1.100', headers: {} } as any;
+      const headers: Record<string, any> = {};
+      const mockRes = {
+        setHeader: vi.fn((k, v) => {
+          headers[k] = v;
+        }),
+        status: vi.fn().mockReturnThis(),
+        json: vi.fn(),
+      } as any;
+      const next = vi.fn();
+
+      await customLimiter(mockReq, mockRes, next);
+      expect(mockStore.get).toHaveBeenCalledWith('192.168.1.100');
+      expect(mockStore.set).toHaveBeenCalled();
+      expect(headers['X-RateLimit-Remaining']).toBe(3);
+      expect(next).toHaveBeenCalled();
     });
   });
 });

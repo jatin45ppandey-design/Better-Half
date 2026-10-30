@@ -1,6 +1,7 @@
 import { prisma } from '../../config/prisma.js';
 import { auditService } from './audit.service.js';
 import { presenceManager } from '../../socket/presence.js';
+import { roomsService } from '../rooms/rooms.service.js';
 import { TRUTH_OR_DARE_ITEMS } from '../../data/questions/truthOrDareQuestions.js';
 import { WOULD_YOU_RATHER_ITEMS } from '../../data/questions/wouldYouRatherQuestions.js';
 import { BETWEEN_US_QUESTIONS } from '../../data/questions/betweenUsQuestions.js';
@@ -232,8 +233,14 @@ export class AdminService {
       { reason, previousStatus: targetUser.accountStatus, newStatus: status }
     );
 
-    // If suspended, actively disconnect any live sockets
+    // If suspended, actively disconnect any live sockets and handle room lifecycle
     if (status === 'SUSPENDED') {
+      try {
+        await roomsService.handleUserSuspension(targetUserId);
+      } catch (err) {
+        console.warn('[Admin] Failed to handle room lifecycle on suspension:', err);
+      }
+
       const socketIds = presenceManager.getUserSockets(targetUserId);
       if (io && socketIds.length > 0) {
         socketIds.forEach((sId) => {

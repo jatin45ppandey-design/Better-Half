@@ -32,6 +32,12 @@ export function registerGameHandlers(
       socket.disconnect(true);
       return true;
     }
+    if (socket.data.tokenExp && Date.now() > socket.data.tokenExp) {
+      callback?.({ success: false, error: 'Authentication token has expired' });
+      socket.emit('room:error', { code: 'TOKEN_EXPIRED', message: 'Authentication token has expired.' });
+      socket.disconnect(true);
+      return true;
+    }
     return false;
   };
 

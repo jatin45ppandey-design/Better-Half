@@ -251,4 +251,60 @@ describe('PlaySpace Wave 2 — B2 Durable Game Sessions & Concurrency Safety', (
       expect((publicProj as any)._serverPiles).toBeUndefined();
     });
   });
+
+  describe('Question Source of Truth & Concurrency Conflict', () => {
+    it('rethrows error when QuestionEntry query fails with a database error and does not swallow it', async () => {
+      vi.spyOn(prisma.room, 'findUnique').mockResolvedValue({
+        id: 'room-truth-1',
+        code: 'TRUTH1',
+        hostId: userA.id,
+        mode: 'COUPLE',
+        status: 'READY_TO_START',
+        participants: [
+          { userId: userA.id, leftAt: null, isReady: true, user: userA },
+          { userId: userB.id, leftAt: null, isReady: true, user: userB },
+        ],
+      } as any);
+
+      vi.spyOn(prisma.gameConfiguration, 'findUnique').mockResolvedValue(null);
+      vi.spyOn(prisma.gameSession, 'findFirst').mockResolvedValue(null);
+      vi.spyOn(prisma.questionEntry, 'findMany').mockRejectedValue(new Error('Question database unreachable'));
+
+      await expect(
+        gameSessionService.createSession('room-truth-1', 'truth-or-dare', userA.id)
+      ).rejects.toThrow('Question database unreachable');
+    });
+
+    it('rejects createSession inside the transaction if concurrent active session exists', async () => {
+      vi.spyOn(prisma.room, 'findUnique').mockResolvedValue({
+        id: 'room-atomic-1',
+        code: 'ATOM01',
+        hostId: userA.id,
+        mode: 'COUPLE',
+        status: 'READY_TO_START',
+        participants: [
+          { userId: userA.id, leftAt: null, isReady: true, user: userA },
+          { userId: userB.id, leftAt: null, isReady: true, user: userB },
+        ],
+      } as any);
+
+      vi.spyOn(prisma.gameConfiguration, 'findUnique').mockResolvedValue(null);
+      // Pre-check finds nothing:
+      vi.spyOn(prisma.gameSession, 'findFirst').mockResolvedValue(null);
+
+      // But transaction check catches concurrent session:
+      vi.spyOn(prisma, '$transaction').mockImplementation(async (cb: any) => {
+        return cb({
+          gameSession: {
+            findFirst: vi.fn().mockResolvedValue({ id: 'sess-race-won', status: 'ACTIVE' }),
+          },
+          room: { update: vi.fn() },
+        });
+      });
+
+      await expect(
+        gameSessionService.createSession('room-atomic-1', 'tic-tac-toe', userA.id)
+      ).rejects.toThrow('An active game session already exists for this room.');
+    });
+  });
 });

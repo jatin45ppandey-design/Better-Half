@@ -150,13 +150,27 @@ export class GameSessionService {
       startedAt: new Date(),
     };
 
-    // 7. Persist to DB transactionally BEFORE registering in memory
-    await prisma.$transaction([
-      prisma.room.update({
+    // 7. Atomic Concurrency Guard: Persist to DB transactionally BEFORE registering in memory
+    await prisma.$transaction(async (tx: any) => {
+      // Re-verify inside the transaction that no active/paused session exists for this room
+      if (tx && tx.gameSession && typeof tx.gameSession.findFirst === 'function') {
+        const activeInTx = await tx.gameSession.findFirst({
+          where: {
+            roomId: room.id,
+            status: { in: ['ACTIVE', 'PAUSED'] },
+          },
+        });
+        if (activeInTx) {
+          throw new AppError('An active game session already exists for this room.', 409);
+        }
+      }
+
+      await tx.room.update({
         where: { id: room.id },
         data: { status: 'IN_PROGRESS', selectedGameId: gameId },
-      }),
-      prisma.gameSession.create({
+      });
+
+      return tx.gameSession.create({
         data: {
           id: sessionId,
           roomId: room.id,
@@ -181,8 +195,8 @@ export class GameSessionService {
             })),
           },
         },
-      }),
-    ]);
+      });
+    });
 
     // 8. Register in memory ONLY after DB persistence succeeds
     gameStateService.setSession(sessionId, context);

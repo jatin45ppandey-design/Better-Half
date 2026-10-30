@@ -308,7 +308,9 @@ export class RoomsService {
   /**
    * List all active rooms for the user
    */
-  async getUserActiveRooms(userId: string) {
+  async getUserActiveRooms(userId: string, options?: { limit?: number; offset?: number }) {
+    const limit = options?.limit ?? 20;
+    const offset = options?.offset ?? 0;
     const participations = await prisma.roomParticipant.findMany({
       where: {
         userId,
@@ -331,6 +333,8 @@ export class RoomsService {
         },
       },
       orderBy: { joinedAt: 'desc' },
+      take: limit,
+      skip: offset,
     });
 
     return participations.map((p) => this.formatRoomSnapshot(p.room));
@@ -1059,6 +1063,68 @@ export class RoomsService {
     }
 
     return formatted;
+  }
+
+  /**
+   * Handle host demotion or room closure when a user is suspended
+   */
+  async handleUserSuspension(userId: string): Promise<{ affectedRooms: number; closedRooms: number; transferredRooms: number }> {
+    const hostedRooms = await prisma.room.findMany({
+      where: {
+        hostId: userId,
+        status: { in: [ROOM_STATUS.WAITING, ROOM_STATUS.READY_TO_START, ROOM_STATUS.IN_PROGRESS] },
+      },
+      include: {
+        participants: {
+          where: { leftAt: null, userId: { not: userId } },
+          include: { user: true },
+          orderBy: { joinedAt: 'asc' },
+        },
+      },
+    });
+
+    let closedRooms = 0;
+    let transferredRooms = 0;
+
+    for (const room of hostedRooms) {
+      const activeCandidates = room.participants.filter(
+        (p) => p.user && p.user.accountStatus !== 'SUSPENDED'
+      );
+
+      if (activeCandidates.length === 0) {
+        await prisma.room.update({
+          where: { id: room.id },
+          data: { status: ROOM_STATUS.CLOSED },
+        });
+        closedRooms++;
+      } else {
+        const nextHost = activeCandidates[0];
+        await prisma.$transaction([
+          prisma.room.update({
+            where: { id: room.id },
+            data: { hostId: nextHost.userId },
+          }),
+          prisma.roomParticipant.update({
+            where: { id: nextHost.id },
+            data: { role: ROOM_PARTICIPANT_ROLES.HOST },
+          }),
+          prisma.roomParticipant.updateMany({
+            where: { roomId: room.id, userId },
+            data: { role: ROOM_PARTICIPANT_ROLES.PLAYER },
+          }),
+          prisma.roomMessage.create({
+            data: {
+              roomId: room.id,
+              senderId: nextHost.userId,
+              message: `Host transferred to ${nextHost.user.displayName || 'Player'} due to account status change.`,
+            },
+          }),
+        ]);
+        transferredRooms++;
+      }
+    }
+
+    return { affectedRooms: hostedRooms.length, closedRooms, transferredRooms };
   }
 
   /**
