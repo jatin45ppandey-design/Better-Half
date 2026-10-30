@@ -48,11 +48,13 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
   );
   const [activeRoomCode, setActiveRoomCode] = useState<string>('');
   const [copied, setCopied] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleClose = () => {
     setStep('configure');
     setSelectedMode(initialMode);
     setCopied(false);
+    setIsSubmitting(false);
     onClose();
   };
 
@@ -63,19 +65,29 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
   const selectedGame =
     GAMES_DATA.find((g) => g.id === selectedGameId) || availableGames[0];
 
-  const handleCreateRoom = (e: React.FormEvent) => {
+  const handleCreateRoom = async (e: React.FormEvent) => {
     e.preventDefault();
-    const created = createRoom({ name: roomName, mode: selectedMode, selectedGameId });
-    setActiveRoomCode(created.code);
-    setStep('ready');
-    addToast(`Room ${created.code} Created!`, {
-      type: 'success',
-      message: `${selectedMode === 'couple' ? 'Couple Mode (2P)' : 'Friend Mode (4P)'} configured.`,
-    });
+    setIsSubmitting(true);
+    try {
+      const created = await createRoom({ name: roomName, mode: selectedMode, selectedGameId });
+      setActiveRoomCode(created.code);
+      setStep('ready');
+      addToast(`Room ${created.code} Created!`, {
+        type: 'success',
+        message: `${selectedMode === 'couple' ? 'Couple Mode (2P)' : 'Friend Mode (4P)'} configured.`,
+      });
+    } catch (err: any) {
+      addToast(err?.message || 'Failed to create room. Please check backend connection.', {
+        type: 'error',
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleCopyCode = () => {
-    const codeToCopy = activeRoomCode || 'PLAY69';
+    const codeToCopy = activeRoomCode;
+    if (!codeToCopy) return;
     navigator.clipboard?.writeText(codeToCopy);
     setCopied(true);
     addToast('Room Code Copied!', {
@@ -221,26 +233,28 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
             </div>
           </div>
 
-          {/* Phase 1 Disclaimer Note */}
+          {/* Live Multiplayer Note */}
           <div className="p-3 rounded-xl bg-[#F8F4FF] border border-[#EAE3F3] text-xs text-[#593B91] flex items-center gap-2">
             <Sparkles className="w-4 h-4 text-[#9670E8] shrink-0" />
             <span>
-              <strong>Phase 1 Preview:</strong> Creating a room configures local room state. Real-time multiplayer synchronization will activate in Phase 2.
+              <strong>Live Multiplayer Room:</strong> Your room will be created on the game server with real-time Socket.IO synchronization.
             </span>
           </div>
 
           {/* Actions */}
           <div className="pt-2 border-t border-[#EAE3F3] flex items-center justify-between">
-            <Button variant="outline" size="sm" onClick={onClose}>
+            <Button variant="outline" size="sm" onClick={onClose} disabled={isSubmitting}>
               Cancel
             </Button>
             <Button
               type="submit"
               variant="primary"
               size="sm"
+              isLoading={isSubmitting}
+              disabled={isSubmitting}
               rightIcon={<ArrowRight className="w-4 h-4" />}
             >
-              Initialize Room
+              {isSubmitting ? 'Creating Room...' : 'Create Live Room'}
             </Button>
           </div>
         </form>

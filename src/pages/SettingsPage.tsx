@@ -1,12 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Navbar } from '../components/navigation/Navbar';
 import { Footer } from '../components/navigation/Footer';
-import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { soundService } from '../services/soundService';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
+import { api } from '../services/api';
 import {
   Settings,
   Volume2,
@@ -16,7 +16,6 @@ import {
   Bell,
   LogOut,
   RotateCcw,
-  Info,
 } from 'lucide-react';
 
 export const SettingsPage: React.FC = () => {
@@ -44,24 +43,65 @@ export const SettingsPage: React.FC = () => {
   const { addToast } = useToast();
   const navigate = useNavigate();
 
-  const handleToggleSound = (enabled: boolean) => {
+  // Load persisted settings from backend
+  useEffect(() => {
+    async function loadSettings() {
+      try {
+        const s = await api.settings.get();
+        if (s) {
+          setPrivacy((prev) => ({
+            ...prev,
+            ghostMode: s.ghostMode,
+            showStats: s.publicMatchHistory,
+          }));
+          if (s.soundMuted !== undefined) {
+            setSoundMuted(s.soundMuted);
+            soundService.setMuted(s.soundMuted);
+          }
+          if (s.volume !== undefined) {
+            setVolume(s.volume);
+            soundService.setVolume(s.volume);
+          }
+          if (s.reducedMotion !== undefined) {
+            setReducedMotion(s.reducedMotion);
+          }
+        }
+      } catch (err) {
+        console.warn('Could not fetch backend settings:', err);
+      }
+    }
+    loadSettings();
+  }, []);
+
+  const handleToggleSound = async (enabled: boolean) => {
     const isMuted = !enabled;
     soundService.setMuted(isMuted);
     setSoundMuted(isMuted);
     addToast(enabled ? 'Sound effects enabled' : 'Sound effects muted', {
       type: 'info',
     });
+
+    try {
+      await api.settings.update({ soundMuted: isMuted });
+    } catch {
+      // ignore
+    }
   };
 
-  const handleVolumeChange = (newVal: number) => {
+  const handleVolumeChange = async (newVal: number) => {
     soundService.setVolume(newVal);
     setVolume(newVal);
     if (!soundMuted) {
       soundService.playClick();
     }
+    try {
+      await api.settings.update({ volume: newVal });
+    } catch {
+      // ignore
+    }
   };
 
-  const handleToggleMotion = (reduced: boolean) => {
+  const handleToggleMotion = async (reduced: boolean) => {
     setReducedMotion(reduced);
     try {
       localStorage.setItem('playspace_reduced_motion', String(reduced));
@@ -70,6 +110,7 @@ export const SettingsPage: React.FC = () => {
       } else {
         document.documentElement.classList.remove('reduce-motion');
       }
+      await api.settings.update({ reducedMotion: reduced });
     } catch {
       // ignore
     }
@@ -94,16 +135,16 @@ export const SettingsPage: React.FC = () => {
     } catch {
       // ignore
     }
-    addToast('Demo local data reset to defaults', { type: 'success' });
+    addToast('Local storage cache cleared', { type: 'success' });
     setTimeout(() => {
       window.location.reload();
     }, 500);
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     soundService.playClick();
-    logout();
-    addToast('Signed out of mock session', { type: 'info' });
+    await logout();
+    addToast('Signed out of PlaySpace', { type: 'info' });
     navigate('/login');
   };
 
@@ -112,17 +153,6 @@ export const SettingsPage: React.FC = () => {
       <Navbar />
 
       <main className="flex-1 max-w-4xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
-        {/* Top Disclaimer Notice */}
-        <div className="mb-6 p-3.5 rounded-2xl bg-[#F8F4FF] border border-[#EAE3F3] flex items-center justify-between gap-3 text-xs text-[#756D82]">
-          <div className="flex items-center gap-2">
-            <Info className="w-4 h-4 text-[#9670E8] shrink-0" />
-            <span>
-              <strong>Frontend Preferences Notice:</strong> Settings are saved locally in your browser. No server-side enforcement applies in this frontend prototype.
-            </span>
-          </div>
-          <Badge variant="subtle" size="sm">Local Settings</Badge>
-        </div>
-
         {/* Page Header */}
         <div className="mb-8">
           <div className="flex items-center gap-2 mb-1">
@@ -132,7 +162,7 @@ export const SettingsPage: React.FC = () => {
             </h1>
           </div>
           <p className="text-sm text-[#756D82]">
-            Customize your audio feedback, motion, notifications, and local session preferences.
+            Customize your audio feedback, motion, notifications, and authenticated session preferences.
           </p>
         </div>
 
@@ -269,7 +299,7 @@ export const SettingsPage: React.FC = () => {
               <Shield className="w-5 h-5 text-[#9670E8]" />
               <div>
                 <h2 className="text-base font-black text-[#211A2D]">Privacy Preferences</h2>
-                <p className="text-xs text-[#756D82]">Simulated local controls for profile visibility</p>
+                <p className="text-xs text-[#756D82]">Control your profile visibility and lobby privacy</p>
               </div>
             </div>
 
@@ -282,9 +312,15 @@ export const SettingsPage: React.FC = () => {
                 <input
                   type="checkbox"
                   checked={privacy.ghostMode}
-                  onChange={(e) => {
+                  onChange={async (e) => {
                     soundService.playClick();
-                    setPrivacy({ ...privacy, ghostMode: e.target.checked });
+                    const val = e.target.checked;
+                    setPrivacy({ ...privacy, ghostMode: val });
+                    try {
+                      await api.settings.update({ ghostMode: val });
+                    } catch {
+                      // ignore
+                    }
                   }}
                   className="w-4 h-4 accent-[#593B91] cursor-pointer"
                 />
@@ -308,13 +344,13 @@ export const SettingsPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Simulated Notification Settings */}
+          {/* Notification Settings */}
           <div className="bg-white rounded-3xl border border-[#EAE3F3] p-6 shadow-sm">
             <div className="flex items-center gap-2.5 mb-4">
               <Bell className="w-5 h-5 text-[#9670E8]" />
               <div>
-                <h2 className="text-base font-black text-[#211A2D]">Frontend Notifications (Preview)</h2>
-                <p className="text-xs text-[#756D82]">In-app notification mock settings</p>
+                <h2 className="text-base font-black text-[#211A2D]">Notifications</h2>
+                <p className="text-xs text-[#756D82]">In-app notification preferences</p>
               </div>
             </div>
 
@@ -347,10 +383,10 @@ export const SettingsPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Local Demo Actions */}
+          {/* Account & Session Actions */}
           <div className="bg-white rounded-3xl border border-[#EAE3F3] p-6 shadow-sm">
-            <h2 className="text-base font-black text-[#211A2D] mb-1">Session & Local Data</h2>
-            <p className="text-xs text-[#756D82] mb-4">Manage mock auth sessions and browser storage</p>
+            <h2 className="text-base font-black text-[#211A2D] mb-1">Session & Account</h2>
+            <p className="text-xs text-[#756D82] mb-4">Manage your authenticated PlaySpace session</p>
 
             <div className="flex flex-wrap items-center gap-3">
               <Button
@@ -359,7 +395,7 @@ export const SettingsPage: React.FC = () => {
                 leftIcon={<RotateCcw className="w-4 h-4" />}
                 onClick={handleResetDemo}
               >
-                Reset Local Demo Storage
+                Clear Local Cache
               </Button>
               <Button
                 variant="danger"
@@ -367,7 +403,7 @@ export const SettingsPage: React.FC = () => {
                 leftIcon={<LogOut className="w-4 h-4" />}
                 onClick={handleLogout}
               >
-                Sign Out ({user?.name || 'Local User'})
+                Sign Out {user?.name ? `(${user.name})` : ''}
               </Button>
             </div>
           </div>

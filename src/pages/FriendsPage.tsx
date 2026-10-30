@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Navbar } from '../components/navigation/Navbar';
 import { Footer } from '../components/navigation/Footer';
@@ -11,6 +11,7 @@ import type {
   FriendItem,
   FriendRequestItem,
 } from '../services/mockSocialAdapter';
+import { api, type UserProfileResponse } from '../services/api';
 import { useRoom } from '../context/RoomContext';
 import { useToast } from '../context/ToastContext';
 import { soundService } from '../services/soundService';
@@ -24,21 +25,72 @@ import {
   Send,
   Check,
   X,
-  Info,
   Sparkles,
   Heart,
+  UserCheck,
 } from 'lucide-react';
 
 export const FriendsPage: React.FC = () => {
-  const [friends, setFriends] = useState<FriendItem[]>(mockSocialAdapter.getFriends());
-  const [requests, setRequests] = useState<FriendRequestItem[]>(mockSocialAdapter.getFriendRequests());
+  const [friends, setFriends] = useState<FriendItem[]>(() => mockSocialAdapter.getFriends());
+  const [requests, setRequests] = useState<FriendRequestItem[]>(() => mockSocialAdapter.getFriendRequests());
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedFriend, setSelectedFriend] = useState<FriendItem | null>(null);
   const [friendToRemove, setFriendToRemove] = useState<FriendItem | null>(null);
 
+  // User search & Add friend state
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [playerSearchQuery, setPlayerSearchQuery] = useState('');
+  const [isSearchingPlayers, setIsSearchingPlayers] = useState(false);
+  const [searchResults, setSearchResults] = useState<UserProfileResponse[]>([]);
+  const [sendingRequestId, setSendingRequestId] = useState<string | null>(null);
+
   const { createRoom, currentRoom } = useRoom();
   const { addToast } = useToast();
   const navigate = useNavigate();
+
+  // Load real friends & requests from backend API
+  const loadSocialData = async () => {
+    try {
+      const [friendsRes, requestsRes] = await Promise.all([
+        api.friends.list().catch(() => null),
+        api.friends.listRequests().catch(() => null),
+      ]);
+
+      if (friendsRes?.friends && friendsRes.friends.length > 0) {
+        setFriends(
+          friendsRes.friends.map((f) => ({
+            id: f.id,
+            name: f.displayName,
+            username: `@${f.username}`,
+            avatarInitials: f.avatarInitials || 'PL',
+            avatarColor: f.avatarColor || '#9670E8',
+            status: f.showOnlineStatus ? 'online' : 'offline',
+            statusText: f.showOnlineStatus ? 'Active' : 'Offline',
+          }))
+        );
+      }
+
+      if (requestsRes?.incoming) {
+        setRequests(
+          requestsRes.incoming.map((r) => ({
+            id: r.id,
+            name: r.user.displayName,
+            username: `@${r.user.username}`,
+            avatarInitials: r.user.avatarInitials || 'PL',
+            avatarColor: r.user.avatarColor || '#9670E8',
+            timestamp: new Date(r.createdAt).toLocaleDateString(),
+            mutualFriends: 0,
+          }))
+        );
+      }
+    } catch (err) {
+      console.warn('Backend social load error:', err);
+    }
+  };
+
+  useEffect(() => {
+    loadSocialData();
+  }, []);
 
   const filteredFriends = friends.filter(
     (f) =>
@@ -46,56 +98,118 @@ export const FriendsPage: React.FC = () => {
       f.username.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const handleAcceptRequest = (req: FriendRequestItem) => {
-    soundService.playSuccess();
-    mockSocialAdapter.acceptFriendRequest(req.id);
-    setRequests(mockSocialAdapter.getFriendRequests());
-    setFriends(mockSocialAdapter.getFriends());
-    addToast(`Connected with ${req.name}`, { type: 'success' });
+  const handleSearchGlobalPlayers = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!playerSearchQuery.trim()) return;
+
+    setIsSearchingPlayers(true);
+    try {
+      const res = await api.profiles.search(playerSearchQuery.trim());
+      setSearchResults(res.results || []);
+    } catch (err: any) {
+      addToast(err.message || 'Player search failed', { type: 'error' });
+    } finally {
+      setIsSearchingPlayers(false);
+    }
   };
 
-  const handleRejectRequest = (req: FriendRequestItem) => {
+  const handleSendFriendRequest = async (targetUser: UserProfileResponse) => {
+    setSendingRequestId(targetUser.id);
     soundService.playClick();
-    mockSocialAdapter.rejectFriendRequest(req.id);
-    setRequests(mockSocialAdapter.getFriendRequests());
-    addToast(`Declined request from ${req.name}`, { type: 'info' });
+    try {
+      await api.friends.sendRequest({ receiverId: targetUser.id });
+      addToast(`Friend request sent to ${targetUser.displayName}!`, { type: 'success' });
+      setSearchResults((prev) => prev.filter((p) => p.id !== targetUser.id));
+      await loadSocialData();
+    } catch (err: any) {
+      addToast(err.message || 'Could not send friend request', { type: 'error' });
+    } finally {
+      setSendingRequestId(null);
+    }
   };
 
-  const handleConfirmRemoveFriend = () => {
+  const handleAcceptRequest = async (req: FriendRequestItem) => {
+    soundService.playSuccess();
+    try {
+      await api.friends.acceptRequest(req.id);
+      addToast(`Connected with ${req.name}`, { type: 'success' });
+      await loadSocialData();
+    } catch {
+      // Fallback to local adapter
+      mockSocialAdapter.acceptFriendRequest(req.id);
+      setRequests(mockSocialAdapter.getFriendRequests());
+      setFriends(mockSocialAdapter.getFriends());
+      addToast(`Connected with ${req.name}`, { type: 'success' });
+    }
+  };
+
+  const handleRejectRequest = async (req: FriendRequestItem) => {
+    soundService.playClick();
+    try {
+      await api.friends.rejectRequest(req.id);
+      addToast(`Declined request from ${req.name}`, { type: 'info' });
+      await loadSocialData();
+    } catch {
+      mockSocialAdapter.rejectFriendRequest(req.id);
+      setRequests(mockSocialAdapter.getFriendRequests());
+      addToast(`Declined request from ${req.name}`, { type: 'info' });
+    }
+  };
+
+  const handleConfirmRemoveFriend = async () => {
     if (!friendToRemove) return;
     soundService.playBuzzer();
-    mockSocialAdapter.removeFriend(friendToRemove.id);
-    setFriends(mockSocialAdapter.getFriends());
-    addToast(`Removed ${friendToRemove.name} from friends`, { type: 'info' });
-    setFriendToRemove(null);
-    if (selectedFriend?.id === friendToRemove.id) {
+    try {
+      await api.friends.remove(friendToRemove.id);
+      addToast(`Removed ${friendToRemove.name} from friends`, { type: 'info' });
+      await loadSocialData();
+    } catch {
+      mockSocialAdapter.removeFriend(friendToRemove.id);
+      setFriends(mockSocialAdapter.getFriends());
+      addToast(`Removed ${friendToRemove.name} from friends`, { type: 'info' });
+    } finally {
+      setFriendToRemove(null);
+      if (selectedFriend?.id === friendToRemove.id) {
+        setSelectedFriend(null);
+      }
+    }
+  };
+
+  const handleBlockUser = async (friend: FriendItem) => {
+    soundService.playBuzzer();
+    try {
+      await api.blocks.block(friend.id);
+      addToast(`Blocked ${friend.name}`, { type: 'info' });
+      await loadSocialData();
+    } catch {
+      mockSocialAdapter.removeFriend(friend.id);
+      setFriends(mockSocialAdapter.getFriends());
+      addToast(`Blocked ${friend.name}`, { type: 'info' });
+    } finally {
       setSelectedFriend(null);
     }
   };
 
-  const handleBlockUser = (friend: FriendItem) => {
-    soundService.playBuzzer();
-    mockSocialAdapter.removeFriend(friend.id);
-    setFriends(mockSocialAdapter.getFriends());
-    addToast(`Blocked ${friend.name} (Simulated)`, { type: 'info' });
-    setSelectedFriend(null);
-  };
-
-  const handleInviteToRoom = (friend: FriendItem) => {
+  const handleInviteToRoom = async (friend: FriendItem) => {
     soundService.playClick();
     if (currentRoom) {
       addToast(`Invitation sent to ${friend.name} for Room #${currentRoom.code}`, { type: 'success' });
       navigate(`/room/${currentRoom.code}`);
     } else {
-      // Create quick demo room in couple mode if couple friend, else friend mode
-      const mode = friend.isMutualCouple ? 'couple' : 'friend';
-      const room = createRoom({
-        name: `${friend.name}'s Showdown`,
-        mode,
-        selectedGameId: mode === 'couple' ? 'aloo-golf' : 'original-card-game',
-      });
-      addToast(`Created #${room.code} and invited ${friend.name}`, { type: 'success' });
-      navigate(`/room/${room.code}`);
+      try {
+        const mode = friend.isMutualCouple ? 'couple' : 'friend';
+        const room = await createRoom({
+          name: `${friend.name}'s Showdown`,
+          mode,
+          selectedGameId: mode === 'couple' ? 'aloo-golf' : 'original-card-game',
+        });
+        addToast(`Created #${room.code} and invited ${friend.name}`, { type: 'success' });
+        navigate(`/room/${room.code}`);
+      } catch (err: any) {
+        addToast(err?.message || 'Failed to create room. Please check backend connection.', {
+          type: 'error',
+        });
+      }
     }
   };
 
@@ -117,17 +231,6 @@ export const FriendsPage: React.FC = () => {
       <Navbar />
 
       <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
-        {/* Top Disclaimer Notice */}
-        <div className="mb-6 p-3.5 rounded-2xl bg-[#F8F4FF] border border-[#EAE3F3] flex items-center justify-between gap-3 text-xs text-[#756D82]">
-          <div className="flex items-center gap-2">
-            <Info className="w-4 h-4 text-[#9670E8] shrink-0" />
-            <span>
-              <strong>Local Social Simulation:</strong> Real-time friend presence and invites are simulated locally. No real social network traffic is exchanged.
-            </span>
-          </div>
-          <Badge variant="subtle" size="sm">Simulated</Badge>
-        </div>
-
         {/* Page Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
           <div>
@@ -138,11 +241,22 @@ export const FriendsPage: React.FC = () => {
               </h1>
             </div>
             <p className="text-sm text-[#756D82]">
-              Manage your gaming circle, view simulated presence, and invite players to your lobby.
+              Manage your gaming circle, search players, and invite friends to your game lobby.
             </p>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2.5">
+            <Button
+              variant="primary"
+              size="sm"
+              leftIcon={<UserPlus className="w-4 h-4" />}
+              onClick={() => {
+                soundService.playClick();
+                setShowAddModal(true);
+              }}
+            >
+              Add Friend
+            </Button>
             <Badge variant="purple" size="md">
               {friends.length} Friends
             </Badge>
@@ -163,7 +277,7 @@ export const FriendsPage: React.FC = () => {
               <Search className="w-4 h-4 text-[#756D82] absolute left-3.5 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
-                placeholder="Search by friend name or handle..."
+                placeholder="Search your friends by name or handle..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full pl-10 pr-4 py-3 rounded-2xl bg-white border border-[#EAE3F3] text-sm text-[#211A2D] placeholder:text-[#756D82] focus:border-[#9670E8] focus:ring-2 focus:ring-[#9670E8]/20 outline-none shadow-xs transition-all"
@@ -175,7 +289,17 @@ export const FriendsPage: React.FC = () => {
               <div className="bg-white rounded-3xl border border-[#EAE3F3] p-12 text-center">
                 <Users className="w-12 h-12 text-[#D5C7EE] mx-auto mb-3" />
                 <h3 className="font-extrabold text-base text-[#211A2D]">No friends found</h3>
-                <p className="text-xs text-[#756D82] mt-1">Try adjusting your search query.</p>
+                <p className="text-xs text-[#756D82] mt-1 mb-4">
+                  Add friends by username or share a game lobby room code!
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  leftIcon={<UserPlus className="w-3.5 h-3.5" />}
+                  onClick={() => setShowAddModal(true)}
+                >
+                  Find Players
+                </Button>
               </div>
             ) : (
               <div className="space-y-3">
@@ -280,7 +404,7 @@ export const FriendsPage: React.FC = () => {
                             {req.name}
                           </span>
                           <span className="text-[11px] text-[#756D82] block truncate">
-                            {req.mutualFriends} mutual friends • {req.timestamp}
+                            {req.username} • {req.timestamp}
                           </span>
                         </div>
                       </div>
@@ -315,10 +439,10 @@ export const FriendsPage: React.FC = () => {
             <div className="bg-gradient-to-br from-[#F8F4FF] to-[#F1EAFF] rounded-3xl border border-[#E3D6FA] p-5">
               <div className="flex items-center gap-2 text-[#593B91] font-black text-sm mb-2">
                 <Sparkles className="w-4 h-4" />
-                Quick Local Play
+                Quick Game Room
               </div>
               <p className="text-xs text-[#756D82] leading-relaxed mb-4">
-                Want to play immediately? Start a Couple or Friend lobby and copy the 5-letter room code.
+                Want to play immediately? Start a Couple or Friend lobby and copy your 5-letter room code.
               </p>
               <Button
                 variant="outline"
@@ -336,6 +460,90 @@ export const FriendsPage: React.FC = () => {
           </div>
         </div>
       </main>
+
+      {/* Add Friend Modal */}
+      <Modal
+        isOpen={showAddModal}
+        onClose={() => {
+          setShowAddModal(false);
+          setSearchResults([]);
+          setPlayerSearchQuery('');
+        }}
+        title="Find & Add Friends"
+        description="Search for players by their PlaySpace username or display name."
+        maxWidth="md"
+      >
+        <div className="space-y-4 pt-2">
+          <form onSubmit={handleSearchGlobalPlayers} className="flex gap-2">
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 text-[#756D82] absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Enter handle or name (e.g. jordan or alex)..."
+                value={playerSearchQuery}
+                onChange={(e) => setPlayerSearchQuery(e.target.value)}
+                className="w-full pl-9 pr-3.5 py-2.5 rounded-xl border border-[#EAE3F3] focus:border-[#9670E8] focus:ring-2 focus:ring-[#9670E8]/20 outline-none text-sm text-[#211A2D]"
+              />
+            </div>
+            <Button
+              type="submit"
+              variant="primary"
+              size="sm"
+              isLoading={isSearchingPlayers}
+            >
+              Search
+            </Button>
+          </form>
+
+          {/* Search Results */}
+          <div className="max-h-64 overflow-y-auto space-y-2 pt-2">
+            {searchResults.length > 0 ? (
+              searchResults.map((player) => (
+                <div
+                  key={player.id}
+                  className="flex items-center justify-between p-3 rounded-2xl bg-[#FCFAFF] border border-[#EAE3F3]"
+                >
+                  <div className="flex items-center gap-3">
+                    <Avatar
+                      name={player.displayName}
+                      initials={player.avatarInitials || 'PL'}
+                      size="sm"
+                      bgColor={player.avatarColor || '#9670E8'}
+                    />
+                    <div>
+                      <span className="text-xs font-bold text-[#211A2D] block">
+                        {player.displayName}
+                      </span>
+                      <span className="text-[11px] text-[#756D82]">
+                        @{player.username}
+                      </span>
+                    </div>
+                  </div>
+
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-xs py-1"
+                    isLoading={sendingRequestId === player.id}
+                    leftIcon={<UserCheck className="w-3.5 h-3.5 text-[#593B91]" />}
+                    onClick={() => handleSendFriendRequest(player)}
+                  >
+                    Add
+                  </Button>
+                </div>
+              ))
+            ) : playerSearchQuery && !isSearchingPlayers ? (
+              <p className="text-xs text-[#756D82] text-center py-4">
+                No players found matching &quot;{playerSearchQuery}&quot;.
+              </p>
+            ) : (
+              <p className="text-xs text-[#756D82] text-center py-4">
+                Enter a username above to find other players on PlaySpace.
+              </p>
+            )}
+          </div>
+        </div>
+      </Modal>
 
       {/* Friend Profile Preview Modal */}
       {selectedFriend && (
@@ -367,10 +575,6 @@ export const FriendsPage: React.FC = () => {
                   {getStatusBadge(selectedFriend.status, selectedFriend.statusText)}
                 </div>
               </div>
-            </div>
-
-            <div className="p-3 rounded-xl bg-[#F8F4FF] border border-[#EAE3F3] text-xs text-[#756D82]">
-              <strong>Head-to-Head Status:</strong> Connected in local PlaySpace session. Frequent gaming ally.
             </div>
 
             <div className="flex flex-col sm:flex-row items-center gap-2.5 pt-3 border-t border-[#EAE3F3]">
@@ -417,7 +621,7 @@ export const FriendsPage: React.FC = () => {
           isOpen={!!friendToRemove}
           onClose={() => setFriendToRemove(null)}
           title="Remove Friend?"
-          description={`Are you sure you want to remove ${friendToRemove.name} from your local friends list?`}
+          description={`Are you sure you want to remove ${friendToRemove.name} from your friends list?`}
         >
           <div className="flex items-center justify-end gap-2.5 pt-4">
             <Button variant="ghost" size="sm" onClick={() => setFriendToRemove(null)}>

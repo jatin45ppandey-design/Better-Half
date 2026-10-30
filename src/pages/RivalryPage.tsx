@@ -29,17 +29,23 @@ export const RivalryPage: React.FC = () => {
   const userWinPct = Math.round((rivalry.userWins / (rivalry.totalMatches || 1)) * 100);
   const rivalWinPct = Math.round((rivalry.rivalWins / (rivalry.totalMatches || 1)) * 100);
 
-  const handleStartRematch = () => {
+  const handleStartRematch = async () => {
     soundService.playSuccess();
-    const room = createRoom({
-      name: `${rivalry.rivalName} vs ${user?.name || 'You'} Showdown`,
-      mode: 'couple',
-      selectedGameId: 'aloo-golf',
-    });
-    addToast(`Couple showdown room #${room.code} created for you and ${rivalry.rivalName}!`, {
-      type: 'success',
-    });
-    navigate(`/room/${room.code}`);
+    try {
+      const room = await createRoom({
+        name: `${rivalry.rivalName} vs ${user?.name || 'You'} Showdown`,
+        mode: 'couple',
+        selectedGameId: 'aloo-golf',
+      });
+      addToast(`Couple showdown room #${room.code} created for you and ${rivalry.rivalName}!`, {
+        type: 'success',
+      });
+      navigate(`/room/${room.code}`);
+    } catch (err: any) {
+      addToast(err?.message || 'Failed to create room. Please check backend connection.', {
+        type: 'error',
+      });
+    }
   };
 
   return (

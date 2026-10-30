@@ -21,6 +21,7 @@ export const JoinRoomModal: React.FC<JoinRoomModalProps> = ({
 }) => {
   const [code, setCode] = useState(initialCode);
   const [error, setError] = useState('');
+  const [isJoining, setIsJoining] = useState(false);
   const [joinedRoom, setJoinedRoom] = useState<{
     code: string;
     hostName: string;
@@ -36,11 +37,12 @@ export const JoinRoomModal: React.FC<JoinRoomModalProps> = ({
   const handleClose = () => {
     setCode(initialCode);
     setError('');
+    setIsJoining(false);
     setJoinedRoom(null);
     onClose();
   };
 
-  const handleJoin = (e: React.FormEvent) => {
+  const handleJoin = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanCode = code.trim().toUpperCase();
 
@@ -49,14 +51,18 @@ export const JoinRoomModal: React.FC<JoinRoomModalProps> = ({
       return;
     }
 
-    const joinRes = joinRoom(cleanCode);
+    setIsJoining(true);
+    setError('');
+    const joinRes = await joinRoom(cleanCode);
+    setIsJoining(false);
+
     if (!joinRes.success) {
-      setError(joinRes.error || `Room "${cleanCode}" not found. Try PLAY69 or LOVE22.`);
+      setError(joinRes.error || `Room "${cleanCode}" could not be reached or does not exist.`);
       return;
     }
 
-    const foundRoom = getRoomByCode(cleanCode);
-    const mockRoom = {
+    const foundRoom = joinRes.room || getRoomByCode(cleanCode);
+    const roomDetails = {
       code: cleanCode,
       hostName: foundRoom?.hostName || 'Room Host',
       mode: (foundRoom?.mode || 'couple') as 'couple' | 'friend',
@@ -64,17 +70,12 @@ export const JoinRoomModal: React.FC<JoinRoomModalProps> = ({
       roomName: foundRoom?.name || 'PlaySpace Game Room',
     };
 
-    setJoinedRoom(mockRoom);
+    setJoinedRoom(roomDetails);
     setError('');
     addToast(`Connected to room ${cleanCode}!`, {
       type: 'success',
-      message: `Hosted by ${mockRoom.hostName} • ${mockRoom.roomName}`,
+      message: `Hosted by ${roomDetails.hostName} • ${roomDetails.roomName}`,
     });
-  };
-
-  const handleQuickAutofill = (demoCode: string) => {
-    setCode(demoCode);
-    setError('');
   };
 
   const handleEnterLobby = () => {
@@ -91,7 +92,7 @@ export const JoinRoomModal: React.FC<JoinRoomModalProps> = ({
       title={joinedRoom ? 'Room Joined' : 'Join Multiplayer Room'}
       description={
         joinedRoom
-          ? 'You have connected to the mock multiplayer room lobby.'
+          ? 'You have connected to the multiplayer room lobby.'
           : 'Enter a 6-character room code from your partner or host.'
       }
       maxWidth="md"
@@ -108,7 +109,7 @@ export const JoinRoomModal: React.FC<JoinRoomModalProps> = ({
                 setCode(e.target.value.toUpperCase().slice(0, 6));
                 if (error) setError('');
               }}
-              placeholder="e.g. PLAY69"
+              placeholder="e.g. LOVE22"
               className="text-center font-mono text-xl tracking-widest uppercase font-bold"
               maxLength={6}
               error={error}
@@ -117,93 +118,64 @@ export const JoinRoomModal: React.FC<JoinRoomModalProps> = ({
             />
           </div>
 
-          {/* Quick Demo Suggestions */}
-          <div className="flex flex-col gap-1.5">
-            <span className="text-[11px] font-semibold text-[#756D82]">
-              Quick Demo Codes:
-            </span>
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => handleQuickAutofill('PLAY69')}
-                className="px-2.5 py-1 rounded-lg border border-[#EAE3F3] bg-[#F8F4FF] text-xs font-mono font-bold text-[#593B91] hover:bg-[#F1EAFF] transition-colors cursor-pointer"
-              >
-                PLAY69 (Friend Mode)
-              </button>
-              <button
-                type="button"
-                onClick={() => handleQuickAutofill('LOVE22')}
-                className="px-2.5 py-1 rounded-lg border border-[#FCE7F3] bg-[#FDF2F8] text-xs font-mono font-bold text-[#9D174D] hover:bg-[#FCE7F3] transition-colors cursor-pointer"
-              >
-                LOVE22 (Couple Mode)
-              </button>
-            </div>
-          </div>
-
-          {/* Honest Note */}
+          {/* Real-time sync note */}
           <div className="p-3 rounded-xl bg-[#F8F4FF] border border-[#EAE3F3] text-xs text-[#593B91] flex items-center gap-2">
             <Sparkles className="w-4 h-4 text-[#9670E8] shrink-0" />
             <span>
-              <strong>Phase 1 Preview:</strong> Validates room code input and transitions to the product lobby state. Real-time peer-to-peer sync activates in Phase 2.
+              <strong>Real-Time Multiplayer:</strong> Connecting syncs live participants, ready checks, and lobby chat directly via WebSockets.
             </span>
           </div>
 
           {/* Actions */}
           <div className="pt-2 border-t border-[#EAE3F3] flex items-center justify-between">
-            <Button variant="outline" size="sm" onClick={onClose}>
+            <Button variant="outline" size="sm" onClick={onClose} disabled={isJoining}>
               Cancel
             </Button>
             <Button
               type="submit"
               variant="primary"
               size="sm"
+              isLoading={isJoining}
+              disabled={isJoining}
               leftIcon={<LogIn className="w-4 h-4" />}
             >
-              Connect to Room
+              {isJoining ? 'Connecting...' : 'Join Room'}
             </Button>
           </div>
         </form>
       ) : (
-        /* Joined Room Summary */
+        /* Joined Room Summary Screen */
         <div className="flex flex-col gap-5 pt-1">
-          <div className="p-5 rounded-2xl bg-gradient-to-br from-[#F8F4FF] to-white border border-[#EAE3F3] flex flex-col gap-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold uppercase tracking-wider text-[#756D82]">
-                Room {joinedRoom.code}
-              </span>
-              <Badge variant={joinedRoom.mode === 'couple' ? 'pink' : 'lavender'} size="sm">
+          <div className="p-4 rounded-2xl bg-[#F7FCF9] border border-[#C6ECD9] flex items-start gap-3">
+            <div className="w-8 h-8 rounded-full bg-[#248A62] text-white flex items-center justify-center shrink-0 mt-0.5">
+              <Check className="w-4 h-4" />
+            </div>
+            <div>
+              <h4 className="text-sm font-bold text-[#211A2D]">
+                Room #{joinedRoom.code} Found!
+              </h4>
+              <p className="text-xs text-[#756D82] mt-0.5">
+                {joinedRoom.roomName} • Hosted by {joinedRoom.hostName}
+              </p>
+            </div>
+          </div>
+
+          <div className="p-4 rounded-2xl bg-[#FCFAFF] border border-[#EAE3F3] flex flex-col gap-3">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-[#756D82]">Match Mode:</span>
+              <Badge variant={joinedRoom.mode === 'couple' ? 'pink' : 'purple'} size="sm">
                 {joinedRoom.mode === 'couple' ? 'Couple Mode (2P)' : 'Friend Mode (4P)'}
               </Badge>
             </div>
-
-            <h3 className="text-xl font-bold text-[#211A2D]">
-              {joinedRoom.roomName}
-            </h3>
-
-            <div className="flex items-center gap-2 text-xs text-[#756D82]">
-              <span>Hosted by <strong className="text-[#211A2D]">{joinedRoom.hostName}</strong></span>
-              <span>•</span>
-              <span>Opening Game: <strong className="text-[#593B91]">{joinedRoom.gameName}</strong></span>
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-[#756D82]">Selected Game:</span>
+              <span className="font-bold text-[#593B91]">{joinedRoom.gameName}</span>
             </div>
-          </div>
-
-          {/* Participant preview */}
-          <div className="p-3 rounded-xl border border-[#EAE3F3] bg-[#FCFAFF] flex items-center justify-between text-xs">
-            <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-full bg-[#593B91] text-white flex items-center justify-center font-bold text-xs">
-                {joinedRoom.hostName[0]}
-              </div>
-              <span className="font-semibold text-[#211A2D]">{joinedRoom.hostName} (Host)</span>
-            </div>
-            <span className="flex items-center gap-1 text-[#248A62] font-semibold">
-              <Check className="w-3.5 h-3.5 stroke-[3]" />
-              In Lobby
-            </span>
           </div>
 
           <div className="pt-2 border-t border-[#EAE3F3] flex items-center justify-between">
-            <Button variant="outline" size="sm" onClick={() => setJoinedRoom(null)}>
-              Join Another Code
+            <Button variant="outline" size="sm" onClick={handleClose}>
+              Close
             </Button>
             <Button
               variant="primary"
@@ -211,7 +183,7 @@ export const JoinRoomModal: React.FC<JoinRoomModalProps> = ({
               onClick={handleEnterLobby}
               rightIcon={<ArrowRight className="w-4 h-4" />}
             >
-              Enter Room Lobby
+              Enter Lobby
             </Button>
           </div>
         </div>

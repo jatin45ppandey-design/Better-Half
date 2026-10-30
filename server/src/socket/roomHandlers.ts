@@ -1,0 +1,391 @@
+import type { Server, Socket } from 'socket.io';
+import { roomsService } from '../modules/rooms/rooms.service.js';
+import { presenceManager } from './presence.js';
+import { prisma } from '../config/prisma.js';
+import type {
+  ClientToServerEvents,
+  ServerToClientEvents,
+  InterServerEvents,
+  SocketData,
+  RoomSnapshot,
+} from './types.js';
+
+type AppSocket = Socket<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
+type AppServer = Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
+
+// Transient rate limit for emojis/reactions: userId -> count & resetTime
+const reactionRateLimits = new Map<string, { count: number; resetAt: number }>();
+
+export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
+  const userId = socket.data.userId;
+
+  // Track socket connection in presence manager
+  presenceManager.trackConnect(userId, socket.id);
+
+  /**
+   * room:join
+   */
+  socket.on('room:join', async (payload, callback) => {
+    try {
+      const { roomId, code } = payload;
+      let targetRoom: RoomSnapshot | undefined;
+
+      if (roomId) {
+        try {
+          targetRoom = await roomsService.getRoomById(roomId);
+        } catch {
+          if (code) {
+            targetRoom = await roomsService.getRoomByCode(code);
+          }
+        }
+      } else if (code) {
+        targetRoom = await roomsService.getRoomByCode(code);
+      }
+
+      if (!targetRoom) {
+        callback?.({ success: false, error: 'Room not found' });
+        return;
+      }
+
+      // Check if user is already an active participant
+      const isParticipant = targetRoom.participants.some(
+        (p: { userId: string }) => p.userId === userId
+      );
+
+      let roomSnapshot: RoomSnapshot = targetRoom;
+
+      if (!isParticipant) {
+        // Join the room in DB
+        const joinResult = await roomsService.joinRoom(userId, targetRoom.code);
+        roomSnapshot = joinResult.room;
+      }
+
+      const roomChannel = `room:${roomSnapshot.id}`;
+      await socket.join(roomChannel);
+
+      // Track presence
+      presenceManager.joinRoom(roomSnapshot.id, userId);
+
+      // Broadcast player joined to others in room
+      const currentParticipant = roomSnapshot.participants.find(
+        (p: { userId: string }) => p.userId === userId
+      );
+      if (currentParticipant) {
+        socket.to(roomChannel).emit('room:player:joined', {
+          participant: {
+            ...currentParticipant,
+            isOnline: true,
+          },
+        });
+      }
+
+      // Send state to joining user
+      socket.emit('room:state', roomSnapshot);
+
+      // Broadcast updated online presence to room
+      const onlineUserIds = presenceManager.getRoomOnlineUsers(roomSnapshot.id);
+      io.to(roomChannel).emit('room:presence:update', { onlineUserIds });
+
+      callback?.({ success: true, room: roomSnapshot });
+    } catch (err: any) {
+      callback?.({ success: false, error: err?.message || 'Failed to join room' });
+    }
+  });
+
+  /**
+   * room:leave
+   */
+  socket.on('room:leave', async (payload, callback) => {
+    try {
+      const { roomId } = payload;
+      const result = await roomsService.leaveRoom(roomId, userId);
+
+      const roomChannel = `room:${roomId}`;
+      await socket.leave(roomChannel);
+      presenceManager.leaveRoom(roomId, userId);
+
+      if (result) {
+        io.to(roomChannel).emit('room:player:left', {
+          userId,
+          newHostId: result.newHostId ?? undefined,
+          roomClosed: result.roomClosed,
+        });
+
+        if (result.room) {
+          io.to(roomChannel).emit('room:state', result.room);
+        }
+
+        const onlineUserIds = presenceManager.getRoomOnlineUsers(roomId);
+        io.to(roomChannel).emit('room:presence:update', { onlineUserIds });
+      }
+
+      callback?.({ success: true });
+    } catch (err: any) {
+      callback?.({ success: false, error: err?.message || 'Failed to leave room' });
+    }
+  });
+
+  /**
+   * room:ready:update
+   */
+  socket.on('room:ready:update', async (payload, callback) => {
+    try {
+      const { roomId, isReady } = payload;
+      const updatedRoom = await roomsService.toggleReady(roomId, userId, isReady);
+
+      const participant = updatedRoom.participants.find(
+        (p: { userId: string }) => p.userId === userId
+      );
+
+      const roomChannel = `room:${roomId}`;
+      io.to(roomChannel).emit('room:player:ready', {
+        userId,
+        isReady: participant ? participant.isReady : isReady,
+        roomStatus: updatedRoom.status,
+      });
+
+      io.to(roomChannel).emit('room:state', updatedRoom);
+
+      callback?.({
+        success: true,
+        isReady: participant ? participant.isReady : isReady,
+      });
+    } catch (err: any) {
+      callback?.({ success: false, error: err?.message || 'Failed to update ready status' });
+    }
+  });
+
+  /**
+   * room:game:vote
+   */
+  socket.on('room:game:vote', async (payload, callback) => {
+    try {
+      const { roomId, gameId } = payload;
+      const updatedRoom = await roomsService.voteGame(roomId, userId, gameId);
+
+      const roomChannel = `room:${roomId}`;
+      io.to(roomChannel).emit('room:game:voted', {
+        userId,
+        gameId,
+        votes: updatedRoom.gameVotes,
+      });
+
+      io.to(roomChannel).emit('room:state', updatedRoom);
+
+      callback?.({ success: true, votes: updatedRoom.gameVotes });
+    } catch (err: any) {
+      callback?.({ success: false, error: err?.message || 'Failed to submit vote' });
+    }
+  });
+
+  /**
+   * room:game:select
+   */
+  socket.on('room:game:select', async (payload, callback) => {
+    try {
+      const { roomId, gameId } = payload;
+      const updatedRoom = await roomsService.selectGame(roomId, userId, gameId);
+
+      const roomChannel = `room:${roomId}`;
+      io.to(roomChannel).emit('room:game:selected', {
+        selectedGameId: gameId,
+      });
+
+      io.to(roomChannel).emit('room:state', updatedRoom);
+
+      callback?.({ success: true });
+    } catch (err: any) {
+      callback?.({ success: false, error: err?.message || 'Failed to select game' });
+    }
+  });
+
+  /**
+   * room:start:prepare
+   */
+  socket.on('room:start:prepare', async (payload, callback) => {
+    try {
+      const { roomId } = payload;
+      const check = await roomsService.canStartGame(roomId, userId);
+
+      if (!check.canStart) {
+        callback?.({ success: false, error: check.reason || 'Cannot start game yet' });
+        return;
+      }
+
+      const room = await roomsService.getRoomById(roomId);
+      if (!room.selectedGameId) {
+        callback?.({ success: false, error: 'No game selected' });
+        return;
+      }
+
+      const roomChannel = `room:${roomId}`;
+      io.to(roomChannel).emit('room:start:launch', {
+        gameId: room.selectedGameId,
+        launchedAt: new Date().toISOString(),
+      });
+
+      callback?.({ success: true });
+    } catch (err: any) {
+      callback?.({ success: false, error: err?.message || 'Failed to start game' });
+    }
+  });
+
+  /**
+   * room:host:transfer
+   */
+  socket.on('room:host:transfer', async (payload, callback) => {
+    try {
+      const { roomId, newHostId } = payload;
+      const updatedRoom = await roomsService.transferHost(roomId, userId, newHostId);
+
+      const roomChannel = `room:${roomId}`;
+      io.to(roomChannel).emit('room:host:changed', {
+        hostId: newHostId,
+        hostName: updatedRoom.hostName,
+      });
+
+      io.to(roomChannel).emit('room:state', updatedRoom);
+
+      callback?.({ success: true });
+    } catch (err: any) {
+      callback?.({ success: false, error: err?.message || 'Failed to transfer host' });
+    }
+  });
+
+  /**
+   * room:player:kick
+   */
+  socket.on('room:player:kick', async (payload, callback) => {
+    try {
+      const { roomId, targetUserId } = payload;
+      const result = await roomsService.kickParticipant(roomId, userId, targetUserId);
+
+      const roomChannel = `room:${roomId}`;
+      io.to(roomChannel).emit('room:player:kicked', { targetUserId });
+      io.to(roomChannel).emit('room:state', result.room);
+
+      // Remove target user's presence
+      presenceManager.leaveRoom(roomId, targetUserId);
+      const onlineUserIds = presenceManager.getRoomOnlineUsers(roomId);
+      io.to(roomChannel).emit('room:presence:update', { onlineUserIds });
+
+      callback?.({ success: true });
+    } catch (err: any) {
+      callback?.({ success: false, error: err?.message || 'Failed to kick player' });
+    }
+  });
+
+  /**
+   * room:chat:send
+   */
+  socket.on('room:chat:send', async (payload, callback) => {
+    try {
+      const { roomId, message } = payload;
+      const createdMessage = await roomsService.postMessage(roomId, userId, message);
+
+      const roomChannel = `room:${roomId}`;
+      io.to(roomChannel).emit('room:chat:new', createdMessage);
+
+      callback?.({ success: true, message: createdMessage });
+    } catch (err: any) {
+      callback?.({ success: false, error: err?.message || 'Failed to send message' });
+    }
+  });
+
+  /**
+   * room:reaction:send
+   */
+  socket.on('room:reaction:send', (payload, callback) => {
+    const { roomId, reaction } = payload;
+
+    // Verify user is an active participant / present in the room
+    const onlineUsers = presenceManager.getRoomOnlineUsers(roomId);
+    if (!onlineUsers.includes(userId)) {
+      callback?.({ success: false, error: 'You are not present in this room' });
+      return;
+    }
+
+    const now = Date.now();
+
+    // Check rate limit: 10 reactions per 3 seconds
+    const limit = reactionRateLimits.get(userId) || { count: 0, resetAt: now + 3000 };
+    if (now > limit.resetAt) {
+      limit.count = 1;
+      limit.resetAt = now + 3000;
+    } else {
+      limit.count++;
+    }
+    reactionRateLimits.set(userId, limit);
+
+    if (limit.count > 10) {
+      callback?.({ success: false, error: 'Too many reactions sent. Please slow down.' });
+      return;
+    }
+
+    const roomChannel = `room:${roomId}`;
+    io.to(roomChannel).emit('room:reaction:new', {
+      senderId: userId,
+      reaction,
+      timestamp: new Date().toISOString(),
+    });
+
+    callback?.({ success: true });
+  });
+
+  /**
+   * disconnect — handled with in-memory grace period
+   */
+  socket.on('disconnect', () => {
+    presenceManager.trackDisconnect(userId, socket.id, async (offlineUserId, affectedRooms) => {
+      // Grace period expired without reconnection
+      for (const roomId of affectedRooms) {
+        const roomChannel = `room:${roomId}`;
+        const onlineUserIds = presenceManager.getRoomOnlineUsers(roomId);
+        io.to(roomChannel).emit('room:presence:update', { onlineUserIds });
+
+        // If the disconnected user was the room host, safely migrate host ownership
+        try {
+          const room = await prisma.room.findFirst({
+            where: {
+              OR: [{ id: roomId }, { code: roomId.toUpperCase() }],
+            },
+            include: {
+              participants: {
+                where: { leftAt: null },
+                orderBy: { joinedAt: 'asc' },
+                include: { user: true },
+              },
+            },
+          });
+
+          if (
+            room &&
+            room.hostId === offlineUserId &&
+            (room.status === 'WAITING' || room.status === 'READY_TO_START')
+          ) {
+            const activeOthers = room.participants.filter((p) => p.userId !== offlineUserId);
+            if (activeOthers.length > 0) {
+              // Prioritize currently online participant, else oldest active participant
+              const candidate =
+                activeOthers.find((p) => presenceManager.isUserOnline(p.userId)) || activeOthers[0];
+
+              const updatedRoom = await roomsService.transferHost(
+                room.id,
+                offlineUserId,
+                candidate.userId
+              );
+
+              io.to(roomChannel).emit('room:host:changed', {
+                hostId: candidate.userId,
+                hostName: updatedRoom.hostName,
+              });
+              io.to(roomChannel).emit('room:state', updatedRoom);
+            }
+          }
+        } catch (err) {
+          console.warn('[Presence] Host migration on disconnect failed:', err);
+        }
+      }
+    });
+  });
+}

@@ -1,78 +1,38 @@
-import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { Gamepad2, Mail, ArrowRight, Sparkles, AlertCircle } from 'lucide-react';
-import { Input } from '../components/ui/Input';
-import { PasswordInput } from '../components/ui/PasswordInput';
+import React, { useState, useEffect } from 'react';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
+import { Gamepad2, AlertCircle } from 'lucide-react';
 import { Button } from '../components/ui/Button';
-import { Modal } from '../components/ui/Modal';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 
 export const LoginPage: React.FC = () => {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [rememberMe, setRememberMe] = useState(true);
-  const [errors, setErrors] = useState<{ email?: string; password?: string; general?: string }>({});
-  const [showForgotModal, setShowForgotModal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const { login } = useAuth();
+  const { loginWithGoogle, isAuthenticated } = useAuth();
   const { addToast } = useToast();
   const navigate = useNavigate();
+  const location = useLocation();
 
-  const validate = () => {
-    const errs: { email?: string; password?: string } = {};
-    if (!email.trim()) {
-      errs.email = 'Email is required';
-    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      errs.email = 'Please enter a valid email address';
+  const from = (location.state as any)?.from?.pathname || '/dashboard';
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      navigate(from, { replace: true });
     }
+  }, [isAuthenticated, navigate, from]);
 
-    if (!password) {
-      errs.password = 'Password is required';
-    } else if (password.length < 6) {
-      errs.password = 'Password must be at least 6 characters';
-    }
-
-    setErrors(errs);
-    return Object.keys(errs).length === 0;
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!validate()) return;
-
+  const handleGoogleSignIn = async () => {
     setIsSubmitting(true);
-    setErrors({});
+    setErrorMessage(null);
 
     try {
-      const res = await login(email, password);
-      if (res.success) {
-        addToast('Welcome back to PlaySpace!', {
-          type: 'success',
-          message: 'Development mock session active.',
-        });
-        navigate('/dashboard');
-      } else {
-        setErrors({ general: res.error || 'Failed to sign in' });
-      }
-    } catch {
-      setErrors({ general: 'An unexpected error occurred. Please try again.' });
-    } finally {
+      await loginWithGoogle();
+      addToast('Redirecting to Google secure authentication...', { type: 'info' });
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Failed to initiate Google sign-in. Please try again.');
       setIsSubmitting(false);
     }
-  };
-
-  const handleQuickDemo = async () => {
-    setEmail('alex.rivera@example.com');
-    setPassword('playspace123');
-    setIsSubmitting(true);
-    await login('alex.rivera@example.com', 'playspace123');
-    addToast('Demo Account Loaded!', {
-      type: 'success',
-      message: 'Signed in as Alex Rivera',
-    });
-    navigate('/dashboard');
   };
 
   return (
@@ -91,122 +51,62 @@ export const LoginPage: React.FC = () => {
           </span>
         </Link>
         <h1 className="mt-4 text-2xl sm:text-3xl font-extrabold tracking-tight text-[#211A2D]">
-          Welcome Back
+          Welcome to PlaySpace
         </h1>
         <p className="mt-1.5 text-xs sm:text-sm text-[#756D82]">
-          Sign in to access your couple and friend game lobbies
+          Sign in to access couple duels and friend game lobbies
         </p>
       </div>
 
       {/* Main Card */}
       <div className="w-full max-w-md bg-white rounded-3xl border border-[#EAE3F3] shadow-xl shadow-[#593B91]/5 p-6 sm:p-8">
-        {/* Development Mock Notice */}
-        <div className="mb-5 p-3 rounded-xl bg-[#F8F4FF] border border-[#EAE3F3] flex items-start gap-2.5 text-xs text-[#593B91]">
-          <Sparkles className="w-4 h-4 text-[#9670E8] shrink-0 mt-0.5" />
-          <div>
-            <span className="font-bold">Development Mock Auth:</span> You can sign in with any valid test email or click the instant 1-click Demo button below.
-          </div>
-        </div>
-
-        {/* General Error Banner */}
-        {errors.general && (
-          <div className="mb-5 p-3 rounded-xl bg-[#FDF0F2] border border-[#F8D2D9] flex items-center gap-2 text-xs text-[#D94C65] font-medium">
+        {/* Error Banner */}
+        {errorMessage && (
+          <div className="mb-5 p-3.5 rounded-2xl bg-[#FDF0F2] border border-[#F8D2D9] flex items-center gap-2.5 text-xs text-[#D94C65] font-medium">
             <AlertCircle className="w-4 h-4 shrink-0" />
-            <span>{errors.general}</span>
+            <span>{errorMessage}</span>
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-          <Input
-            label="Email Address"
-            type="email"
-            placeholder="you@example.com"
-            value={email}
-            onChange={(e) => {
-              setEmail(e.target.value);
-              if (errors.email) setErrors((prev) => ({ ...prev, email: undefined }));
-            }}
-            error={errors.email}
-            leftIcon={<Mail className="w-4 h-4" />}
-            autoComplete="email"
-            required
-          />
-
-          <div>
-            <PasswordInput
-              label="Password"
-              placeholder="Enter your password"
-              value={password}
-              onChange={(e) => {
-                setPassword(e.target.value);
-                if (errors.password) setErrors((prev) => ({ ...prev, password: undefined }));
-              }}
-              error={errors.password}
-              autoComplete="current-password"
-              required
-            />
-          </div>
-
-          {/* Remember me & Forgot Password */}
-          <div className="flex items-center justify-between text-xs pt-1">
-            <label className="flex items-center gap-2 text-[#756D82] cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={rememberMe}
-                onChange={(e) => setRememberMe(e.target.checked)}
-                className="rounded border-[#EAE3F3] text-[#593B91] focus:ring-[#9670E8] w-4 h-4"
-              />
-              <span>Remember me</span>
-            </label>
-
-            <button
-              type="button"
-              onClick={() => setShowForgotModal(true)}
-              className="text-[#593B91] hover:text-[#9670E8] font-semibold transition-colors cursor-pointer"
-            >
-              Forgot password?
-            </button>
-          </div>
-
-          {/* Primary Submit Button */}
+        {/* Google OAuth Login */}
+        <div className="space-y-4">
           <Button
-            type="submit"
+            type="button"
             variant="primary"
-            size="md"
+            size="lg"
             isLoading={isSubmitting}
-            className="w-full mt-2 font-bold"
-            rightIcon={<ArrowRight className="w-4 h-4" />}
+            className="w-full font-bold flex items-center justify-center gap-3 py-3.5 shadow-md shadow-[#593B91]/15"
+            onClick={handleGoogleSignIn}
           >
-            Sign In
+            <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24">
+              <path
+                fill="#EA4335"
+                d="M12 5c1.7 0 3 .6 4 1.5l3-3C17.2 1.8 14.8 1 12 1 7.5 1 3.7 3.6 1.9 7.3l3.7 2.9C6.5 7.3 9 5 12 5z"
+              />
+              <path
+                fill="#4285F4"
+                d="M23.5 12.3c0-.8-.1-1.7-.2-2.3H12v4.5h6.5c-.3 1.5-1.1 2.8-2.4 3.7l3.7 2.9c2.2-2 3.7-5 3.7-8.8z"
+              />
+              <path
+                fill="#FBBC05"
+                d="M5.6 14.8c-.2-.7-.4-1.5-.4-2.3 0-.8.1-1.6.4-2.3L1.9 7.3C.7 9.7 0 12 0 14.5s.7 4.8 1.9 7.2l3.7-2.9z"
+              />
+              <path
+                fill="#34A853"
+                d="M12 24c3.2 0 6-1.1 8-3l-3.7-2.9c-1.1.7-2.5 1.2-4.3 1.2-3 0-5.5-2.3-6.4-5.2L1.9 17C3.7 20.7 7.5 24 12 24z"
+              />
+            </svg>
+            <span>Continue with Google</span>
           </Button>
-        </form>
 
-        {/* Quick Demo Login Option */}
-        <div className="relative my-6">
-          <div className="absolute inset-0 flex items-center">
-            <div className="w-full border-t border-[#EAE3F3]" />
-          </div>
-          <div className="relative flex justify-center text-xs">
-            <span className="bg-white px-3 text-[#9D96A8] uppercase tracking-wider font-semibold">
-              Or Instant Preview
-            </span>
-          </div>
+          <p className="text-[11px] text-[#756D82] text-center px-4 leading-relaxed">
+            By signing in with Google, you agree to PlaySpace community guidelines and privacy standards.
+          </p>
         </div>
 
-        <Button
-          type="button"
-          variant="secondary"
-          size="md"
-          className="w-full font-bold"
-          onClick={handleQuickDemo}
-          leftIcon={<Sparkles className="w-4 h-4 text-[#9670E8]" />}
-        >
-          1-Click Demo Login (Alex Rivera)
-        </Button>
-
         {/* Link to Signup */}
-        <p className="mt-6 text-center text-xs text-[#756D82]">
-          Do not have an account yet?{' '}
+        <p className="mt-8 text-center text-xs text-[#756D82] border-t border-[#EAE3F3] pt-5">
+          New to PlaySpace?{' '}
           <Link
             to="/signup"
             className="font-bold text-[#593B91] hover:text-[#9670E8] transition-colors"
@@ -215,33 +115,6 @@ export const LoginPage: React.FC = () => {
           </Link>
         </p>
       </div>
-
-      {/* Forgot Password Honest Modal */}
-      <Modal
-        isOpen={showForgotModal}
-        onClose={() => setShowForgotModal(false)}
-        title="Password Recovery"
-        description="Phase 1 Development Notice"
-        maxWidth="sm"
-      >
-        <div className="flex flex-col gap-4 text-xs text-[#756D82] leading-relaxed pt-1">
-          <p>
-            In this Phase 1 frontend preview, an external SMTP email delivery service is intentionally not configured.
-          </p>
-          <p className="p-3 rounded-xl bg-[#F8F4FF] border border-[#EAE3F3] text-[#593B91] font-medium">
-            You can enter any valid test email and password (min 6 characters), or click <strong>1-Click Demo Login</strong> to immediately access the full platform!
-          </p>
-          <div className="pt-2 flex justify-end">
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={() => setShowForgotModal(false)}
-            >
-              Understood
-            </Button>
-          </div>
-        </div>
-      </Modal>
     </div>
   );
 };

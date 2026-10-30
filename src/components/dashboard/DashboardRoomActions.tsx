@@ -40,8 +40,8 @@ export const DashboardRoomActions: React.FC<DashboardRoomActionsProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
-          <Badge variant="subtle" size="sm">
-            Phase 1 Sandbox
+          <Badge variant="purple" size="sm">
+            Phase 2 Live
           </Badge>
           <div className="flex items-center gap-1 p-1 bg-[#F8F4FF] rounded-xl border border-[#EAE3F3]">
             <button
@@ -130,7 +130,7 @@ export const DashboardRoomActions: React.FC<DashboardRoomActionsProps> = ({
           <form onSubmit={handleJoinSubmit} className="flex items-center gap-2">
             <input
               type="text"
-              placeholder="e.g. PLAY69"
+              placeholder="e.g. LOVE22"
               value={roomCodeInput}
               onChange={(e) => setRoomCodeInput(e.target.value.toUpperCase().slice(0, 6))}
               className="flex-1 rounded-xl border border-[#EAE3F3] bg-[#FCFAFF] px-3.5 py-2 text-xs font-mono font-bold tracking-widest text-[#211A2D] placeholder-[#9D96A8] uppercase focus:border-[#9670E8] focus:bg-white focus:outline-none"

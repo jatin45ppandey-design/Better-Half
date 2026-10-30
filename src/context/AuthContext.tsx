@@ -1,147 +1,197 @@
-import React, { createContext, useContext, useState } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { supabase } from '../lib/supabase';
+import { api } from '../services/api';
 import type { User, AuthState } from '../types/auth';
 
 interface AuthContextType extends AuthState {
-  login: (email: string, password?: string) => Promise<{ success: boolean; error?: string }>;
-  signup: (name: string, email: string, password?: string) => Promise<{ success: boolean; error?: string }>;
-  logout: () => void;
+  loginWithGoogle: () => Promise<void>;
+  logout: () => Promise<void>;
+  refreshProfile: () => Promise<void>;
   setDevUser: (mode?: 'couple' | 'friend') => void;
+  // Backward compatibility signatures for existing consumers during transition
+  login: (email?: string, password?: string) => Promise<{ success: boolean; error?: string }>;
+  signup: (name?: string, email?: string, password?: string) => Promise<{ success: boolean; error?: string }>;
 }
-
-const DEFAULT_MOCK_USER: User = {
-  id: 'dev-user-01',
-  name: 'Alex Rivera',
-  email: 'alex.rivera@example.com',
-  avatarInitials: 'AR',
-  avatarColor: 'bg-[#9670E8]',
-  preferredMode: 'couple',
-  isDevMock: true,
-};
-
-const DEV_STORAGE_KEY = 'playspace_dev_mock_session';
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(() => {
+  const [user, setUser] = useState<User | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchUserProfile = useCallback(async (supabaseUser: any): Promise<User | null> => {
     try {
-      const stored = localStorage.getItem(DEV_STORAGE_KEY);
-      if (stored) {
-        return JSON.parse(stored);
+      const profile = await api.profiles.getMe();
+      return {
+        id: profile.id,
+        name: profile.displayName || supabaseUser.user_metadata?.full_name || 'PlaySpace Player',
+        email: supabaseUser.email || '',
+        username: profile.username,
+        avatarInitials: profile.avatarInitials || 'PL',
+        avatarColor: profile.avatarColor || '#9670E8',
+        bio: profile.bio || '',
+        preferredMode: 'couple',
+        isDevMock: false,
+      };
+    } catch (err) {
+      console.warn('Backend profile fetch failed, using Supabase session data:', err);
+      // Fallback to Supabase metadata if backend database is cold or bootstrapping
+      const name =
+        supabaseUser.user_metadata?.full_name ||
+        supabaseUser.user_metadata?.name ||
+        supabaseUser.email?.split('@')[0] ||
+        'PlaySpace Player';
+
+      const initials =
+        name
+          .split(' ')
+          .map((n: string) => n[0])
+          .slice(0, 2)
+          .join('')
+          .toUpperCase() || 'PL';
+
+      return {
+        id: supabaseUser.id,
+        name,
+        email: supabaseUser.email || '',
+        username: supabaseUser.user_metadata?.preferred_username || supabaseUser.email?.split('@')[0] || 'player',
+        avatarInitials: initials,
+        avatarColor: '#9670E8',
+        bio: '',
+        preferredMode: 'couple',
+        isDevMock: false,
+      };
+    }
+  }, []);
+
+  const refreshProfile = useCallback(async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.user) {
+      const updatedUser = await fetchUserProfile(session.user);
+      if (updatedUser) {
+        setUser(updatedUser);
       }
-      return null;
-    } catch {
-      return null;
     }
-  });
-  const [isLoading, setIsLoading] = useState<boolean>(false);
+  }, [fetchUserProfile]);
 
-  const login = async (email: string): Promise<{ success: boolean; error?: string }> => {
-    setIsLoading(true);
-    // Simulate brief network delay
-    await new Promise((r) => setTimeout(r, 400));
+  useEffect(() => {
+    let isMounted = true;
 
-    if (!email || !email.includes('@')) {
-      setIsLoading(false);
-      return { success: false, error: 'Please enter a valid email address.' };
+    async function initAuth() {
+      try {
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        if (sessionError) {
+          throw sessionError;
+        }
+
+        if (session?.user && isMounted) {
+          const profileUser = await fetchUserProfile(session.user);
+          if (isMounted) {
+            setUser(profileUser);
+          }
+        }
+      } catch (err: any) {
+        console.error('Error restoring Supabase session:', err);
+        if (isMounted) {
+          setError(err.message || 'Failed to restore authentication session');
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoading(false);
+        }
+      }
     }
 
-    // Extract display name from email
-    const namePart = email.split('@')[0];
-    const formattedName = namePart
-      .replace(/[._-]/g, ' ')
-      .replace(/\b\w/g, (char) => char.toUpperCase());
+    initAuth();
 
-    const initials = formattedName
-      .split(' ')
-      .map((n) => n[0])
-      .slice(0, 2)
-      .join('')
-      .toUpperCase() || 'PL';
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (!isMounted) return;
 
-    const newUser: User = {
-      id: `dev-user-${Date.now()}`,
-      name: formattedName || 'PlaySpace Player',
-      email,
-      avatarInitials: initials,
-      avatarColor: 'bg-[#9670E8]',
-      preferredMode: 'couple',
-      isDevMock: true,
+      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+        if (session?.user) {
+          const profileUser = await fetchUserProfile(session.user);
+          if (isMounted) {
+            setUser(profileUser);
+            setIsLoading(false);
+          }
+        }
+      } else if (event === 'SIGNED_OUT') {
+        if (isMounted) {
+          setUser(null);
+          setIsLoading(false);
+        }
+      }
+    });
+
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
     };
+  }, [fetchUserProfile]);
 
-    setUser(newUser);
+  const loginWithGoogle = async () => {
+    setError(null);
+    setIsLoading(true);
     try {
-      localStorage.setItem(DEV_STORAGE_KEY, JSON.stringify(newUser));
-    } catch {
-      // ignore storage failure in dev
+      const redirectUrl = `${window.location.origin}/dashboard`;
+      const { error: oauthError } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: redirectUrl,
+          queryParams: {
+            access_type: 'offline',
+            prompt: 'select_account',
+          },
+        },
+      });
+
+      if (oauthError) {
+        throw oauthError;
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to sign in with Google');
+      setIsLoading(false);
+      throw err;
     }
-    setIsLoading(false);
-    return { success: true };
   };
 
-  const signup = async (
-    name: string,
-    email: string
-  ): Promise<{ success: boolean; error?: string }> => {
+  const logout = async () => {
     setIsLoading(true);
-    await new Promise((r) => setTimeout(r, 450));
-
-    if (!name.trim()) {
-      setIsLoading(false);
-      return { success: false, error: 'Name is required.' };
-    }
-    if (!email || !email.includes('@')) {
-      setIsLoading(false);
-      return { success: false, error: 'Valid email is required.' };
-    }
-
-    const initials = name
-      .trim()
-      .split(' ')
-      .map((n) => n[0])
-      .slice(0, 2)
-      .join('')
-      .toUpperCase() || 'PL';
-
-    const newUser: User = {
-      id: `dev-user-${Date.now()}`,
-      name: name.trim(),
-      email: email.trim(),
-      avatarInitials: initials,
-      avatarColor: 'bg-[#865CE3]',
-      preferredMode: 'couple',
-      isDevMock: true,
-    };
-
-    setUser(newUser);
     try {
-      localStorage.setItem(DEV_STORAGE_KEY, JSON.stringify(newUser));
-    } catch {
-      // ignore storage failure
+      await supabase.auth.signOut();
+      setUser(null);
+    } catch (err: any) {
+      console.error('Logout error:', err);
+    } finally {
+      setIsLoading(false);
     }
-    setIsLoading(false);
-    return { success: true };
   };
 
-  const logout = () => {
-    setUser(null);
+  // Backward-compatible fallback for components still invoking login / signup
+  const login = async (): Promise<{ success: boolean; error?: string }> => {
     try {
-      localStorage.removeItem(DEV_STORAGE_KEY);
-    } catch {
-      // ignore
+      await loginWithGoogle();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  };
+
+  const signup = async (): Promise<{ success: boolean; error?: string }> => {
+    try {
+      await loginWithGoogle();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
     }
   };
 
   const setDevUser = (mode?: 'couple' | 'friend') => {
-    const updatedUser: User = {
-      ...DEFAULT_MOCK_USER,
-      preferredMode: mode || DEFAULT_MOCK_USER.preferredMode,
-    };
-    setUser(updatedUser);
-    try {
-      localStorage.setItem(DEV_STORAGE_KEY, JSON.stringify(updatedUser));
-    } catch {
-      // ignore
+    if (user) {
+      setUser({ ...user, preferredMode: mode || user.preferredMode || 'couple' });
     }
   };
 
@@ -151,10 +201,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         user,
         isAuthenticated: !!user,
         isLoading,
+        error,
+        loginWithGoogle,
+        logout,
+        refreshProfile,
+        setDevUser,
         login,
         signup,
-        logout,
-        setDevUser,
       }}
     >
       {children}

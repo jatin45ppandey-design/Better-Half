@@ -9,7 +9,6 @@ import {
   ArrowLeft,
   MessageSquare,
   Send,
-  UserPlus,
   CheckCircle2,
   XCircle,
   AlertCircle,
@@ -48,8 +47,6 @@ export const RoomLobbyPage: React.FC = () => {
     voteForGame,
     sendChatMessage,
     sendEmojiReaction,
-    addDemoPlayer,
-    removeDemoPlayer,
     canStartGame,
   } = useRoom();
 
@@ -57,18 +54,48 @@ export const RoomLobbyPage: React.FC = () => {
   const [chatInput, setChatInput] = useState('');
   const [validationError, setValidationError] = useState<string | null>(null);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(false);
 
-  // If URL has roomCode but currentRoom does not match, attempt to join
+  // If URL has roomCode but currentRoom does not match, attempt to join on server
   useEffect(() => {
     if (roomCode) {
       const code = roomCode.toUpperCase();
       if (!currentRoom || currentRoom.code !== code) {
-        if (allRooms[code]) {
-          joinRoom(code);
-        }
+        setIsConnecting(true);
+        joinRoom(code)
+          .then((res) => {
+            if (!res.success) {
+              setValidationError(res.error || `Could not connect to room ${code}`);
+            }
+          })
+          .catch((err) => {
+            setValidationError(err?.message || `Could not join room ${code}`);
+          })
+          .finally(() => {
+            setIsConnecting(false);
+          });
       }
     }
-  }, [roomCode, currentRoom, allRooms, joinRoom]);
+  }, [roomCode, currentRoom, joinRoom]);
+
+  // Loading state
+  if (isConnecting) {
+    return (
+      <div className="min-h-screen flex flex-col bg-[#FCFAFF]">
+        <Navbar />
+        <main className="flex-1 flex flex-col items-center justify-center p-4 text-center">
+          <div className="max-w-md w-full p-8 rounded-3xl bg-white border border-[#EAE3F3] shadow-md flex flex-col items-center gap-4">
+            <div className="w-12 h-12 rounded-full border-4 border-[#9670E8] border-t-transparent animate-spin" />
+            <h2 className="text-xl font-bold text-[#211A2D]">Connecting to Lobby...</h2>
+            <p className="text-xs text-[#756D82]">
+              Connecting to room <strong>#{roomCode}</strong> via real-time multiplayer server.
+            </p>
+          </div>
+        </main>
+        <Footer />
+      </div>
+    );
+  }
 
   // If room is invalid / not found
   if (!roomCode || !allRooms[roomCode.toUpperCase()]) {
@@ -82,29 +109,16 @@ export const RoomLobbyPage: React.FC = () => {
             </div>
             <h1 className="text-2xl font-bold text-[#211A2D]">Room Not Found</h1>
             <p className="text-sm text-[#756D82] leading-relaxed">
-              We couldn't find an active room with code <strong>{roomCode || 'UNKNOWN'}</strong>.
-              You can jump into one of our demo lobbies or create a new room.
+              We couldn't connect to an active room with code <strong>{roomCode || 'UNKNOWN'}</strong>.
+              The room may have expired, reached maximum capacity, or been closed by the host.
             </p>
             <div className="flex flex-col gap-2 w-full pt-2">
               <Button
                 variant="primary"
-                onClick={() => {
-                  joinRoom('PLAY69');
-                  navigate('/room/PLAY69');
-                }}
+                onClick={() => navigate('/dashboard')}
                 className="w-full justify-center"
               >
-                Join Friend Mode Demo (PLAY69)
-              </Button>
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  joinRoom('LOVE22');
-                  navigate('/room/LOVE22');
-                }}
-                className="w-full justify-center"
-              >
-                Join Couple Mode Demo (LOVE22)
+                Create a New Room
               </Button>
               <Link to="/dashboard" className="w-full">
                 <Button variant="outline" className="w-full justify-center">
@@ -164,8 +178,8 @@ export const RoomLobbyPage: React.FC = () => {
     navigate(`/game/${selectedGame.id}?room=${room.code}`);
   };
 
-  const handleGameSelect = (gameId: string) => {
-    const res = setRoomGame(gameId);
+  const handleGameSelect = async (gameId: string) => {
+    const res = await setRoomGame(gameId);
     if (!res.success) {
       addToast(res.error || 'Failed to select game', { type: 'error' });
     } else {
@@ -298,20 +312,6 @@ export const RoomLobbyPage: React.FC = () => {
                       : 'Friend Mode supports up to 4 players. All players must toggle Ready.'}
                   </p>
                 </div>
-
-                {/* Add/Remove Demo Player Controls for Host */}
-                <div className="flex items-center gap-1.5">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={addDemoPlayer}
-                    disabled={room.participants.length >= room.maxPlayers}
-                    leftIcon={<UserPlus className="w-3.5 h-3.5" />}
-                    className="text-xs font-semibold"
-                  >
-                    + Add Player
-                  </Button>
-                </div>
               </div>
 
               {/* Player Slots Grid */}
@@ -367,18 +367,6 @@ export const RoomLobbyPage: React.FC = () => {
                           </>
                         )}
                       </span>
-
-                      {/* Remove demo player button if demo */}
-                      {participant.isDemo && isHost && (
-                        <button
-                          type="button"
-                          onClick={() => removeDemoPlayer(participant.id)}
-                          className="text-[#D94C65] hover:bg-[#FDF0F2] p-1 rounded-md text-[10px] transition-colors"
-                          title="Remove demo participant"
-                        >
-                          Remove
-                        </button>
-                      )}
                     </div>
                   </div>
                 ))}
@@ -448,10 +436,12 @@ export const RoomLobbyPage: React.FC = () => {
                     variant="primary"
                     size="sm"
                     onClick={handleStartGame}
+                    disabled={!isHost}
+                    title={isHost ? 'Launch Match' : 'Only the room host can launch the match'}
                     leftIcon={<Play className="w-3.5 h-3.5 fill-current" />}
                     className="font-bold text-xs"
                   >
-                    Launch Match
+                    {isHost ? 'Launch Match' : 'Host Launches'}
                   </Button>
                 </div>
               </div>

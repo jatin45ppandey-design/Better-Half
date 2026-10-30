@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Navbar } from '../components/navigation/Navbar';
 import { Footer } from '../components/navigation/Footer';
@@ -8,8 +8,10 @@ import { Button } from '../components/ui/Button';
 import { mockSocialAdapter } from '../services/mockSocialAdapter';
 import type { RoomInvitationItem } from '../services/mockSocialAdapter';
 import { useRoom } from '../context/RoomContext';
+import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { soundService } from '../services/soundService';
+import { api } from '../services/api';
 import {
   Mail,
   Gamepad2,
@@ -22,6 +24,7 @@ import {
 } from 'lucide-react';
 
 export const InvitationsPage: React.FC = () => {
+  const { user } = useAuth();
   const [invitations, setInvitations] = useState<RoomInvitationItem[]>(
     mockSocialAdapter.getInvitations()
   );
@@ -31,13 +34,48 @@ export const InvitationsPage: React.FC = () => {
   const { addToast } = useToast();
   const navigate = useNavigate();
 
+  // Load real backend invitations if user is authenticated
+  useEffect(() => {
+    if (!user) return;
+    api.roomInvitations
+      .getReceived()
+      .then((res) => {
+        if (res?.invitations && res.invitations.length > 0) {
+          const mapped: RoomInvitationItem[] = res.invitations.map((inv: any) => ({
+            id: inv.id,
+            fromUserId: inv.sender.id,
+            fromName: inv.sender.displayName || inv.sender.username,
+            fromAvatarInitials: inv.sender.avatarInitials || (inv.sender.displayName ? inv.sender.displayName.substring(0, 2).toUpperCase() : 'IN'),
+            fromAvatarColor: inv.sender.avatarColor || 'bg-[#9670E8]',
+            roomCode: inv.room.code,
+            roomMode: inv.room.mode.toLowerCase() as 'couple' | 'friend',
+            suggestedGameId: 'uno-style',
+            suggestedGameName: inv.room.name || 'Room Lobby',
+            timestamp: new Date(inv.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            status: (inv.status === 'PENDING' ? 'pending' : inv.status === 'DECLINED' ? 'declined' : 'expired') as 'pending' | 'expired' | 'declined',
+            isDemoInvitation: false,
+          }));
+
+          setInvitations((prev) => {
+            // Keep simulated invites plus real invites
+            const realIds = new Set(mapped.map((m) => m.id));
+            const filteredSimulated = prev.filter((p) => !realIds.has(p.id));
+            return [...mapped, ...filteredSimulated];
+          });
+        }
+      })
+      .catch((err) => {
+        console.warn('Could not fetch real invitations from server:', err);
+      });
+  }, [user]);
+
   const displayedInvitations = invitations.filter((inv) =>
     filter === 'pending' ? inv.status === 'pending' : inv.status !== 'pending'
   );
 
-  const handleAcceptInvite = (inv: RoomInvitationItem) => {
+  const handleAcceptInvite = async (inv: RoomInvitationItem) => {
     soundService.playSuccess();
-    const res = joinRoom(inv.roomCode);
+    const res = await joinRoom(inv.roomCode);
     if (res.success) {
       addToast(`Joined room #${inv.roomCode} hosted by ${inv.fromName}`, {
         type: 'success',

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Navbar } from '../components/navigation/Navbar';
 import { Footer } from '../components/navigation/Footer';
 import { Avatar } from '../components/ui/Avatar';
@@ -7,6 +7,8 @@ import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
 import { mockSocialAdapter } from '../services/mockSocialAdapter';
 import type { PlayerProfileData } from '../services/mockSocialAdapter';
+import { api } from '../services/api';
+import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { soundService } from '../services/soundService';
 import {
@@ -19,39 +21,118 @@ import {
   Gamepad2,
   Calendar,
   Sparkles,
-  Info,
   CheckCircle2,
 } from 'lucide-react';
 
 export const ProfilePage: React.FC = () => {
-  const [profile, setProfile] = useState<PlayerProfileData>(mockSocialAdapter.getProfile());
+  const { user, refreshProfile } = useAuth();
+  const [profile, setProfile] = useState<PlayerProfileData>(() => mockSocialAdapter.getProfile());
   const [isEditing, setIsEditing] = useState(false);
   const [bioInput, setBioInput] = useState(profile.bio);
   const [nameInput, setNameInput] = useState(profile.name);
+  const [usernameInput, setUsernameInput] = useState(profile.username.replace(/^@/, ''));
+  const [isSaving, setIsSaving] = useState(false);
   const { addToast } = useToast();
+
+  // Load real backend profile and settings on mount
+  useEffect(() => {
+    let isMounted = true;
+    async function loadData() {
+      try {
+        const [backendProfile, backendSettings] = await Promise.all([
+          api.profiles.getMe().catch(() => null),
+          api.settings.get().catch(() => null),
+        ]);
+
+        if (backendProfile && isMounted) {
+          setProfile((prev) => ({
+            ...prev,
+            id: backendProfile.id,
+            name: backendProfile.displayName || prev.name,
+            username: `@${backendProfile.username}`,
+            avatarInitials: backendProfile.avatarInitials || prev.avatarInitials,
+            avatarColor: backendProfile.avatarColor || prev.avatarColor,
+            bio: backendProfile.bio ?? prev.bio,
+            joinedDate: backendProfile.createdAt
+              ? `Joined ${new Date(backendProfile.createdAt).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}`
+              : prev.joinedDate,
+            privacy: backendSettings
+              ? {
+                  showOnlineStatus: backendSettings.showOnlineStatus,
+                  allowDirectInvites: backendSettings.allowDirectInvites,
+                  publicMatchHistory: backendSettings.publicMatchHistory,
+                }
+              : prev.privacy,
+          }));
+          setBioInput(backendProfile.bio ?? '');
+          setNameInput(backendProfile.displayName || '');
+          setUsernameInput(backendProfile.username || '');
+        }
+      } catch (err) {
+        console.warn('Failed to load profile from backend:', err);
+      }
+    }
+    loadData();
+    return () => {
+      isMounted = false;
+    };
+  }, [user]);
 
   const winRate = Math.round((profile.wins / (profile.totalMatches || 1)) * 100);
 
-  const handleSaveProfile = () => {
+  const handleSaveProfile = async () => {
+    setIsSaving(true);
     soundService.playSuccess();
-    const updated = mockSocialAdapter.updateProfile({
-      name: nameInput.trim() || profile.name,
-      bio: bioInput.trim() || profile.bio,
-    });
-    setProfile(updated);
-    setIsEditing(false);
-    addToast('Profile updated locally', { type: 'success' });
+    try {
+      const cleanUsername = usernameInput.trim().replace(/^@/, '');
+      const updatedBackend = await api.profiles.updateMe({
+        displayName: nameInput.trim() || profile.name,
+        bio: bioInput.trim(),
+        ...(cleanUsername ? { username: cleanUsername } : {}),
+      });
+
+      setProfile((prev) => ({
+        ...prev,
+        name: updatedBackend.displayName,
+        username: `@${updatedBackend.username}`,
+        bio: updatedBackend.bio ?? '',
+      }));
+
+      // Also update mock adapter cache for fallback
+      mockSocialAdapter.updateProfile({
+        name: updatedBackend.displayName,
+        bio: updatedBackend.bio ?? '',
+      });
+
+      await refreshProfile();
+      setIsEditing(false);
+      addToast('Profile saved successfully!', { type: 'success' });
+    } catch (err: any) {
+      addToast(err.message || 'Failed to update profile', { type: 'error' });
+    } finally {
+      setIsSaving(false);
+    }
   };
 
-  const handleTogglePrivacy = (key: keyof PlayerProfileData['privacy']) => {
+  const handleTogglePrivacy = async (key: keyof PlayerProfileData['privacy']) => {
     soundService.playClick();
+    const nextVal = !profile.privacy[key];
     const nextPrivacy = {
       ...profile.privacy,
-      [key]: !profile.privacy[key],
+      [key]: nextVal,
     };
-    const updated = mockSocialAdapter.updateProfile({ privacy: nextPrivacy });
-    setProfile(updated);
-    addToast('Privacy preference saved', { type: 'info' });
+
+    setProfile((prev) => ({ ...prev, privacy: nextPrivacy }));
+    mockSocialAdapter.updateProfile({ privacy: nextPrivacy });
+
+    try {
+      await api.settings.update({
+        [key]: nextVal,
+      });
+      addToast('Privacy preference saved', { type: 'info' });
+    } catch (err) {
+      console.warn('Failed to persist privacy setting to backend:', err);
+    }
   };
 
   return (
@@ -59,17 +140,6 @@ export const ProfilePage: React.FC = () => {
       <Navbar />
 
       <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
-        {/* Sample Data Disclaimer Banner */}
-        <div className="mb-6 p-3.5 rounded-2xl bg-[#F8F4FF] border border-[#EAE3F3] flex items-center justify-between gap-3 text-xs text-[#756D82]">
-          <div className="flex items-center gap-2">
-            <Info className="w-4 h-4 text-[#9670E8] shrink-0" />
-            <span>
-              <strong>Local Prototype Notice:</strong> Career statistics, friend history, and records are sample data stored in local browser memory.
-            </span>
-          </div>
-          <Badge variant="subtle" size="sm">Local Demo</Badge>
-        </div>
-
         {/* Profile Header Card */}
         <div className="relative bg-white rounded-3xl border border-[#EAE3F3] shadow-sm overflow-hidden p-6 sm:p-8 mb-8">
           <div className="absolute top-0 right-0 w-96 h-48 bg-gradient-to-bl from-[#E3D6FA]/40 to-transparent rounded-bl-full pointer-events-none" />
@@ -93,12 +163,12 @@ export const ProfilePage: React.FC = () => {
                 <h1 className="text-2xl sm:text-3xl font-black text-[#211A2D] tracking-tight">
                   {profile.name}
                 </h1>
-                <Badge variant="purple" size="sm">Pro PlaySpacian</Badge>
+                <Badge variant="purple" size="sm">PlaySpace Player</Badge>
                 <span className="text-sm font-semibold text-[#756D82]">{profile.username}</span>
               </div>
 
               <p className="text-sm text-[#756D82] max-w-2xl leading-relaxed">
-                {profile.bio}
+                {profile.bio || 'Ready for friendly game nights and couple showdowns!'}
               </p>
 
               <div className="flex flex-wrap items-center justify-center sm:justify-start gap-4 pt-1 text-xs text-[#756D82]">
@@ -122,6 +192,7 @@ export const ProfilePage: React.FC = () => {
                   soundService.playClick();
                   setNameInput(profile.name);
                   setBioInput(profile.bio);
+                  setUsernameInput(profile.username.replace(/^@/, ''));
                   setIsEditing(true);
                 }}
               >
@@ -336,8 +407,8 @@ export const ProfilePage: React.FC = () => {
       <Modal
         isOpen={isEditing}
         onClose={() => setIsEditing(false)}
-        title="Edit Local Profile"
-        description="Update your display name and bio for this browser session."
+        title="Edit Profile"
+        description="Update your display name, username, and bio."
       >
         <div className="space-y-4 pt-2">
           <div>
@@ -347,8 +418,25 @@ export const ProfilePage: React.FC = () => {
               value={nameInput}
               onChange={(e) => setNameInput(e.target.value)}
               className="w-full px-3.5 py-2.5 rounded-xl border border-[#EAE3F3] focus:border-[#9670E8] focus:ring-2 focus:ring-[#9670E8]/20 outline-none text-sm text-[#211A2D]"
-              maxLength={30}
+              maxLength={40}
             />
+          </div>
+
+          <div>
+            <label className="text-xs font-bold text-[#211A2D] block mb-1">Username (Handle)</label>
+            <div className="relative">
+              <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm text-[#756D82]">@</span>
+              <input
+                type="text"
+                value={usernameInput}
+                onChange={(e) => setUsernameInput(e.target.value.toLowerCase().replace(/[^a-z0-9_.]/g, ''))}
+                className="w-full pl-8 pr-3.5 py-2.5 rounded-xl border border-[#EAE3F3] focus:border-[#9670E8] focus:ring-2 focus:ring-[#9670E8]/20 outline-none text-sm text-[#211A2D]"
+                maxLength={24}
+              />
+            </div>
+            <span className="text-[11px] text-[#756D82] block mt-1">
+              Letters, numbers, underscores, and dots (min 3 chars).
+            </span>
           </div>
 
           <div>
@@ -368,7 +456,12 @@ export const ProfilePage: React.FC = () => {
             <Button variant="ghost" size="sm" onClick={() => setIsEditing(false)}>
               Cancel
             </Button>
-            <Button variant="primary" size="sm" onClick={handleSaveProfile}>
+            <Button
+              variant="primary"
+              size="sm"
+              isLoading={isSaving}
+              onClick={handleSaveProfile}
+            >
               Save Profile
             </Button>
           </div>

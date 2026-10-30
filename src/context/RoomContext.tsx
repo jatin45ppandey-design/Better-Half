@@ -1,11 +1,12 @@
-import React, { createContext, useContext, useState, useCallback, useMemo } from 'react';
+import React, { createContext, useContext, useState, useCallback, useMemo, useEffect } from 'react';
 import type { RoomSession, RoomParticipant, ChatMessage } from '../types/game';
 import { isGameEligibleForMode } from '../data/games/registry';
 import { useAuth } from './AuthContext';
 import { useToast } from './ToastContext';
+import { api } from '../services/api';
+import { socketService } from '../services/socket';
 
 interface CreateRoomParams {
-  code?: string;
   name: string;
   mode: 'couple' | 'friend';
   selectedGameId: string;
@@ -14,141 +15,74 @@ interface CreateRoomParams {
 interface RoomContextType {
   currentRoom: RoomSession | null;
   allRooms: Record<string, RoomSession>;
-  createRoom: (params: CreateRoomParams) => RoomSession;
-  joinRoom: (code: string) => { success: boolean; error?: string };
-  leaveRoom: () => void;
+  isRoomLoading: boolean;
+  roomError: string | null;
+  createRoom: (params: CreateRoomParams) => Promise<RoomSession>;
+  joinRoom: (code: string) => Promise<{ success: boolean; error?: string; room?: RoomSession }>;
+  leaveRoom: () => Promise<void>;
   getRoomByCode: (code: string) => RoomSession | undefined;
-  toggleReady: (participantId?: string) => void;
-  setRoomGame: (gameId: string) => { success: boolean; error?: string };
-  voteForGame: (gameId: string) => void;
+  fetchRoom: (code: string) => Promise<RoomSession | null>;
+  toggleReady: (participantId?: string) => Promise<void>;
+  setRoomGame: (gameId: string) => Promise<{ success: boolean; error?: string }>;
+  voteForGame: (gameId: string) => Promise<void>;
   sendChatMessage: (text: string) => void;
   sendEmojiReaction: (emoji: string) => void;
-  addDemoPlayer: () => void;
-  removeDemoPlayer: (participantId: string) => void;
   setRoomStatus: (status: 'lobby' | 'playing' | 'results') => void;
   canStartGame: () => { canStart: boolean; reason?: string };
+  refreshCurrentRoom: () => Promise<void>;
 }
 
-const SEEDED_ROOMS: Record<string, RoomSession> = {
-  LOVE22: {
-    code: 'LOVE22',
-    name: 'Cozy Evening Lounge',
-    mode: 'couple',
-    maxPlayers: 2,
-    selectedGameId: 'between-us',
-    hostId: 'dev-user-01',
-    hostName: 'Alex Rivera',
-    participants: [
-      {
-        id: 'dev-user-01',
-        name: 'Alex Rivera',
-        avatarInitials: 'AR',
-        avatarColor: 'bg-[#9670E8]',
-        isHost: true,
-        isReady: true,
-      },
-      {
-        id: 'demo-partner-02',
-        name: 'Sam Patel',
-        avatarInitials: 'SP',
-        avatarColor: 'bg-[#D94C65]',
-        isHost: false,
-        isReady: true,
-        isDemo: true,
-      },
-    ],
-    gameVotes: { 'between-us': ['dev-user-01', 'demo-partner-02'] },
-    chatMessages: [
-      {
-        id: 'msg-1',
-        senderId: 'system',
-        senderName: 'System',
-        text: 'Room LOVE22 created in Couple Mode (2 Players max).',
-        timestamp: '10:00 AM',
-        isSystem: true,
-      },
-      {
-        id: 'msg-2',
-        senderId: 'demo-partner-02',
-        senderName: 'Sam',
-        text: 'Ready for deep questions tonight! 💜',
-        timestamp: '10:01 AM',
-      },
-    ],
-    status: 'lobby',
-    createdAt: '2026-10-30T10:00:00Z',
-  },
-  PLAY69: {
-    code: 'PLAY69',
-    name: 'Friday Banter Squad',
-    mode: 'friend',
-    maxPlayers: 4,
-    selectedGameId: 'uno-style',
-    hostId: 'dev-user-01',
-    hostName: 'Alex Rivera',
-    participants: [
-      {
-        id: 'dev-user-01',
-        name: 'Alex Rivera',
-        avatarInitials: 'AR',
-        avatarColor: 'bg-[#9670E8]',
-        isHost: true,
-        isReady: true,
-      },
-      {
-        id: 'demo-friend-02',
-        name: 'Leo Vance',
-        avatarInitials: 'LV',
-        avatarColor: 'bg-[#3B82F6]',
-        isHost: false,
-        isReady: true,
-        isDemo: true,
-      },
-      {
-        id: 'demo-friend-03',
-        name: 'Zara Chen',
-        avatarInitials: 'ZC',
-        avatarColor: 'bg-[#10B981]',
-        isHost: false,
-        isReady: true,
-        isDemo: true,
-      },
-      {
-        id: 'demo-friend-04',
-        name: 'Kai Miller',
-        avatarInitials: 'KM',
-        avatarColor: 'bg-[#F59E0B]',
-        isHost: false,
-        isReady: true,
-        isDemo: true,
-      },
-    ],
-    gameVotes: {
-      'uno-style': ['dev-user-01', 'demo-friend-03'],
-      'blind-ranking': ['demo-friend-02'],
-      'kabza': ['demo-friend-04'],
-    },
-    chatMessages: [
-      {
-        id: 'msg-f1',
-        senderId: 'system',
-        senderName: 'System',
-        text: 'Room PLAY69 initialized in Friend Mode (4 Players).',
-        timestamp: '10:15 AM',
-        isSystem: true,
-      },
-      {
-        id: 'msg-f2',
-        senderId: 'demo-friend-02',
-        senderName: 'Leo',
-        text: 'Whoever draws +4 is getting no mercy tonight 😂',
-        timestamp: '10:16 AM',
-      },
-    ],
-    status: 'lobby',
-    createdAt: '2026-10-30T10:15:00Z',
-  },
-};
+function formatSnapshotToRoomSession(snapshot: any): RoomSession {
+  return {
+    code: snapshot.code,
+    name: snapshot.name,
+    mode: (snapshot.mode || 'couple').toLowerCase() as 'couple' | 'friend',
+    maxPlayers: snapshot.maxPlayers || (snapshot.mode?.toLowerCase() === 'couple' ? 2 : 4),
+    selectedGameId:
+      snapshot.selectedGameId ||
+      (snapshot.mode?.toLowerCase() === 'couple' ? 'between-us' : 'uno-style'),
+    hostId: snapshot.hostId,
+    hostName: snapshot.hostName || snapshot.host?.displayName || 'Host',
+    participants: (snapshot.participants || []).map((p: any) => ({
+      id: p.userId || p.id,
+      name: p.displayName || p.name || 'Player',
+      avatarInitials:
+        p.avatarInitials ||
+        (p.displayName || p.name
+          ? (p.displayName || p.name).substring(0, 2).toUpperCase()
+          : 'PL'),
+      avatarColor: p.avatarColor || 'bg-[#9670E8]',
+      isHost:
+        p.role === 'HOST' ||
+        p.isHost ||
+        (snapshot.hostId && (p.userId || p.id) === snapshot.hostId),
+      isReady: p.isReady ?? false,
+      isDemo: false,
+      isOnline: p.isOnline ?? true,
+    })),
+    gameVotes: snapshot.gameVotes || {},
+    chatMessages: (snapshot.chatMessages || snapshot.messages || []).map((m: any) => ({
+      id: m.id,
+      senderId: m.senderId,
+      senderName: m.senderName || (m.sender ? m.sender.displayName : 'System'),
+      text: m.text || m.message,
+      timestamp:
+        m.timestamp ||
+        new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      isSystem: m.isSystem || m.senderId === 'system',
+    })),
+    status:
+      snapshot.status === 'IN_PROGRESS'
+        ? 'playing'
+        : snapshot.status === 'COMPLETED'
+        ? 'results'
+        : 'lobby',
+    createdAt:
+      typeof snapshot.createdAt === 'string'
+        ? snapshot.createdAt
+        : new Date(snapshot.createdAt || Date.now()).toISOString(),
+  };
+}
 
 const RoomContext = createContext<RoomContextType | undefined>(undefined);
 
@@ -156,8 +90,10 @@ export const RoomProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const { user } = useAuth();
   const { addToast } = useToast();
 
-  const [allRooms, setAllRooms] = useState<Record<string, RoomSession>>(SEEDED_ROOMS);
+  const [allRooms, setAllRooms] = useState<Record<string, RoomSession>>({});
   const [currentRoomCode, setCurrentRoomCode] = useState<string | null>(null);
+  const [isRoomLoading, setIsRoomLoading] = useState(false);
+  const [roomError, setRoomError] = useState<string | null>(null);
 
   const currentRoom = useMemo(
     () => (currentRoomCode ? allRooms[currentRoomCode] || null : null),
@@ -169,142 +105,358 @@ export const RoomProvider: React.FC<{ children: React.ReactNode }> = ({ children
     [allRooms]
   );
 
-  const createRoom = useCallback(
-    ({ code, name, mode, selectedGameId }: CreateRoomParams): RoomSession => {
-      const roomCode =
-        code?.toUpperCase() || Math.random().toString(36).substring(2, 8).toUpperCase();
-      const hostId = user?.id || 'dev-host-01';
-      const hostName = user?.name || 'Alex Rivera';
+  // Initialize Socket.IO connection when user is authenticated
+  useEffect(() => {
+    if (user) {
+      socketService.connect();
+    } else {
+      socketService.disconnect();
+    }
+  }, [user]);
 
-      const initialParticipants: RoomParticipant[] = [
-        {
-          id: hostId,
-          name: hostName,
-          avatarInitials: user?.avatarInitials || 'AR',
-          avatarColor: user?.avatarColor || 'bg-[#9670E8]',
-          isHost: true,
-          isReady: true,
-        },
-      ];
+  // Handle Socket.IO events for active room
+  useEffect(() => {
+    if (!currentRoomCode) return;
 
-      // Add default seeded demo partner if Couple Mode
-      if (mode === 'couple') {
-        initialParticipants.push({
-          id: 'demo-partner-02',
-          name: 'Sam Patel',
-          avatarInitials: 'SP',
-          avatarColor: 'bg-[#D94C65]',
-          isHost: false,
-          isReady: true,
-          isDemo: true,
+    // Listen to real-time state updates
+    const unsubState = socketService.on('room:state', (snapshot: any) => {
+      const formatted = formatSnapshotToRoomSession(snapshot);
+      setAllRooms((prev) => ({ ...prev, [formatted.code]: formatted }));
+    });
+
+    const unsubJoined = socketService.on('room:player:joined', ({ participant }: any) => {
+      setAllRooms((prev) => {
+        const room = prev[currentRoomCode];
+        if (!room) return prev;
+        const exists = room.participants.some(
+          (p) => p.id === (participant.userId || participant.id)
+        );
+        if (exists) return prev;
+
+        const newP: RoomParticipant = {
+          id: participant.userId || participant.id,
+          name: participant.displayName || participant.name || 'Player',
+          avatarInitials: participant.avatarInitials || 'PL',
+          avatarColor: participant.avatarColor || 'bg-[#9670E8]',
+          isHost: participant.role === 'HOST' || participant.isHost,
+          isReady: participant.isReady ?? false,
+          isOnline: true,
+        };
+
+        return {
+          ...prev,
+          [currentRoomCode]: {
+            ...room,
+            participants: [...room.participants, newP],
+          },
+        };
+      });
+    });
+
+    const unsubLeft = socketService.on(
+      'room:player:left',
+      ({ userId, newHostId, roomClosed }: any) => {
+        if (roomClosed) {
+          addToast('The host closed this room.', { type: 'info' });
+          setCurrentRoomCode(null);
+          return;
+        }
+
+        setAllRooms((prev) => {
+          const room = prev[currentRoomCode];
+          if (!room) return prev;
+          const updatedParticipants = room.participants
+            .filter((p) => p.id !== userId)
+            .map((p) => (newHostId && p.id === newHostId ? { ...p, isHost: true } : p));
+
+          return {
+            ...prev,
+            [currentRoomCode]: {
+              ...room,
+              hostId: newHostId || room.hostId,
+              participants: updatedParticipants,
+            },
+          };
         });
       }
+    );
 
-      const newRoom: RoomSession = {
-        code: roomCode,
-        name: name.trim() || (mode === 'couple' ? 'Cozy Couple Room' : 'Party Squad Arena'),
-        mode,
-        maxPlayers: mode === 'couple' ? 2 : 4,
-        selectedGameId,
-        hostId,
-        hostName,
-        participants: initialParticipants,
-        gameVotes: { [selectedGameId]: [hostId] },
-        chatMessages: [
-          {
-            id: `msg-${Date.now()}`,
-            senderId: 'system',
-            senderName: 'System',
-            text: `Room ${roomCode} created in ${mode === 'couple' ? 'Couple' : 'Friend'} Mode.`,
-            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            isSystem: true,
+    const unsubReady = socketService.on(
+      'room:player:ready',
+      ({ userId, isReady, roomStatus }: any) => {
+        setAllRooms((prev) => {
+          const room = prev[currentRoomCode];
+          if (!room) return prev;
+          const updatedParticipants = room.participants.map((p) =>
+            p.id === userId ? { ...p, isReady } : p
+          );
+
+          return {
+            ...prev,
+            [currentRoomCode]: {
+              ...room,
+              status: roomStatus === 'IN_PROGRESS' ? 'playing' : room.status,
+              participants: updatedParticipants,
+            },
+          };
+        });
+      }
+    );
+
+    const unsubVoted = socketService.on('room:game:voted', ({ votes }: any) => {
+      setAllRooms((prev) => {
+        const room = prev[currentRoomCode];
+        if (!room) return prev;
+        return {
+          ...prev,
+          [currentRoomCode]: {
+            ...room,
+            gameVotes: votes,
           },
-        ],
-        status: 'lobby',
-        createdAt: new Date().toISOString(),
-      };
+        };
+      });
+    });
 
-      setAllRooms((prev) => ({ ...prev, [roomCode]: newRoom }));
-      setCurrentRoomCode(roomCode);
-      return newRoom;
+    const unsubSelected = socketService.on('room:game:selected', ({ selectedGameId }: any) => {
+      setAllRooms((prev) => {
+        const room = prev[currentRoomCode];
+        if (!room) return prev;
+        return {
+          ...prev,
+          [currentRoomCode]: {
+            ...room,
+            selectedGameId,
+          },
+        };
+      });
+    });
+
+    const unsubChat = socketService.on('room:chat:new', (msg: any) => {
+      setAllRooms((prev) => {
+        const room = prev[currentRoomCode];
+        if (!room) return prev;
+        const newMsg: ChatMessage = {
+          id: msg.id || `msg-${Date.now()}`,
+          senderId: msg.senderId,
+          senderName: msg.senderName,
+          text: msg.text || msg.message,
+          timestamp:
+            msg.timestamp ||
+            new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          isSystem: msg.isSystem,
+        };
+
+        // Prevent duplicate messages
+        if (room.chatMessages.some((m) => m.id === newMsg.id)) {
+          return prev;
+        }
+
+        return {
+          ...prev,
+          [currentRoomCode]: {
+            ...room,
+            chatMessages: [...room.chatMessages, newMsg],
+          },
+        };
+      });
+    });
+
+    const unsubReaction = socketService.on('room:reaction:new', ({ senderId, reaction }: any) => {
+      const room = allRooms[currentRoomCode];
+      const sender = room?.participants.find((p) => p.id === senderId);
+      addToast(`${sender?.name || 'Player'} reacted: ${reaction}`, { type: 'info' });
+    });
+
+    const unsubPresence = socketService.on('room:presence:update', ({ onlineUserIds }: any) => {
+      setAllRooms((prev) => {
+        const room = prev[currentRoomCode];
+        if (!room) return prev;
+        const onlineSet = new Set(onlineUserIds || []);
+        const updated = room.participants.map((p) => ({
+          ...p,
+          isOnline: onlineSet.has(p.id),
+        }));
+        return {
+          ...prev,
+          [currentRoomCode]: {
+            ...room,
+            participants: updated,
+          },
+        };
+      });
+    });
+
+    const unsubLaunch = socketService.on('room:start:launch', ({ gameId }: any) => {
+      addToast(`Launching ${gameId.toUpperCase()}!`, { type: 'success' });
+      setAllRooms((prev) => {
+        const room = prev[currentRoomCode];
+        if (!room) return prev;
+        return {
+          ...prev,
+          [currentRoomCode]: {
+            ...room,
+            status: 'playing',
+          },
+        };
+      });
+    });
+
+    return () => {
+      unsubState();
+      unsubJoined();
+      unsubLeft();
+      unsubReady();
+      unsubVoted();
+      unsubSelected();
+      unsubChat();
+      unsubReaction();
+      unsubPresence();
+      unsubLaunch();
+    };
+  }, [currentRoomCode, allRooms, addToast]);
+
+  const refreshCurrentRoom = useCallback(async () => {
+    if (!currentRoomCode) return;
+    try {
+      const snapshot = await api.rooms.getByCode(currentRoomCode);
+      const formatted = formatSnapshotToRoomSession(snapshot);
+      setAllRooms((prev) => ({ ...prev, [formatted.code]: formatted }));
+    } catch (err: any) {
+      console.warn('Could not refresh room from server:', err);
+    }
+  }, [currentRoomCode]);
+
+  const fetchRoom = useCallback(
+    async (code: string): Promise<RoomSession | null> => {
+      const cleanCode = code.trim().toUpperCase();
+      if (!cleanCode) return null;
+
+      try {
+        const snapshot = await api.rooms.getByCode(cleanCode);
+        const formatted = formatSnapshotToRoomSession(snapshot);
+        setAllRooms((prev) => ({ ...prev, [formatted.code]: formatted }));
+        return formatted;
+      } catch {
+        return null;
+      }
+    },
+    []
+  );
+
+  const createRoom = useCallback(
+    async ({ name, mode, selectedGameId }: CreateRoomParams): Promise<RoomSession> => {
+      if (!user) {
+        throw new Error('You must be signed in to create a multiplayer room.');
+      }
+
+      setIsRoomLoading(true);
+      setRoomError(null);
+
+      try {
+        const roomName =
+          name.trim() || (mode === 'couple' ? 'Cozy Couple Lounge' : 'Game Night Squad');
+        const backendSnapshot = await api.rooms.create({
+          name: roomName,
+          mode,
+          selectedGameId,
+        });
+
+        const formatted = formatSnapshotToRoomSession(backendSnapshot);
+        setAllRooms((prev) => ({ ...prev, [formatted.code]: formatted }));
+        setCurrentRoomCode(formatted.code);
+
+        // Join socket channel
+        socketService.emit('room:join', { roomId: formatted.code, code: formatted.code });
+
+        return formatted;
+      } catch (err: any) {
+        const msg =
+          err?.message || 'Failed to create multiplayer room. Please verify backend connectivity.';
+        setRoomError(msg);
+        throw new Error(msg);
+      } finally {
+        setIsRoomLoading(false);
+      }
     },
     [user]
   );
 
   const joinRoom = useCallback(
-    (code: string): { success: boolean; error?: string } => {
+    async (
+      code: string
+    ): Promise<{ success: boolean; error?: string; room?: RoomSession }> => {
       const cleanCode = code.trim().toUpperCase();
-      const room = allRooms[cleanCode];
 
-      if (!room) {
+      if (!cleanCode || cleanCode.length < 4) {
         return {
           success: false,
-          error: `Room "${cleanCode}" was not found. Please verify the code or try demo code PLAY69 or LOVE22.`,
+          error: 'Please enter a valid room code.',
         };
       }
 
-      const playerId = user?.id || 'guest-user-01';
-      const playerName = user?.name || 'Guest Player';
-
-      // Check if already in room
-      const alreadyJoined = room.participants.some((p) => p.id === playerId);
-      if (!alreadyJoined) {
-        if (room.participants.length >= room.maxPlayers) {
-          return {
-            success: false,
-            error: `Room ${cleanCode} is full (Maximum ${room.maxPlayers} players allowed for ${room.mode === 'couple' ? 'Couple' : 'Friend'} Mode).`,
-          };
-        }
-
-        const newParticipant: RoomParticipant = {
-          id: playerId,
-          name: playerName,
-          avatarInitials: user?.avatarInitials || 'GP',
-          avatarColor: user?.avatarColor || 'bg-[#865CE3]',
-          isHost: false,
-          isReady: false,
+      if (!user) {
+        return {
+          success: false,
+          error: 'You must be signed in to join a multiplayer room.',
         };
-
-        const updatedRoom: RoomSession = {
-          ...room,
-          participants: [...room.participants, newParticipant],
-          chatMessages: [
-            ...room.chatMessages,
-            {
-              id: `msg-${Date.now()}`,
-              senderId: 'system',
-              senderName: 'System',
-              text: `${playerName} connected to the room.`,
-              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-              isSystem: true,
-            },
-          ],
-        };
-
-        setAllRooms((prev) => ({ ...prev, [cleanCode]: updatedRoom }));
       }
 
-      setCurrentRoomCode(cleanCode);
-      return { success: true };
+      setIsRoomLoading(true);
+      setRoomError(null);
+
+      try {
+        const backendSnapshot = await api.rooms.join(cleanCode);
+        const snapshotData = backendSnapshot.room || backendSnapshot;
+        const formatted = formatSnapshotToRoomSession(snapshotData);
+
+        setAllRooms((prev) => ({ ...prev, [formatted.code]: formatted }));
+        setCurrentRoomCode(formatted.code);
+
+        // Join socket channel
+        socketService.emit('room:join', { roomId: formatted.code, code: formatted.code });
+
+        return { success: true, room: formatted };
+      } catch (err: any) {
+        const msg = err?.message || `Room "${cleanCode}" could not be found or is unavailable.`;
+        setRoomError(msg);
+        return {
+          success: false,
+          error: msg,
+        };
+      } finally {
+        setIsRoomLoading(false);
+      }
     },
-    [allRooms, user]
+    [user]
   );
 
-  const leaveRoom = useCallback(() => {
-    setCurrentRoomCode(null);
-  }, []);
+  const leaveRoom = useCallback(async () => {
+    if (currentRoomCode) {
+      const code = currentRoomCode;
+      setCurrentRoomCode(null);
+      try {
+        socketService.emit('room:leave', { roomId: code });
+        await api.rooms.leave(code);
+      } catch (err) {
+        console.warn('Error notifying room leave to server:', err);
+      }
+    }
+  }, [currentRoomCode]);
 
   const toggleReady = useCallback(
-    (participantId?: string) => {
+    async (participantId?: string) => {
       if (!currentRoom) return;
       const targetId = participantId || user?.id || currentRoom.hostId;
+      const currentParticipant = currentRoom.participants.find((p) => p.id === targetId);
+      const nextReady = !currentParticipant?.isReady;
 
+      // Optimistic update
       setAllRooms((prev) => {
         const room = prev[currentRoom.code];
         if (!room) return prev;
 
         const updatedParticipants = room.participants.map((p) =>
-          p.id === targetId ? { ...p, isReady: !p.isReady } : p
+          p.id === targetId ? { ...p, isReady: nextReady } : p
         );
 
         return {
@@ -315,12 +467,24 @@ export const RoomProvider: React.FC<{ children: React.ReactNode }> = ({ children
           },
         };
       });
+
+      // Emit to socket & backend API
+      socketService.emit('room:ready:update', {
+        roomId: currentRoom.code,
+        isReady: nextReady,
+      });
+
+      try {
+        await api.rooms.toggleReady(currentRoom.code, nextReady);
+      } catch (err) {
+        console.warn('Failed to persist ready toggle:', err);
+      }
     },
     [currentRoom, user]
   );
 
   const setRoomGame = useCallback(
-    (gameId: string): { success: boolean; error?: string } => {
+    async (gameId: string): Promise<{ success: boolean; error?: string }> => {
       if (!currentRoom) return { success: false, error: 'No active room.' };
 
       if (!isGameEligibleForMode(gameId, currentRoom.mode)) {
@@ -343,13 +507,20 @@ export const RoomProvider: React.FC<{ children: React.ReactNode }> = ({ children
         };
       });
 
-      return { success: true };
+      socketService.emit('room:game:select', { roomId: currentRoom.code, gameId });
+
+      try {
+        await api.rooms.selectGame(currentRoom.code, gameId);
+        return { success: true };
+      } catch (err: any) {
+        return { success: false, error: err?.message || 'Failed to select game on server' };
+      }
     },
     [currentRoom]
   );
 
   const voteForGame = useCallback(
-    (gameId: string) => {
+    async (gameId: string) => {
       if (!currentRoom) return;
       const voterId = user?.id || currentRoom.hostId;
 
@@ -358,33 +529,29 @@ export const RoomProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (!room) return prev;
 
         const votes = { ...room.gameVotes };
-        // Remove voter from all other votes
+        // Remove voter from other votes
         Object.keys(votes).forEach((k) => {
           votes[k] = votes[k].filter((id) => id !== voterId);
         });
 
-        // Add vote
         votes[gameId] = [...(votes[gameId] || []), voterId];
-
-        // Find game with most votes to auto-select as top candidate
-        let maxVotes = 0;
-        let topGame = room.selectedGameId;
-        Object.entries(votes).forEach(([gId, voters]) => {
-          if (voters.length > maxVotes) {
-            maxVotes = voters.length;
-            topGame = gId;
-          }
-        });
 
         return {
           ...prev,
           [room.code]: {
             ...room,
             gameVotes: votes,
-            selectedGameId: topGame,
           },
         };
       });
+
+      socketService.emit('room:game:vote', { roomId: currentRoom.code, gameId });
+
+      try {
+        await api.rooms.voteGame(currentRoom.code, gameId);
+      } catch (err) {
+        console.warn('Failed to persist game vote:', err);
+      }
     },
     [currentRoom, user]
   );
@@ -392,99 +559,17 @@ export const RoomProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const sendChatMessage = useCallback(
     (text: string) => {
       if (!currentRoom || !text.trim()) return;
-      const senderName = user?.name || 'Alex';
-      const senderId = user?.id || 'host-user';
+      const clean = text.trim();
 
-      const newMsg: ChatMessage = {
-        id: `chat-${Date.now()}`,
-        senderId,
-        senderName,
-        text: text.trim(),
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      };
-
-      setAllRooms((prev) => {
-        const room = prev[currentRoom.code];
-        if (!room) return prev;
-        return {
-          ...prev,
-          [room.code]: {
-            ...room,
-            chatMessages: [...room.chatMessages, newMsg],
-          },
-        };
-      });
+      socketService.emit('room:chat:send', { roomId: currentRoom.code, message: clean });
     },
-    [currentRoom, user]
+    [currentRoom]
   );
 
   const sendEmojiReaction = useCallback(
     (emoji: string) => {
-      sendChatMessage(emoji);
-    },
-    [sendChatMessage]
-  );
-
-  const addDemoPlayer = useCallback(() => {
-    if (!currentRoom) return;
-    if (currentRoom.participants.length >= currentRoom.maxPlayers) {
-      addToast('Room is at maximum player capacity!', { type: 'error' });
-      return;
-    }
-
-    const availableNames = [
-      { name: 'Jordan Vance', initials: 'JV', color: 'bg-[#0369A1]' },
-      { name: 'Maya Lin', initials: 'ML', color: 'bg-[#9D174D]' },
-      { name: 'Chloe Ray', initials: 'CR', color: 'bg-[#854D0E]' },
-    ];
-
-    const currentNames = new Set(currentRoom.participants.map((p) => p.name));
-    const nextPick = availableNames.find((p) => !currentNames.has(p.name)) || {
-      name: `Player ${currentRoom.participants.length + 1}`,
-      initials: `P${currentRoom.participants.length + 1}`,
-      color: 'bg-[#593B91]',
-    };
-
-    const newParticipant: RoomParticipant = {
-      id: `demo-bot-${Date.now()}`,
-      name: nextPick.name,
-      avatarInitials: nextPick.initials,
-      avatarColor: nextPick.color,
-      isHost: false,
-      isReady: true,
-      isDemo: true,
-    };
-
-    setAllRooms((prev) => {
-      const room = prev[currentRoom.code];
-      if (!room) return prev;
-      return {
-        ...prev,
-        [room.code]: {
-          ...room,
-          participants: [...room.participants, newParticipant],
-        },
-      };
-    });
-
-    addToast(`${nextPick.name} joined the room!`, { type: 'success' });
-  }, [currentRoom, addToast]);
-
-  const removeDemoPlayer = useCallback(
-    (participantId: string) => {
       if (!currentRoom) return;
-
-      setAllRooms((prev) => {
-        const room = prev[currentRoom.code];
-        if (!room) return prev;
-        return {
-          ...prev,
-          [room.code]: {
-            ...room,
-            participants: room.participants.filter((p) => p.id !== participantId),
-          },
-        };
-      });
+      socketService.emit('room:reaction:send', { roomId: currentRoom.code, reaction: emoji });
     },
     [currentRoom]
   );
@@ -553,19 +638,21 @@ export const RoomProvider: React.FC<{ children: React.ReactNode }> = ({ children
       value={{
         currentRoom,
         allRooms,
+        isRoomLoading,
+        roomError,
         createRoom,
         joinRoom,
         leaveRoom,
         getRoomByCode,
+        fetchRoom,
         toggleReady,
         setRoomGame,
         voteForGame,
         sendChatMessage,
         sendEmojiReaction,
-        addDemoPlayer,
-        removeDemoPlayer,
         setRoomStatus,
         canStartGame,
+        refreshCurrentRoom,
       }}
     >
       {children}

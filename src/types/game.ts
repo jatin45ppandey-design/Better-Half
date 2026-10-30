@@ -73,6 +73,7 @@ export interface RoomParticipant {
   isHost: boolean;
   isReady: boolean;
   isDemo?: boolean;
+  isOnline?: boolean;
 }
 
 export interface ChatMessage {

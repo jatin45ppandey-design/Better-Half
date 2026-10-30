@@ -4,6 +4,7 @@ import { AuthProvider } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
 import { RoomProvider } from './context/RoomContext';
 import { ToastContainer } from './components/ui/Toast';
+import { ProtectedRoute } from './components/auth/ProtectedRoute';
 
 // Core routes loaded directly for instant initial paint
 import { LandingPage } from './pages/LandingPage';
@@ -42,21 +43,92 @@ export function App() {
           <RoomProvider>
             <Suspense fallback={<RouteLoadingFallback />}>
               <Routes>
+                {/* Public Routes */}
                 <Route path="/" element={<LandingPage />} />
                 <Route path="/login" element={<LoginPage />} />
                 <Route path="/signup" element={<SignupPage />} />
-                <Route path="/dashboard" element={<DashboardPage />} />
-                <Route path="/room/:roomCode" element={<RoomLobbyPage />} />
-                <Route path="/game/:gameId" element={<GameArenaPage />} />
-                
-                {/* Phase 3 Supporting Application Routes */}
-                <Route path="/profile" element={<ProfilePage />} />
-                <Route path="/friends" element={<FriendsPage />} />
-                <Route path="/invitations" element={<InvitationsPage />} />
-                <Route path="/history" element={<MatchHistoryPage />} />
-                <Route path="/rivalry" element={<RivalryPage />} />
-                <Route path="/settings" element={<SettingsPage />} />
-                <Route path="/admin" element={<AdminDashboardPage />} />
+
+                {/* Protected Application Routes */}
+                <Route
+                  path="/dashboard"
+                  element={
+                    <ProtectedRoute>
+                      <DashboardPage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/room/:roomCode"
+                  element={
+                    <ProtectedRoute>
+                      <RoomLobbyPage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/game/:gameId"
+                  element={
+                    <ProtectedRoute>
+                      <GameArenaPage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/profile"
+                  element={
+                    <ProtectedRoute>
+                      <ProfilePage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/friends"
+                  element={
+                    <ProtectedRoute>
+                      <FriendsPage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/invitations"
+                  element={
+                    <ProtectedRoute>
+                      <InvitationsPage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/history"
+                  element={
+                    <ProtectedRoute>
+                      <MatchHistoryPage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/rivalry"
+                  element={
+                    <ProtectedRoute>
+                      <RivalryPage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/settings"
+                  element={
+                    <ProtectedRoute>
+                      <SettingsPage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/admin"
+                  element={
+                    <ProtectedRoute>
+                      <AdminDashboardPage />
+                    </ProtectedRoute>
+                  }
+                />
 
                 <Route path="*" element={<NotFoundPage />} />
               </Routes>

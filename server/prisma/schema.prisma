@@ -1,0 +1,204 @@
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// -------------------------------------------------------------
+// PlaySpace Phase 1 Models: Profiles, Settings, Social Graph
+// -------------------------------------------------------------
+
+model UserProfile {
+  id             String         @id // Matches Supabase Auth user UUID
+  username       String         @unique
+  displayName    String
+  avatarUrl      String?
+  avatarInitials String?
+  avatarColor    String?        @default("#9670E8")
+  bio            String?        @default("")
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  settings       UserSettings?
+
+  // Social relationships
+  sentFriendRequests     FriendRequest[] @relation("SentFriendRequests")
+  receivedFriendRequests FriendRequest[] @relation("ReceivedFriendRequests")
+  friendships            Friendship[]    @relation("UserFriendships")
+  friendshipsAsFriend    Friendship[]    @relation("FriendFriendships")
+  blocksInitiated        BlockedUser[]   @relation("BlockerUsers")
+  blocksReceived         BlockedUser[]   @relation("BlockedUsers")
+
+  // Phase 2 Room & Multiplayer relationships
+  hostedRooms            Room[]          @relation("HostedRooms")
+  roomParticipations     RoomParticipant[] @relation("RoomParticipations")
+  sentRoomInvitations    RoomInvitation[] @relation("SentRoomInvitations")
+  receivedRoomInvitations RoomInvitation[] @relation("ReceivedRoomInvitations")
+  roomMessages           RoomMessage[]   @relation("RoomMessages")
+  gameVotes              GameVote[]      @relation("GameVotes")
+
+  @@index([username])
+  @@index([displayName])
+}
+
+model UserSettings {
+  id                 String      @id @default(uuid())
+  userId             String      @unique
+  showOnlineStatus   Boolean     @default(true)
+  allowDirectInvites Boolean     @default(true)
+  publicMatchHistory Boolean     @default(true)
+  ghostMode          Boolean     @default(false)
+  soundMuted         Boolean     @default(false)
+  volume             Float       @default(0.8)
+  reducedMotion      Boolean     @default(false)
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+
+  user UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model FriendRequest {
+  id         String      @id @default(uuid())
+  senderId   String
+  receiverId String
+  status     String      @default("PENDING") // PENDING, ACCEPTED, REJECTED, CANCELLED
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+
+  sender   UserProfile @relation("SentFriendRequests", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver UserProfile @relation("ReceivedFriendRequests", fields: [receiverId], references: [id], onDelete: Cascade)
+
+  @@unique([senderId, receiverId])
+  @@index([senderId])
+  @@index([receiverId])
+  @@index([status])
+}
+
+model Friendship {
+  id        String      @id @default(uuid())
+  userId    String
+  friendId  String
+  createdAt DateTime    @default(now())
+
+  user   UserProfile @relation("UserFriendships", fields: [userId], references: [id], onDelete: Cascade)
+  friend UserProfile @relation("FriendFriendships", fields: [friendId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, friendId])
+  @@index([userId])
+  @@index([friendId])
+}
+
+model BlockedUser {
+  id            String      @id @default(uuid())
+  blockerId     String
+  blockedUserId String
+  createdAt     DateTime    @default(now())
+
+  blocker     UserProfile @relation("BlockerUsers", fields: [blockerId], references: [id], onDelete: Cascade)
+  blockedUser UserProfile @relation("BlockedUsers", fields: [blockedUserId], references: [id], onDelete: Cascade)
+
+  @@unique([blockerId, blockedUserId])
+  @@index([blockerId])
+  @@index([blockedUserId])
+}
+
+// -------------------------------------------------------------
+// PlaySpace Phase 2 Models: Rooms, Lobby, Invitations, Chat
+// -------------------------------------------------------------
+
+model Room {
+  id             String            @id @default(uuid())
+  code           String            @unique // 6-character room code (e.g. LOVE22, PLAY69)
+  hostId         String
+  name           String
+  mode           String            // "COUPLE" | "FRIEND"
+  status         String            @default("WAITING") // WAITING, READY_TO_START, IN_PROGRESS, COMPLETED, CLOSED, EXPIRED
+  selectedGameId String?
+  maxPlayers     Int               @default(2)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  expiresAt      DateTime
+
+  host           UserProfile       @relation("HostedRooms", fields: [hostId], references: [id], onDelete: Cascade)
+  participants   RoomParticipant[]
+  invitations    RoomInvitation[]
+  messages       RoomMessage[]
+  gameVotes      GameVote[]
+
+  @@index([code])
+  @@index([hostId])
+  @@index([status])
+  @@index([expiresAt])
+}
+
+model RoomParticipant {
+  id        String      @id @default(uuid())
+  roomId    String
+  userId    String
+  role      String      @default("PLAYER") // HOST, PLAYER
+  isReady   Boolean     @default(false)
+  joinedAt  DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  leftAt    DateTime?
+
+  room Room        @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user UserProfile @relation("RoomParticipations", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([roomId, userId])
+  @@index([roomId])
+  @@index([userId])
+  @@index([role])
+}
+
+model RoomInvitation {
+  id         String      @id @default(uuid())
+  roomId     String
+  senderId   String
+  receiverId String
+  status     String      @default("PENDING") // PENDING, ACCEPTED, DECLINED, CANCELLED, EXPIRED
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+  expiresAt  DateTime
+
+  room     Room        @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  sender   UserProfile @relation("SentRoomInvitations", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver UserProfile @relation("ReceivedRoomInvitations", fields: [receiverId], references: [id], onDelete: Cascade)
+
+  @@unique([roomId, receiverId])
+  @@index([roomId])
+  @@index([receiverId])
+  @@index([status])
+}
+
+model RoomMessage {
+  id        String      @id @default(uuid())
+  roomId    String
+  senderId  String
+  message   String
+  createdAt DateTime    @default(now())
+
+  room   Room        @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  sender UserProfile @relation("RoomMessages", fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([roomId, createdAt])
+  @@index([senderId])
+}
+
+model GameVote {
+  id        String      @id @default(uuid())
+  roomId    String
+  userId    String
+  gameId    String
+  createdAt DateTime    @default(now())
+
+  room Room        @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user UserProfile @relation("GameVotes", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([roomId, userId])
+  @@index([roomId])
+  @@index([gameId])
+}
