@@ -4,7 +4,8 @@ import { prisma } from '../config/prisma.js';
 export async function checkAccountStatus(
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
+  options: { allowMissingProfile?: boolean } = {}
 ): Promise<void> {
   const userId = (req as any).user?.id;
   if (!userId) {
@@ -18,6 +19,14 @@ export async function checkAccountStatus(
     });
 
     if (!profile) {
+      // A newly authenticated Google user must be allowed through only the
+      // dedicated GET /profiles/me bootstrap route so its profile can be created.
+      // All other authenticated endpoints continue to fail closed.
+      if (options.allowMissingProfile) {
+        next();
+        return;
+      }
+
       res.status(403).json({
         success: false,
         error: 'User profile not found. Access denied.',
