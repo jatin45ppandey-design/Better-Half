@@ -19,13 +19,14 @@ export class BetweenUsEngine
 {
   readonly gameId = 'between-us';
 
-  private getEligibleQuestions(category: string, intensity: 1 | 2 | 3 | 4 | 5): BetweenUsQuestion[] {
-    const list = BETWEEN_US_QUESTIONS.filter((q) => {
+  private getEligibleQuestions(category: string, intensity: 1 | 2 | 3 | 4 | 5, customPool?: BetweenUsQuestion[]): BetweenUsQuestion[] {
+    const base = customPool && customPool.length > 0 ? customPool : BETWEEN_US_QUESTIONS;
+    const list = base.filter((q) => {
       const matchCat = category === 'All' || q.category === category;
       const matchInt = q.intensity <= intensity;
       return matchCat && matchInt;
     });
-    return list.length > 0 ? list : BETWEEN_US_QUESTIONS;
+    return list.length > 0 ? list : base;
   }
 
   createInitialState(params: {
@@ -33,6 +34,7 @@ export class BetweenUsEngine
     mode: 'couple' | 'friend';
     participants: GameParticipant[];
     rngSeed: string;
+    customQuestions?: any[];
   }): {
     state: BetweenUsPublicState;
     privateStates: Record<string, BetweenUsPrivateState>;
@@ -40,7 +42,17 @@ export class BetweenUsEngine
   } {
     const category = 'All';
     const intensity = 2;
-    const pool = this.getEligibleQuestions(category, intensity);
+    const customPool =
+      params.customQuestions && params.customQuestions.length > 0
+        ? params.customQuestions.map((q) => ({
+            id: q.id,
+            prompt: q.prompt,
+            category: q.category || 'Couple',
+            intensity: (q.intensity || 2) as any,
+          }))
+        : undefined;
+
+    const pool = this.getEligibleQuestions(category, intensity, customPool);
     const privateStates: Record<string, BetweenUsPrivateState> = {};
     const scores: Record<string, number> = {};
 
@@ -49,7 +61,7 @@ export class BetweenUsEngine
       scores[p.userId] = 0;
     });
 
-    const state: BetweenUsPublicState = {
+    const state: BetweenUsPublicState & { questionsPool?: any[] } = {
       category,
       intensity,
       questionIndex: 0,
@@ -59,6 +71,7 @@ export class BetweenUsEngine
       adultConsentUserIds: [],
       revealedAnswers: null,
       questionsAnsweredCount: 0,
+      questionsPool: customPool,
     };
 
     return {
@@ -140,7 +153,7 @@ export class BetweenUsEngine
       if (action.category) state.category = action.category;
       if (action.intensity) state.intensity = action.intensity;
 
-      const pool = this.getEligibleQuestions(state.category, state.intensity);
+      const pool = this.getEligibleQuestions(state.category, state.intensity, (state as any).questionsPool);
       state.currentQuestion = pool[state.questionIndex % pool.length];
 
       return {
@@ -199,7 +212,7 @@ export class BetweenUsEngine
     }
 
     if (action.type === 'NEXT_QUESTION') {
-      const pool = this.getEligibleQuestions(state.category, state.intensity);
+      const pool = this.getEligibleQuestions(state.category, state.intensity, (state as any).questionsPool);
       state.questionIndex = (state.questionIndex + 1) % pool.length;
       state.currentQuestion = pool[state.questionIndex];
       state.phase = 'ANSWERING';

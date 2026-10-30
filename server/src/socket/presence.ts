@@ -14,6 +14,10 @@ export class PresenceManager {
   // Default grace period: 15 seconds
   private gracePeriodMs: number;
 
+  getOnlineCount(): number {
+    return this.userSockets.size;
+  }
+
   constructor(gracePeriodMs = 15000) {
     this.gracePeriodMs = gracePeriodMs;
   }

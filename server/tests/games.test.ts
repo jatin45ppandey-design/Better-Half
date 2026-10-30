@@ -34,6 +34,31 @@ describe('PlaySpace Phase 3 — All 11 Server Game Engines & Real-time Integrati
   const tokenB = 'test-mock-token-user-p3-b';
 
   beforeAll(async () => {
+    // Mock userProfile for socket auth middleware
+    vi.spyOn(prisma.userProfile, 'findUnique').mockResolvedValue({
+      id: 'any-user',
+      accountStatus: 'ACTIVE',
+    } as any);
+
+    vi.spyOn(prisma.gameAction, 'findFirst').mockResolvedValue(null);
+    vi.spyOn(prisma.gameSession, 'update').mockResolvedValue({} as any);
+    vi.spyOn(prisma.gameConfiguration, 'findUnique').mockResolvedValue(null);
+    vi.spyOn(prisma, '$transaction').mockImplementation(async (arg: any) => {
+      if (typeof arg === 'function') {
+        return arg({
+          gameSession: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+          gameAction: { create: vi.fn().mockResolvedValue({}) },
+          gameSessionParticipant: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+          match: { findUnique: vi.fn().mockResolvedValue(null), create: vi.fn().mockResolvedValue({ id: 'm-1' }) },
+          matchParticipant: { create: vi.fn().mockResolvedValue({}) },
+          userGameStats: { upsert: vi.fn().mockResolvedValue({}) },
+          rivalryStats: { findUnique: vi.fn().mockResolvedValue(null), upsert: vi.fn().mockResolvedValue({}) },
+          userProfile: { findMany: vi.fn().mockResolvedValue([]) },
+        });
+      }
+      return [{}, {}];
+    });
+
     // Mock Prisma Room find for game session initialization
     vi.spyOn(prisma.room, 'findUnique').mockImplementation(async ({ where }: any) => {
       const code = where.code || 'COUPLE99';

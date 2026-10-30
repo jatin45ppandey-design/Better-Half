@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { supabase } from '../config/supabase.js';
-import { prisma } from '../config/prisma.js';
+import { checkAccountStatus } from './rbac.js';
 
 export async function requireAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
   const authHeader = req.headers.authorization;
@@ -32,16 +32,8 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
       user_metadata: { name: 'Test User' },
     };
 
-    if (testUserId.includes('suspended')) {
-      res.status(403).json({
-        success: false,
-        error: 'Your account has been suspended. Please contact platform support.',
-        code: 'ACCOUNT_SUSPENDED',
-      });
-      return;
-    }
-
-    next();
+    // Execute account status verification after identity is established
+    await checkAccountStatus(req, res, next);
     return;
   }
 
@@ -62,24 +54,8 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
       user_metadata: data.user.user_metadata,
     };
 
-    try {
-      const profile = await prisma.userProfile.findUnique({
-        where: { id: req.user.id },
-        select: { accountStatus: true },
-      });
-      if (profile && profile.accountStatus === 'SUSPENDED') {
-        res.status(403).json({
-          success: false,
-          error: 'Your account has been suspended. Please contact platform support.',
-          code: 'ACCOUNT_SUSPENDED',
-        });
-        return;
-      }
-    } catch {
-      // Ignore if DB check fails
-    }
-
-    next();
+    // Execute account status verification after identity is established
+    await checkAccountStatus(req, res, next);
   } catch (err) {
     console.error('Error during token verification:', err instanceof Error ? err.message : err);
     res.status(401).json({
@@ -88,4 +64,3 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     });
   }
 }
-

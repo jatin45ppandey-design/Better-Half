@@ -223,9 +223,20 @@ describe('PlaySpace Phase 4 — Match History, Stats, Rivalry, RBAC & Admin Suit
       const findSpy = vi.spyOn(prisma.match, 'findUnique');
       findSpy.mockResolvedValueOnce(null as any); // First call: does not exist yet
 
-      vi.spyOn(prisma.$transaction, 'impl' as any).mockImplementation(async (callback: any) => {
+      vi.spyOn(prisma.userProfile, 'findMany').mockResolvedValue([
+        { id: normalUserA.id, displayName: normalUserA.displayName, username: normalUserA.username, avatarUrl: null },
+        { id: normalUserB.id, displayName: normalUserB.displayName, username: normalUserB.username, avatarUrl: null },
+      ] as any);
+
+      vi.spyOn(prisma, '$transaction').mockImplementation(async (callback: any) => {
         if (typeof callback === 'function') {
           return callback({
+            userProfile: {
+              findMany: vi.fn().mockResolvedValue([
+                { id: normalUserA.id, displayName: normalUserA.displayName, username: normalUserA.username, avatarUrl: null },
+                { id: normalUserB.id, displayName: normalUserB.displayName, username: normalUserB.username, avatarUrl: null },
+              ]),
+            },
             match: {
               findUnique: vi.fn().mockResolvedValue(null),
               create: vi.fn().mockResolvedValue(mockMatchRecord),
@@ -428,6 +439,7 @@ describe('PlaySpace Phase 4 — Match History, Stats, Rivalry, RBAC & Admin Suit
     });
 
     it('allows verified admin to view overview metrics (200)', async () => {
+      vi.spyOn(prisma, '$queryRaw').mockResolvedValue([1] as any);
       vi.spyOn(prisma.userProfile, 'findUnique').mockResolvedValue(adminUser as any);
       vi.spyOn(prisma.appRole, 'findFirst').mockResolvedValue({
         id: 'role-1',

@@ -43,6 +43,7 @@ export interface IGameEngine<TState = any, TPrivateState = any, TAction = any> {
     mode: 'couple' | 'friend';
     participants: GameParticipant[];
     rngSeed: string;
+    customQuestions?: any[];
   }): {
     state: TState;
     privateStates: Record<string, TPrivateState>;

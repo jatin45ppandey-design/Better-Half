@@ -56,7 +56,16 @@ export function errorHandler(
     return;
   }
 
-  // 4. Generic 500 Server Error
+  // 4. CORS Rejection
+  if (err?.message?.includes('CORS origin')) {
+    res.status(403).json({
+      error: 'CORS Forbidden',
+      message: err.message,
+    });
+    return;
+  }
+
+  // 5. Generic 500 Server Error
   // Log securely without leaking passwords or tokens
   const safeMessage = err instanceof Error ? err.message : String(err);
   console.error('[Internal Error]:', safeMessage);

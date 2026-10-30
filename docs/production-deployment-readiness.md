@@ -23,11 +23,11 @@ NODE_ENV=production
 PORT=10000
 
 # CORS & Client URLs
-CLIENT_URL=https://playspace-app.vercel.app
+FRONTEND_URL=https://playspace-app.vercel.app
 
 # Supabase Auth Integration
 SUPABASE_URL=https://<your-project-ref>.supabase.co
-SUPABASE_ANON_KEY=<your-supabase-anon-key>
+SUPABASE_PUBLISHABLE_KEY=<your-supabase-publishable-key>
 SUPABASE_SERVICE_ROLE_KEY=<your-supabase-service-role-key>
 
 # Database (Supabase PostgreSQL)
@@ -44,7 +44,7 @@ VITE_SOCKET_URL=https://playspace-backend.onrender.com
 
 # Supabase Public Keys
 VITE_SUPABASE_URL=https://<your-project-ref>.supabase.co
-VITE_SUPABASE_ANON_KEY=<your-supabase-anon-key>
+VITE_SUPABASE_PUBLISHABLE_KEY=<your-supabase-publishable-key>
 ```
 
 ---
@@ -108,7 +108,7 @@ curl https://playspace-backend.onrender.com/api/v1/health
 
 ## 5. Security & Reliability Checklist
 
-1. **CORS Restrictions**: `CLIENT_URL` on Render must match the production Vercel domain.
+1. **CORS Restrictions**: `FRONTEND_URL` on Render must match the production Vercel domain.
 2. **Ephemeral Memory Hygiene**:
    - BETWEEN US answers are stored exclusively in memory and garbage-collected upon round reveal.
    - Sockets implement a 15-second grace period for temporary reconnections before marking a participant departed.

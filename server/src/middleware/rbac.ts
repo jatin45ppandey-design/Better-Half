@@ -14,10 +14,19 @@ export async function checkAccountStatus(
   try {
     const profile = await prisma.userProfile.findUnique({
       where: { id: userId },
-      select: { accountStatus: true },
+      select: { id: true, accountStatus: true, username: true, displayName: true },
     });
 
-    if (profile && profile.accountStatus === 'SUSPENDED') {
+    if (!profile) {
+      res.status(403).json({
+        success: false,
+        error: 'User profile not found. Access denied.',
+        code: 'PROFILE_NOT_FOUND',
+      });
+      return;
+    }
+
+    if (profile.accountStatus === 'SUSPENDED') {
       res.status(403).json({
         success: false,
         error: 'Your account has been suspended. Please contact platform support.',
@@ -25,9 +34,15 @@ export async function checkAccountStatus(
       });
       return;
     }
+
+    (req as any).userProfile = profile;
     next();
-  } catch {
-    next();
+  } catch (_err: any) {
+    res.status(503).json({
+      success: false,
+      error: 'Account verification service unavailable. Please retry.',
+      code: 'DATABASE_UNAVAILABLE',
+    });
   }
 }
 

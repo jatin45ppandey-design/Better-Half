@@ -1,6 +1,6 @@
 import type http from 'node:http';
 import { Server } from 'socket.io';
-import { env } from '../config/env.js';
+import { isOriginAllowed } from '../config/cors.js';
 import { socketAuthMiddleware } from './authMiddleware.js';
 import { registerRoomHandlers } from './roomHandlers.js';
 import { registerGameHandlers } from './gameHandlers.js';
@@ -12,12 +12,6 @@ import type {
 } from './types.js';
 
 export function createSocketServer(httpServer: http.Server) {
-  const allowedOrigins = [
-    env.FRONTEND_URL,
-    'http://localhost:5173',
-    'http://127.0.0.1:5173',
-  ].filter(Boolean);
-
   const io = new Server<
     ClientToServerEvents,
     ServerToClientEvents,
@@ -26,11 +20,10 @@ export function createSocketServer(httpServer: http.Server) {
   >(httpServer, {
     cors: {
       origin: (origin, callback) => {
-        if (!origin) return callback(null, true);
-        if (allowedOrigins.includes(origin)) {
+        if (isOriginAllowed(origin)) {
           return callback(null, true);
         }
-        return callback(null, true);
+        return callback(new Error(`CORS origin "${origin}" not allowed`), false);
       },
       credentials: true,
       methods: ['GET', 'POST'],

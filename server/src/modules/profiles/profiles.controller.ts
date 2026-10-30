@@ -7,6 +7,11 @@ export async function getMyProfile(req: Request, res: Response, next: NextFuncti
     const email = req.user!.email;
     const metadata = req.user!.user_metadata;
 
+    if ((req as any).userProfile && (req as any).userProfile.username) {
+      res.status(200).json((req as any).userProfile);
+      return;
+    }
+
     const profile = await profilesService.getOrCreateProfile(userId, email, metadata);
     res.status(200).json(profile);
   } catch (error) {

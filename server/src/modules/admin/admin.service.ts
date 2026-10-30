@@ -5,7 +5,6 @@ import { TRUTH_OR_DARE_ITEMS } from '../../data/questions/truthOrDareQuestions.j
 import { WOULD_YOU_RATHER_ITEMS } from '../../data/questions/wouldYouRatherQuestions.js';
 import { BETWEEN_US_QUESTIONS } from '../../data/questions/betweenUsQuestions.js';
 import { SERVER_GAMES } from '../games/core/gameRegistry.js';
-import { logger } from '../../utils/logger.js';
 
 export interface UserFilterOptions {
   search?: string;
@@ -54,15 +53,25 @@ export class AdminService {
       prisma.questionEntry.count({ where: { isActive: true } }),
     ]);
 
-    // Active users in last 7 days
+    // Recently active user profiles in last 7 days
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    const activeUsers = await prisma.userProfile.count({
+    const recentlyActiveProfiles = await prisma.userProfile.count({
       where: { updatedAt: { gte: sevenDaysAgo } },
     });
 
+    // Determine actual database and service health
+    let serviceHealth: 'OPERATIONAL' | 'DEGRADED' | 'DOWN' = 'OPERATIONAL';
+    try {
+      await prisma.$queryRaw`SELECT 1`;
+    } catch {
+      serviceHealth = 'DEGRADED';
+    }
+
     return {
       totalUsers,
-      activeUsers,
+      activeUsers: recentlyActiveProfiles, // Tracked via 7-day profile activity
+      recentlyActiveProfiles,
+      onlineUsers: presenceManager.getOnlineCount(),
       suspendedUsers,
       activeRooms,
       activeGameSessions,
@@ -70,7 +79,7 @@ export class AdminService {
       completedMatchesToday,
       enabledGames,
       totalQuestions,
-      serviceHealth: 'OPERATIONAL',
+      serviceHealth,
       serverTimestamp: new Date().toISOString(),
     };
   }
@@ -356,78 +365,70 @@ export class AdminService {
   }
 
   async isGameEnabledForMode(gameId: string, mode: 'couple' | 'friend'): Promise<boolean> {
-    try {
-      const config = await prisma.gameConfiguration.findUnique({
-        where: { gameId },
-      });
-      if (!config) return true;
-      if (!config.isEnabled) return false;
-      return mode === 'couple' ? config.coupleEnabled : config.friendEnabled;
-    } catch {
-      return true;
-    }
+    const config = await prisma.gameConfiguration.findUnique({
+      where: { gameId },
+    });
+    if (!config) return true;
+    if (!config.isEnabled) return false;
+    return mode === 'couple' ? config.coupleEnabled : config.friendEnabled;
   }
 
   // -------------------------------------------------------------
   // 4. Question Library Management
   // -------------------------------------------------------------
   async seedQuestionLibrary() {
-    try {
-      // 1. Seed Truth or Dare
-      for (const item of TRUTH_OR_DARE_ITEMS) {
-        const sourceKey = `tod-${item.id}`;
-        const intensityNum = item.intensity === 'Soft' ? 1 : item.intensity === 'Spicy' ? 2 : 3;
-        await prisma.questionEntry.upsert({
-          where: { sourceKey },
-          update: {},
-          create: {
-            gameId: 'truth-or-dare',
-            sourceKey,
-            prompt: item.text,
-            questionType: item.type.toUpperCase(),
-            category: item.category,
-            intensity: intensityNum,
-            isActive: true,
-          },
-        });
-      }
+    // 1. Seed Truth or Dare
+    for (const item of TRUTH_OR_DARE_ITEMS) {
+      const sourceKey = `tod-${item.id}`;
+      const intensityNum = item.intensity === 'Soft' ? 1 : item.intensity === 'Spicy' ? 2 : 3;
+      await prisma.questionEntry.upsert({
+        where: { sourceKey },
+        update: {},
+        create: {
+          gameId: 'truth-or-dare',
+          sourceKey,
+          prompt: item.text,
+          questionType: item.type.toUpperCase(),
+          category: item.category,
+          intensity: intensityNum,
+          isActive: true,
+        },
+      });
+    }
 
-      // 2. Seed Would You Rather
-      for (const item of WOULD_YOU_RATHER_ITEMS) {
-        const sourceKey = `wyr-${item.id}`;
-        await prisma.questionEntry.upsert({
-          where: { sourceKey },
-          update: {},
-          create: {
-            gameId: 'would-you-rather',
-            sourceKey,
-            prompt: `${item.optionA} OR ${item.optionB}`,
-            optionA: item.optionA,
-            optionB: item.optionB,
-            category: item.category,
-            isActive: true,
-          },
-        });
-      }
+    // 2. Seed Would You Rather
+    for (const item of WOULD_YOU_RATHER_ITEMS) {
+      const sourceKey = `wyr-${item.id}`;
+      await prisma.questionEntry.upsert({
+        where: { sourceKey },
+        update: {},
+        create: {
+          gameId: 'would-you-rather',
+          sourceKey,
+          prompt: `${item.optionA} OR ${item.optionB}`,
+          optionA: item.optionA,
+          optionB: item.optionB,
+          category: item.category,
+          isActive: true,
+        },
+      });
+    }
 
-      // 3. Seed BETWEEN US
-      for (const item of BETWEEN_US_QUESTIONS) {
-        const sourceKey = `bu-${item.id}`;
-        await prisma.questionEntry.upsert({
-          where: { sourceKey },
-          update: {},
-          create: {
-            gameId: 'between-us',
-            sourceKey,
-            prompt: item.prompt,
-            category: item.category,
-            intensity: item.intensity,
-            isActive: true,
-          },
-        });
-      }
-    } catch (err: any) {
-      logger.warn(`Question library seed non-blocking error: ${err?.message || err}`);
+    // 3. Seed BETWEEN US
+    for (const item of BETWEEN_US_QUESTIONS) {
+      const sourceKey = `bu-${item.id}`;
+      await prisma.questionEntry.upsert({
+        where: { sourceKey },
+        update: {},
+        create: {
+          gameId: 'between-us',
+          sourceKey,
+          prompt: item.prompt,
+          category: item.category,
+          intensity: item.intensity,
+          isActive: true,
+        },
+      });
     }
   }
 

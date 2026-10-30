@@ -28,6 +28,7 @@ export class WouldYouRatherEngine
     mode: 'couple' | 'friend';
     participants: GameParticipant[];
     rngSeed: string;
+    customQuestions?: any[];
   }): {
     state: WouldYouRatherPublicState;
     privateStates: Record<string, WouldYouRatherPrivateState>;
@@ -41,15 +42,27 @@ export class WouldYouRatherEngine
       scores[p.userId] = 0;
     });
 
-    const state: WouldYouRatherPublicState = {
+    const pool =
+      params.customQuestions && params.customQuestions.length > 0
+        ? params.customQuestions.map((q) => ({
+            id: q.id,
+            category: q.category || 'Couples',
+            intensity: q.intensity === 3 ? 'Deep' : q.intensity === 2 ? 'Playful' : 'Funny',
+            optionA: q.optionA || 'Option A',
+            optionB: q.optionB || 'Option B',
+          }))
+        : WOULD_YOU_RATHER_ITEMS;
+
+    const state: WouldYouRatherPublicState & { questionsPool?: any[] } = {
       questionIndex: 0,
-      currentQuestion: WOULD_YOU_RATHER_ITEMS[0],
+      currentQuestion: pool[0],
       phase: 'ANSWERING',
       submittedUserIds: [],
       revealedChoices: null,
       matchCount: 0,
       totalAnswered: 0,
       history: [],
+      questionsPool: pool,
     };
 
     return {
@@ -160,9 +173,10 @@ export class WouldYouRatherEngine
     }
 
     if (action.type === 'NEXT_QUESTION') {
-      const nextIndex = (state.questionIndex + 1) % WOULD_YOU_RATHER_ITEMS.length;
+      const pool = (state as any).questionsPool || WOULD_YOU_RATHER_ITEMS;
+      const nextIndex = (state.questionIndex + 1) % pool.length;
       state.questionIndex = nextIndex;
-      state.currentQuestion = WOULD_YOU_RATHER_ITEMS[nextIndex];
+      state.currentQuestion = pool[nextIndex];
       state.phase = 'ANSWERING';
       state.submittedUserIds = [];
       state.revealedChoices = null;

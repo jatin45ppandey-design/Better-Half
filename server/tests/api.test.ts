@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../src/app.js';
 import { prisma } from '../src/config/prisma.js';
@@ -7,6 +7,33 @@ import { supabase } from '../src/config/supabase.js';
 const app = createApp();
 
 describe('PlaySpace Backend API — Phase 1 Test Suite', () => {
+  beforeEach(() => {
+    vi.spyOn(prisma.userProfile, 'findUnique').mockImplementation(async (args: any) => {
+      if (args?.where?.username === 'taken_name') {
+        return { id: 'other-user-uuid', username: 'taken_name' } as any;
+      }
+      return {
+        id: args?.where?.id || 'user-test-uuid',
+        username: 'test_player',
+        displayName: 'Test Player',
+        avatarColor: '#9670E8',
+        avatarInitials: 'TP',
+        bio: 'Hello PlaySpace',
+        accountStatus: 'ACTIVE',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        settings: {
+          publicMatchHistory: true,
+          stealthMode: false,
+          ghostMode: false,
+          soundMuted: false,
+          volume: 0.8,
+          reducedMotion: false,
+        },
+      } as any;
+    });
+  });
+
   describe('Health & Readiness', () => {
     it('GET /api/v1/health returns 200 OK with service info', async () => {
       const res = await request(app).get('/api/v1/health');
@@ -108,10 +135,12 @@ describe('PlaySpace Backend API — Phase 1 Test Suite', () => {
     });
 
     it('enforces username uniqueness on profile update', async () => {
-      vi.spyOn(prisma.userProfile, 'findUnique').mockResolvedValueOnce({
-        id: 'other-user-uuid',
-        username: 'taken_name',
-      } as any);
+      vi.spyOn(prisma.userProfile, 'findUnique').mockImplementation(async (args: any) => {
+        if (args?.where?.username) {
+          return { id: 'other-user-uuid', username: 'taken_name' } as any;
+        }
+        return { id: 'user-test-uuid', username: 'test_player', accountStatus: 'ACTIVE' } as any;
+      });
 
       const res = await request(app)
         .patch('/api/v1/profiles/me')

@@ -13,7 +13,7 @@ export class GameSessionService {
     session: GameEngineContext;
     roomCode: string;
   }> {
-    // 1. Fetch Room from DB or fallback
+    // 1. Fetch Room from DB
     let room = await prisma.room.findUnique({
       where: { id: roomId },
       include: {
@@ -48,8 +48,29 @@ export class GameSessionService {
     const mode = room.mode.toLowerCase() as 'couple' | 'friend';
     const gameId = requestedGameId || room.selectedGameId || 'truth-or-dare';
 
+    // Enforce Couple-only hardcoded restriction
+    if (mode === 'friend' && ['truth-or-dare', 'would-you-rather', 'between-us'].includes(gameId)) {
+      throw new Error(`Game "${gameId}" is restricted to Couple Mode only.`);
+    }
+
     if (!isGameEligibleForMode(gameId, mode)) {
       throw new Error(`Game "${gameId}" is not allowed in ${room.mode} Mode`);
+    }
+
+    // Enforce GameConfiguration server-side check
+    const gameConfig = await prisma.gameConfiguration.findUnique({
+      where: { gameId },
+    });
+    if (gameConfig) {
+      if (!gameConfig.isEnabled) {
+        throw new Error(`Game "${gameId}" is currently disabled by administrators.`);
+      }
+      if (mode === 'friend' && !gameConfig.friendEnabled) {
+        throw new Error(`Game "${gameId}" is disabled in Friend Mode.`);
+      }
+      if (mode === 'couple' && !gameConfig.coupleEnabled) {
+        throw new Error(`Game "${gameId}" is disabled in Couple Mode.`);
+      }
     }
 
     // 4. Validate participant counts & readiness
@@ -68,7 +89,22 @@ export class GameSessionService {
       throw new Error('All players must be ready before starting the match');
     }
 
-    // 5. Generate seed and initial state
+    // 5. Query active questions from QuestionEntry if applicable
+    let customQuestions: any[] | undefined = undefined;
+    if (['truth-or-dare', 'would-you-rather', 'between-us'].includes(gameId)) {
+      try {
+        const dbQuestions = await prisma.questionEntry.findMany({
+          where: { gameId, isActive: true },
+        });
+        if (dbQuestions && dbQuestions.length > 0) {
+          customQuestions = dbQuestions;
+        }
+      } catch {
+        // Fallback to static questions if question library query is unavailable
+      }
+    }
+
+    // 6. Generate seed and initial state
     const rngSeed = Math.random().toString(36).substring(2, 10);
     const engine = gameEngineFactory.getEngine(gameId);
 
@@ -85,6 +121,7 @@ export class GameSessionService {
       mode,
       participants,
       rngSeed,
+      customQuestions,
     });
 
     const context: GameEngineContext = {
@@ -104,46 +141,43 @@ export class GameSessionService {
       startedAt: new Date(),
     };
 
-    // 6. Save in memory
-    gameStateService.setSession(sessionId, context);
-
-    // 7. Try persisting in DB safely (non-blocking if DB is unreachable in dev)
-    try {
-      await prisma.$transaction([
-        prisma.room.update({
-          where: { id: room.id },
-          data: { status: 'IN_PROGRESS', selectedGameId: gameId },
-        }),
-        prisma.gameSession.create({
-          data: {
-            id: sessionId,
-            roomId: room.id,
-            gameId,
-            mode: room.mode,
-            status: 'ACTIVE',
-            currentTurnUserId: context.currentTurnUserId,
-            stateVersion: 1,
-            publicState: engine.getPublicProjection(context.state, context) as any,
-            rngSeed,
-            participants: {
-              create: participants.map((p) => ({
-                userId: p.userId,
-                seatIndex: p.seatIndex,
-                status: 'ACTIVE',
-                score: context.scores[p.userId] || 0,
-                // Never persist BETWEEN US answers or sensitive private states
-                privateState:
-                  gameId === 'between-us'
-                    ? undefined
-                    : (context.privateStates[p.userId] as any),
-              })),
-            },
+    // 7. Persist to DB transactionally BEFORE registering in memory
+    // If database persistence fails, an authoritative error is thrown.
+    await prisma.$transaction([
+      prisma.room.update({
+        where: { id: room.id },
+        data: { status: 'IN_PROGRESS', selectedGameId: gameId },
+      }),
+      prisma.gameSession.create({
+        data: {
+          id: sessionId,
+          roomId: room.id,
+          gameId,
+          mode: room.mode,
+          status: 'ACTIVE',
+          currentTurnUserId: context.currentTurnUserId,
+          stateVersion: 1,
+          publicState: engine.getPublicProjection(context.state, context) as any,
+          rngSeed,
+          participants: {
+            create: participants.map((p) => ({
+              userId: p.userId,
+              seatIndex: p.seatIndex,
+              status: 'ACTIVE',
+              score: context.scores[p.userId] || 0,
+              // Never persist BETWEEN US answers or pending Would You Rather choices
+              privateState:
+                gameId === 'between-us' || gameId === 'would-you-rather'
+                  ? undefined
+                  : (context.privateStates[p.userId] as any),
+            })),
           },
-        }),
-      ]);
-    } catch {
-      // Database write non-blocking for mock or isolated testing
-    }
+        },
+      }),
+    ]);
+
+    // 8. Register in memory ONLY after DB persistence succeeds
+    gameStateService.setSession(sessionId, context);
 
     return { session: context, roomCode: room.code };
   }
@@ -162,8 +196,20 @@ export class GameSessionService {
     const participant = session.participants.find((p) => p.userId === actorUserId);
     if (!participant) throw new Error('Unauthorized');
 
+    const nextVersion = session.version + 1;
+
+    // Persist pause status and version increment to database
+    await prisma.gameSession.update({
+      where: { id: sessionId },
+      data: {
+        status: 'PAUSED',
+        stateVersion: nextVersion,
+      },
+    });
+
     session.isPaused = true;
-    session.version += 1;
+    session.status = 'PAUSED';
+    session.version = nextVersion;
     gameStateService.setSession(sessionId, session);
 
     return session;
@@ -179,8 +225,20 @@ export class GameSessionService {
     const participant = session.participants.find((p) => p.userId === actorUserId);
     if (!participant) throw new Error('Unauthorized');
 
+    const nextVersion = session.version + 1;
+
+    // Persist resume status and version increment to database
+    await prisma.gameSession.update({
+      where: { id: sessionId },
+      data: {
+        status: 'ACTIVE',
+        stateVersion: nextVersion,
+      },
+    });
+
     session.isPaused = false;
-    session.version += 1;
+    session.status = 'ACTIVE';
+    session.version = nextVersion;
     gameStateService.setSession(sessionId, session);
 
     return session;
@@ -198,7 +256,38 @@ export class GameSessionService {
       throw new Error('Only the host can initiate a rematch');
     }
 
-    const engine = gameEngineFactory.getEngine(prevSession.gameId);
+    const gameId = prevSession.gameId;
+    const mode = prevSession.mode;
+
+    // Enforce GameConfiguration server-side check
+    const gameConfig = await prisma.gameConfiguration.findUnique({
+      where: { gameId },
+    });
+    if (gameConfig && !gameConfig.isEnabled) {
+      throw new Error(`Game "${gameId}" is currently disabled by administrators.`);
+    }
+
+    // Enforce Couple-only restriction
+    if (mode === 'friend' && ['truth-or-dare', 'would-you-rather', 'between-us'].includes(gameId)) {
+      throw new Error(`Game "${gameId}" is restricted to Couple Mode only.`);
+    }
+
+    // Query active questions from QuestionEntry if applicable
+    let customQuestions: any[] | undefined = undefined;
+    if (['truth-or-dare', 'would-you-rather', 'between-us'].includes(gameId)) {
+      try {
+        const dbQuestions = await prisma.questionEntry.findMany({
+          where: { gameId, isActive: true },
+        });
+        if (dbQuestions && dbQuestions.length > 0) {
+          customQuestions = dbQuestions;
+        }
+      } catch {
+        // Fallback to static questions
+      }
+    }
+
+    const engine = gameEngineFactory.getEngine(gameId);
     const newRngSeed = Math.random().toString(36).substring(2, 10);
     const newSessionId = `gs-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
 
@@ -207,6 +296,7 @@ export class GameSessionService {
       mode: prevSession.mode,
       participants: prevSession.participants,
       rngSeed: newRngSeed,
+      customQuestions,
     });
 
     const newContext: GameEngineContext = {
@@ -222,12 +312,51 @@ export class GameSessionService {
       scores: initialState.scores || {},
       rngSeed: newRngSeed,
       currentTurnUserId: initialState.currentTurnUserId || prevSession.participants[0]?.userId || null,
+      roomId: prevSession.roomId,
+      startedAt: new Date(),
     };
 
+    // Persist rematch session to DB transactionally before registering in memory
+    await prisma.$transaction([
+      ...(prevSession.roomId
+        ? [
+          prisma.room.update({
+            where: { id: prevSession.roomId },
+            data: { status: 'IN_PROGRESS', selectedGameId: gameId },
+          }),
+        ]
+        : []),
+      prisma.gameSession.create({
+        data: {
+          id: newSessionId,
+          roomId: prevSession.roomId || 'direct-room',
+          gameId,
+          mode: prevSession.mode.toUpperCase(),
+          status: 'ACTIVE',
+          currentTurnUserId: newContext.currentTurnUserId,
+          stateVersion: 1,
+          publicState: engine.getPublicProjection(newContext.state, newContext) as any,
+          rngSeed: newRngSeed,
+          participants: {
+            create: prevSession.participants.map((p) => ({
+              userId: p.userId,
+              seatIndex: p.seatIndex,
+              status: 'ACTIVE',
+              score: newContext.scores[p.userId] || 0,
+              privateState:
+                gameId === 'between-us' || gameId === 'would-you-rather'
+                  ? undefined
+                  : (newContext.privateStates[p.userId] as any),
+            })),
+          },
+        },
+      }),
+    ]);
+
+    // Register in memory ONLY after successful DB persistence
     gameStateService.setSession(newSessionId, newContext);
     return newContext;
   }
 }
 
 export const gameSessionService = new GameSessionService();
-

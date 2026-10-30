@@ -63,7 +63,7 @@ Represents an authoritative, finalized multiplayer game instance.
 | `id` | String | PK (`uuid`/cuid) | Unique match identifier |
 | `gameSessionId` | String | Unique | Source runtime session ID (ensures idempotent finalization) |
 | `roomId` | String | Indexed | Room code/ID where match occurred |
-| `gameId` | String | Indexed | Game catalog identifier (`uno-flip`, `basketball-rivalry`, etc.) |
+| `gameId` | String | Indexed | Game catalog identifier (`uno-style`, `basketball-rivalry`, etc.) |
 | `mode` | String | | Room mode (`COUPLE`, `FRIEND`) |
 | `resultType` | String | | `COMPETITIVE`, `COOPERATIVE`, `SURVIVAL`, `DRAW` |
 | `winnerUserId` | String? | FK -> UserProfile | Winning participant's user ID (null for ties/cooperative) |
@@ -119,21 +119,14 @@ Stores longitudinal performance metrics for a specific user in a specific game.
 | `matchesPlayed` | Int | Default 0 | Total completed matches |
 | `wins` | Int | Default 0 | Total wins |
 | `losses` | Int | Default 0 | Total losses |
-| `ties` | Int | Default 0 | Total draws/ties |
-| `winRate` | Float | Default 0.0 | Calculated `(wins / (matchesPlayed - ties))` ratio |
-| `currentStreak` | Int | Default 0 | Active streak count |
-| `bestStreak` | Int | Default 0 | Highest historical winning streak |
-| `streakType` | String | Default `NONE` | `WIN`, `LOSS`, `NONE` |
-| `totalScore` | Float | Default 0.0 | Cumulative score for average calculations |
-| `highestScore` | Float? | | High score record |
-| `totalDurationSeconds` | Int | Default 0 | Total time spent playing this game |
-| `lastPlayedAt` | DateTime | Default `now()` | Last played match timestamp |
+| `draws` | Int | Default 0 | Total draws/ties |
+| `cooperativeCompletions` | Int | Default 0 | Total cooperative game completions |
+| `lastPlayedAt` | DateTime? | | Last played match timestamp |
+| `createdAt` | DateTime | Default `now()` | Record creation timestamp |
 | `updatedAt` | DateTime | Auto-update | Last update timestamp |
 
 **Indexes**:
 - `@@unique([userId, gameId])` (composite key for atomic upserts)
-- `@@index([userId])`
-- `@@index([gameId])`
 
 ---
 
@@ -149,20 +142,20 @@ Maintains canonical head-to-head metrics between two users.
 | `id` | String | PK | Rivalry record ID |
 | `userLowId` | String | FK -> UserProfile (Cascade) | Lexicographically lower user ID |
 | `userHighId` | String | FK -> UserProfile (Cascade) | Lexicographically higher user ID |
-| `gameId` | String? | | Optional game filter (null = all games aggregate) |
 | `matchesPlayed` | Int | Default 0 | Head-to-head matches |
+| `competitiveMatches` | Int | Default 0 | Head-to-head competitive matches |
 | `userLowWins` | Int | Default 0 | Wins by `userLow` |
 | `userHighWins` | Int | Default 0 | Wins by `userHigh` |
-| `ties` | Int | Default 0 | Draws |
-| `currentStreakLeaderId` | String? | | Active streak holder |
+| `draws` | Int | Default 0 | Draws |
+| `cooperativeCompletions` | Int | Default 0 | Cooperative completions played together |
+| `currentStreakHolder` | String? | | Active streak holder |
 | `currentStreakCount` | Int | Default 0 | Active head-to-head streak length |
-| `lastPlayedAt` | DateTime | Default `now()` | Last clash timestamp |
+| `lastMatchAt` | DateTime? | | Last match timestamp |
+| `createdAt` | DateTime | Default `now()` | Record creation timestamp |
 | `updatedAt` | DateTime | Auto-update | Update timestamp |
 
 **Indexes**:
-- `@@unique([userLowId, userHighId, gameId])` (enforces single canonical record per pair)
-- `@@index([userLowId])`
-- `@@index([userHighId])`
+- `@@unique([userLowId, userHighId])` (enforces single canonical record per pair)
 
 ---
 
@@ -195,18 +188,20 @@ Governs platform game availability and dynamic question catalogs.
 - **`GameConfiguration`**:
   - `gameId`: Unique catalog string (`truth-or-dare`, `kabza`, etc.).
   - `isEnabled`: Global platform availability toggle.
-  - `coupleModeEnabled`: Toggle for couple 2-player lobbies.
-  - `friendModeEnabled`: Toggle for friend 4-player lobbies.
-  - **Constraint Rule**: Games declared Couple-only (`truth-or-dare`, `would-you-rather`, `between-us`) cannot have `friendModeEnabled = true`.
-  - `minPlayers`, `maxPlayers`, `maintenanceNotice`, `updatedById`.
+  - `coupleEnabled`: Toggle for couple 2-player lobbies.
+  - `friendEnabled`: Toggle for friend 4-player lobbies.
+  - **Constraint Rule**: Games declared Couple-only (`truth-or-dare`, `would-you-rather`, `between-us`) cannot have `friendEnabled = true`.
+  - `maintenanceMessage`: Optional maintenance notice.
+  - `updatedBy`: Operator ID.
 - **`QuestionEntry`**:
   - `gameId`: Associated game (`truth-or-dare`, `would-you-rather`, `between-us`).
-  - `category`: Question category string (`Couples`, `Spicy`, `Deep`, `Funny`).
-  - `intensity`: Integer rating (1 = Soft, 2 = Spicy, 3 = Wild).
-  - `prompt`: Main question text.
-  - `optionA`, `optionB`: Binary choice options (mandatory for Would You Rather).
+  - `category`: Question category string (`couples`, `spicy`, `deep`, `funny`).
+  - `intensity`: Question intensity level (`soft`, `spicy`, `wild`, `extreme`).
+  - `text`: Main question or prompt text.
+  - `type`: Question type (`truth`, `dare`, `dilemma`, `between_us`).
+  - `options`: JSON array of string options.
   - `isActive`: Boolean toggle.
-  - `addedById`: Operator ID.
+  - `createdById`: Operator ID.
 
 ---
 

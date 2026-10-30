@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import { env } from './config/env.js';
+import { isOriginAllowed } from './config/cors.js';
 import { apiRouter } from './routes/index.js';
 import { errorHandler } from './middleware/errorHandler.js';
 
@@ -12,21 +13,13 @@ export function createApp() {
   app.use(helmet());
 
   // CORS Configuration
-  const allowedOrigins = [
-    env.FRONTEND_URL,
-    'http://localhost:5173',
-    'http://127.0.0.1:5173',
-  ].filter(Boolean);
-
   app.use(
     cors({
       origin: (origin, callback) => {
-        // Allow requests with no origin (mobile apps, curl, server-to-server)
-        if (!origin) return callback(null, true);
-        if (allowedOrigins.includes(origin)) {
+        if (isOriginAllowed(origin)) {
           return callback(null, true);
         }
-        return callback(null, true); // Permissive in dev, or can restrict if needed
+        return callback(new Error(`CORS origin "${origin}" not allowed`), false);
       },
       credentials: true,
       methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],

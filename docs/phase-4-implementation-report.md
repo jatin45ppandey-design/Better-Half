@@ -30,7 +30,7 @@ All 11 existing games, visual themes, sound effects, animations, and couple/frie
 ### 2.3 Game-Specific Result Policies (`resultPolicies.ts`)
 Decoupled victory, placement, and scoring rules for each individual game:
 - **Competitive Games**:
-  - `basketball-rivalry`, `snatch-the-fries`, `kabza`, `pen-fight`, `uno-flip`, `tic-tac-toe`: Higher score/points wins.
+  - `basketball-rivalry`, `snatch-the-fries`, `kabza`, `pen-fight`, `uno-style`, `tic-tac-toe`: Higher score/points wins.
   - `aloo-golf`: Lowest stroke count wins.
 - **Cooperative & Conversational Games**:
   - `truth-or-dare`, `would-you-rather`, `between-us`: Honest completion with `COMPLETED` outcome; no winner or loser fabricated.

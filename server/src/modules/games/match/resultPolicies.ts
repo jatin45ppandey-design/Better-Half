@@ -53,7 +53,7 @@ export function evaluateGameResult(context: GameEngineContext): MatchEvaluationR
         userId: p.userId,
         placement: 1,
         scoreValue: alignmentScore,
-        scoreLabel: `${alignmentScore} alignment pts`,
+        scoreLabel: `${alignmentScore}% alignment`,
         isWinner: false,
         outcome: 'COMPLETED',
       }));
@@ -70,6 +70,9 @@ export function evaluateGameResult(context: GameEngineContext): MatchEvaluationR
         },
       };
     }
+
+    // In Friend Mode, blind ranking evaluates competitive accuracy/alignment rankings
+    // Falls through to competitive logic below
   }
 
   // 3. Aloo Golf: LOWEST strokes wins!
@@ -81,10 +84,10 @@ export function evaluateGameResult(context: GameEngineContext): MatchEvaluationR
     });
 
     const bestStrokes = scores[sorted[0]?.userId] ?? 999;
-    const secondStrokes = scores[sorted[1]?.userId] ?? 999;
-    const isTie = sorted.length > 1 && bestStrokes === secondStrokes;
-    const matchWinnerId = isTie ? null : sorted[0]?.userId || null;
-    const resultType = isTie ? 'DRAW' : 'COMPETITIVE';
+    const secondStrokes = sorted.length > 1 ? (scores[sorted[1]?.userId] ?? 999) : null;
+    const isTieForFirst = sorted.length > 1 && bestStrokes === secondStrokes;
+    const matchWinnerId = isTieForFirst ? null : sorted[0]?.userId || null;
+    const resultType = isTieForFirst ? 'DRAW' : 'COMPETITIVE';
 
     let currentPlacement = 1;
     const participantResults: ParticipantResult[] = sorted.map((p, idx) => {
@@ -92,12 +95,12 @@ export function evaluateGameResult(context: GameEngineContext): MatchEvaluationR
       if (idx > 0 && userStrokes > (scores[sorted[idx - 1].userId] ?? 999)) {
         currentPlacement = idx + 1;
       }
-      const isWin = !isTie && p.userId === matchWinnerId;
-      const isDraw = isTie && userStrokes === bestStrokes;
+      const isWin = !isTieForFirst && p.userId === matchWinnerId;
+      const isDraw = isTieForFirst && userStrokes === bestStrokes;
 
       return {
         userId: p.userId,
-        placement: currentPlacement,
+        placement: isWin ? 1 : currentPlacement,
         scoreValue: userStrokes,
         scoreLabel: `${userStrokes} strokes`,
         isWinner: isWin,
@@ -118,11 +121,8 @@ export function evaluateGameResult(context: GameEngineContext): MatchEvaluationR
     };
   }
 
-  // 4. Default Competitive Games (Higher score is better: Basketball, Fries, Kabza, Pen Fight, UNO, Tic Tac Toe)
+  // 4. Default Competitive Games (Higher score is better: Basketball, Fries, Kabza, Pen Fight, UNO-style, Tic Tac Toe, Blind Ranking Friend)
   const isDirectWinner = winnerUserId !== undefined && winnerUserId !== null;
-  const isDraw = state?.isDraw || (!isDirectWinner && participants.length > 1 &&
-    Object.values(scores).length > 1 &&
-    new Set(Object.values(scores)).size === 1);
 
   const sorted = [...participants].sort((a, b) => {
     if (isDirectWinner) {
@@ -131,11 +131,17 @@ export function evaluateGameResult(context: GameEngineContext): MatchEvaluationR
     }
     const scoreA = scores[a.userId] || 0;
     const scoreB = scores[b.userId] || 0;
-    return scoreB - scoreA; // Descending: higher is better
+    return scoreB - scoreA; // Descending: higher score is better
   });
 
   const topScore = scores[sorted[0]?.userId] || 0;
-  const matchWinner = isDraw ? null : (winnerUserId || sorted[0]?.userId || null);
+  const secondScore = sorted.length > 1 ? scores[sorted[1]?.userId] || 0 : null;
+
+  const isTieForFirst =
+    state?.isDraw ||
+    (!isDirectWinner && sorted.length > 1 && topScore === secondScore);
+
+  const matchWinner = isTieForFirst ? null : (winnerUserId || sorted[0]?.userId || null);
 
   let currentPlacement = 1;
   const participantResults: ParticipantResult[] = sorted.map((p, idx) => {
@@ -143,8 +149,8 @@ export function evaluateGameResult(context: GameEngineContext): MatchEvaluationR
     if (idx > 0 && s < (scores[sorted[idx - 1].userId] || 0)) {
       currentPlacement = idx + 1;
     }
-    const isWin = !isDraw && p.userId === matchWinner;
-    const isPlayerDraw = isDraw && s === topScore;
+    const isWin = !isTieForFirst && p.userId === matchWinner;
+    const isPlayerDraw = isTieForFirst && s === topScore;
 
     return {
       userId: p.userId,
@@ -157,15 +163,14 @@ export function evaluateGameResult(context: GameEngineContext): MatchEvaluationR
   });
 
   return {
-    resultType: isDraw ? 'DRAW' : 'COMPETITIVE',
-    winnerUserId: isDraw ? null : matchWinner,
+    resultType: isTieForFirst ? 'DRAW' : 'COMPETITIVE',
+    winnerUserId: isTieForFirst ? null : matchWinner,
     participants: participantResults,
     roundsPlayed: state?.round || state?.currentRound || state?.dropRound || 1,
     resultSummary: {
       gameId,
       scores,
-      isDraw: !!isDraw,
+      isDraw: !!isTieForFirst,
     },
   };
 }
-

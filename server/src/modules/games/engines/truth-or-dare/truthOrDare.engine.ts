@@ -17,6 +17,7 @@ export class TruthOrDareEngine
     mode: 'couple' | 'friend';
     participants: GameParticipant[];
     rngSeed: string;
+    customQuestions?: any[];
   }): {
     state: TruthOrDareState;
     privateStates: Record<string, Record<string, never>>;
@@ -34,7 +35,18 @@ export class TruthOrDareEngine
       scores[p.userId] = 0;
     });
 
-    const state: TruthOrDareState = {
+    const customPool =
+      params.customQuestions && params.customQuestions.length > 0
+        ? params.customQuestions.map((q) => ({
+            id: q.id,
+            type: q.category?.toUpperCase() === 'DARE' ? ('DARE' as const) : ('TRUTH' as const),
+            text: q.prompt,
+            category: q.category || 'Romantic',
+            intensity: q.intensity === 3 ? 'Wild' : q.intensity === 2 ? 'Spicy' : 'Soft',
+          }))
+        : TRUTH_OR_DARE_ITEMS;
+
+    const state: TruthOrDareState & { questionsPool?: any[] } = {
       currentTurnUserId: p1.userId,
       selectedType: null,
       currentPrompt: null,
@@ -44,6 +56,7 @@ export class TruthOrDareEngine
       completedCount,
       history: [],
       totalTurns: 0,
+      questionsPool: customPool,
     };
 
     return {
@@ -104,10 +117,11 @@ export class TruthOrDareEngine
     if (action.type === 'CHOOSE_TYPE') {
       const cat = action.category || state.category;
       const int = action.intensity || state.intensity;
-      const pool = TRUTH_OR_DARE_ITEMS.filter(
-        (item) => item.type === action.promptType && (item.category === cat || item.intensity === int)
+      const baseItems = (state as any).questionsPool || TRUTH_OR_DARE_ITEMS;
+      const pool = baseItems.filter(
+        (item: any) => item.type === action.promptType && (item.category === cat || item.intensity === int)
       );
-      const fallback = TRUTH_OR_DARE_ITEMS.filter((item) => item.type === action.promptType);
+      const fallback = baseItems.filter((item: any) => item.type === action.promptType);
       const candidates = pool.length > 0 ? pool : fallback;
       const chosen = candidates[Math.floor(Math.random() * candidates.length)];
 

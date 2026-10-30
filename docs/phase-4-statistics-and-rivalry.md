@@ -43,7 +43,7 @@ Retrieves overall cumulative performance statistics for the authenticated player
         "winRate": 0.75
       },
       {
-        "gameId": "uno-flip",
+        "gameId": "uno-style",
         "matchesPlayed": 12,
         "wins": 8,
         "winRate": 0.667
