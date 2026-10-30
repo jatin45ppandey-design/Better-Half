@@ -170,6 +170,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }, 0);
     };
 
+    // The listener handles SDK auth events, while getSession below provides
+    // an explicit recovery path for an already-persisted session. Whichever
+    // resolves first wins; an older startup read must never override an auth event.
+    let authEventHandled = false;
+
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, session) => {
@@ -178,6 +183,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (!effectActive || !mountedRef.current) return;
 
       if (event === 'INITIAL_SESSION') {
+        authEventHandled = true;
         if (session?.user) {
           applySession(session.user as SupabaseUserLike);
         } else {
@@ -187,6 +193,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       if (event === 'SIGNED_IN' || event === 'USER_UPDATED' || event === 'PASSWORD_RECOVERY') {
+        authEventHandled = true;
         if (session?.user) {
           applySession(session.user as SupabaseUserLike, event === 'USER_UPDATED');
         }
@@ -194,6 +201,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       if (event === 'TOKEN_REFRESHED') {
+        authEventHandled = true;
         if (session?.user) {
           // Only re-establish state if the identity actually changed. Normal token
           // refreshes must not cause profile-fetch loops.
@@ -203,9 +211,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       if (event === 'SIGNED_OUT') {
+        authEventHandled = true;
         clearSession();
       }
     });
+
+    // Explicit startup session restoration. Supabase also emits INITIAL_SESSION,
+    // but this protects against a missed/late initial notification and retains
+    // the session that was persisted before the OAuth redirect.
+    void supabase.auth.getSession()
+      .then(({ data, error: sessionError }) => {
+        if (!effectActive || !mountedRef.current || authEventHandled) return;
+        if (sessionError) throw sessionError;
+
+        if (data.session?.user) {
+          applySession(data.session.user as SupabaseUserLike);
+        } else {
+          clearSession();
+        }
+      })
+      .catch((err: unknown) => {
+        if (!effectActive || !mountedRef.current || authEventHandled) return;
+        console.error('[Auth] Initial session restoration failed:', err);
+        setError(err instanceof Error ? err.message : 'Failed to restore authentication session');
+        setIsLoading(false);
+      });
 
     return () => {
       effectActive = false;
