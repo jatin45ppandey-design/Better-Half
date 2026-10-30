@@ -54,11 +54,29 @@ export class AdminService {
       prisma.questionEntry.count({ where: { isActive: true } }),
     ]);
 
-    // Recently active user profiles in last 7 days
+    // Weekly active players in last 7 days (distinct match or room participants)
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    const recentlyActiveProfiles = await prisma.userProfile.count({
-      where: { updatedAt: { gte: sevenDaysAgo } },
-    });
+    const [matchParticipants7d, roomParticipants7d, recentlyActiveProfiles] = await Promise.all([
+      prisma.matchParticipant.findMany({
+        where: { createdAt: { gte: sevenDaysAgo } },
+        select: { userId: true },
+        distinct: ['userId'],
+      }),
+      prisma.roomParticipant.findMany({
+        where: { joinedAt: { gte: sevenDaysAgo } },
+        select: { userId: true },
+        distinct: ['userId'],
+      }),
+      prisma.userProfile.count({
+        where: { updatedAt: { gte: sevenDaysAgo } },
+      }),
+    ]);
+
+    const activePlayerIds = new Set([
+      ...matchParticipants7d.map((p) => p.userId),
+      ...roomParticipants7d.map((p) => p.userId),
+    ]);
+    const weeklyActivePlayers = activePlayerIds.size;
 
     // Determine actual database and service health
     let serviceHealth: 'OPERATIONAL' | 'DEGRADED' | 'DOWN' = 'OPERATIONAL';
@@ -70,7 +88,8 @@ export class AdminService {
 
     return {
       totalUsers,
-      activeUsers: recentlyActiveProfiles, // Tracked via 7-day profile activity
+      activeUsers: weeklyActivePlayers, // Genuine weekly active players based on match/room telemetry
+      weeklyActivePlayers,
       recentlyActiveProfiles,
       onlineUsers: presenceManager.getOnlineCount(),
       suspendedUsers,
@@ -191,22 +210,23 @@ export class AdminService {
 
     if (!targetUser) throw new Error('Target user not found.');
 
-    // Protect last active administrator from being suspended
     const isTargetAdmin = targetUser.roles.some((r) => r.role === 'ADMIN');
-    if (isTargetAdmin && status === 'SUSPENDED') {
-      const activeAdminCount = await prisma.appRole.count({
-        where: {
-          role: 'ADMIN',
-          user: { accountStatus: 'ACTIVE' },
-        },
-      });
-
-      if (activeAdminCount <= 1) {
-        throw new Error('Cannot suspend the last active administrator.');
-      }
-    }
 
     const updatedUser = await prisma.$transaction(async (tx) => {
+      // Protect last active administrator from being suspended (transactional race guard)
+      if (isTargetAdmin && status === 'SUSPENDED') {
+        const activeAdminCount = await tx.appRole.count({
+          where: {
+            role: 'ADMIN',
+            user: { accountStatus: 'ACTIVE' },
+          },
+        });
+
+        if (activeAdminCount <= 1) {
+          throw new Error('Cannot suspend the last active administrator.');
+        }
+      }
+
       const user = await tx.userProfile.update({
         where: { id: targetUserId },
         data: { accountStatus: status },
@@ -221,17 +241,18 @@ export class AdminService {
         },
       });
 
+      // Write immutable audit log within the same transaction
+      await auditService.logAction(
+        moderatorUserId,
+        status === 'SUSPENDED' ? 'USER_SUSPENDED' : 'USER_REINSTATED',
+        'USER',
+        targetUserId,
+        { reason, previousStatus: targetUser.accountStatus, newStatus: status },
+        tx
+      );
+
       return user;
     });
-
-    // Write immutable audit log
-    await auditService.logAction(
-      moderatorUserId,
-      status === 'SUSPENDED' ? 'USER_SUSPENDED' : 'USER_REINSTATED',
-      'USER',
-      targetUserId,
-      { reason, previousStatus: targetUser.accountStatus, newStatus: status }
-    );
 
     // If suspended, actively disconnect any live sockets and handle room lifecycle
     if (status === 'SUSPENDED') {
@@ -260,44 +281,55 @@ export class AdminService {
     const user = await prisma.userProfile.findUnique({ where: { id: targetUserId } });
     if (!user) throw new Error('Target user not found.');
 
-    const newRole = await prisma.appRole.upsert({
-      where: {
-        userId_role: {
+    return prisma.$transaction(async (tx) => {
+      const newRole = await tx.appRole.upsert({
+        where: {
+          userId_role: {
+            userId: targetUserId,
+            role,
+          },
+        },
+        update: {},
+        create: {
           userId: targetUserId,
           role,
+          assignedBy: actorUserId,
         },
-      },
-      update: {},
-      create: {
-        userId: targetUserId,
-        role,
-        assignedBy: actorUserId,
-      },
-    });
+      });
 
-    await auditService.logAction(actorUserId, 'ROLE_GRANTED', 'USER', targetUserId, { role });
-    return newRole;
+      await auditService.logAction(actorUserId, 'ROLE_GRANTED', 'USER', targetUserId, { role }, tx);
+      return newRole;
+    });
   }
 
   async revokeRole(targetUserId: string, role: 'ADMIN' | 'MODERATOR', actorUserId: string) {
-    if (role === 'ADMIN') {
-      const adminCount = await prisma.appRole.count({
-        where: { role: 'ADMIN' },
-      });
-      if (adminCount <= 1) {
-        throw new Error('Cannot revoke role from the last active administrator.');
+    return prisma.$transaction(async (tx) => {
+      if (role === 'ADMIN') {
+        const activeAdminCount = await tx.appRole.count({
+          where: {
+            role: 'ADMIN',
+            user: { accountStatus: { not: 'SUSPENDED' } },
+          },
+        });
+        if (activeAdminCount <= 1) {
+          throw new Error('Cannot revoke role from the last active administrator.');
+        }
       }
-    }
 
-    await prisma.appRole.deleteMany({
-      where: {
-        userId: targetUserId,
-        role,
-      },
+      const deleted = await tx.appRole.deleteMany({
+        where: {
+          userId: targetUserId,
+          role,
+        },
+      });
+
+      if (deleted.count === 0) {
+        throw new Error('Role record not found for user.');
+      }
+
+      await auditService.logAction(actorUserId, 'ROLE_REVOKED', 'USER', targetUserId, { role }, tx);
+      return { success: true };
     });
-
-    await auditService.logAction(actorUserId, 'ROLE_REVOKED', 'USER', targetUserId, { role });
-    return { success: true };
   }
 
   // -------------------------------------------------------------
@@ -321,7 +353,6 @@ export class AdminService {
   }
 
   async listGames() {
-    await this.seedInitialGameConfigs();
     return prisma.gameConfiguration.findMany({
       orderBy: { gameId: 'asc' },
     });
@@ -484,6 +515,15 @@ export class AdminService {
   ) {
     if (!data.gameId || !data.prompt) {
       throw new Error('Game ID and prompt are required.');
+    }
+
+    if (data.gameId === 'blind-ranking') {
+      throw new Error('Blind Ranking content is curated static items and is not managed through question entries.');
+    }
+
+    const SUPPORTED_QUESTION_GAMES = ['truth-or-dare', 'would-you-rather', 'between-us'];
+    if (!SUPPORTED_QUESTION_GAMES.includes(data.gameId)) {
+      throw new Error(`Game "${data.gameId}" does not support custom question entries.`);
     }
 
     if (data.gameId === 'would-you-rather') {

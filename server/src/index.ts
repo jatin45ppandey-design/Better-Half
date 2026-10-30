@@ -5,6 +5,7 @@ import { prisma } from './config/prisma.js';
 import { createSocketServer } from './socket/index.js';
 import { gameSessionService } from './modules/games/core/gameSession.service.js';
 import { roomsService } from './modules/rooms/rooms.service.js';
+import { adminService } from './modules/admin/admin.service.js';
 
 const app = createApp();
 const httpServer = http.createServer(app);
@@ -32,6 +33,19 @@ httpServer.listen(PORT, HOST, () => {
     }
   }).catch((err) => {
     console.warn('Could not restore sessions on startup:', err);
+  });
+
+  // Seed default game configurations if unseeded
+  prisma.gameConfiguration.count().then((count) => {
+    if (count === 0) {
+      adminService.seedInitialGameConfigs().then(() => {
+        console.log('🎮 Seeded initial game configurations.');
+      }).catch((err) => {
+        console.warn('Could not seed game configurations on startup:', err);
+      });
+    }
+  }).catch((err) => {
+    console.warn('Could not check game configuration count on startup:', err);
   });
 
   // Periodic idempotent cleanup of expired rooms and invitations (every 5 minutes)
