@@ -85,6 +85,14 @@ export class PresenceManager {
   }
 
   /**
+   * Get all active socket IDs for a user
+   */
+  getUserSockets(userId: string): string[] {
+    const sockets = this.userSockets.get(userId);
+    return sockets ? Array.from(sockets) : [];
+  }
+
+  /**
    * User leaves a room
    */
   leaveRoom(roomId: string, userId: string): void {

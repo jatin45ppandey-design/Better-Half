@@ -86,6 +86,7 @@ export interface ChatMessage {
 }
 
 export interface RoomSession {
+  id?: string;
   code: string;
   name: string;
   mode: 'couple' | 'friend';

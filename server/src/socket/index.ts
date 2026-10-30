@@ -3,6 +3,7 @@ import { Server } from 'socket.io';
 import { env } from '../config/env.js';
 import { socketAuthMiddleware } from './authMiddleware.js';
 import { registerRoomHandlers } from './roomHandlers.js';
+import { registerGameHandlers } from './gameHandlers.js';
 import type {
   ClientToServerEvents,
   ServerToClientEvents,
@@ -44,6 +45,7 @@ export function createSocketServer(httpServer: http.Server) {
   // Register room and presence events on connection
   io.on('connection', (socket) => {
     registerRoomHandlers(io, socket);
+    registerGameHandlers(io, socket);
   });
 
   return io;

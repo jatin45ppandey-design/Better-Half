@@ -268,5 +268,46 @@ export const api = {
         method: 'POST',
       }),
   },
+
+  // Game Sessions (Phase 3)
+  games: {
+    start: (roomId: string, gameId?: string) =>
+      request<{
+        sessionId: string;
+        roomCode: string;
+        gameId: string;
+        mode: string;
+        publicState: any;
+        privateState: any;
+      }>(`/games/rooms/${roomId}/start`, {
+        method: 'POST',
+        body: JSON.stringify({ gameId }),
+      }),
+    getSession: (sessionId: string) =>
+      request<{
+        sessionId: string;
+        gameId: string;
+        mode: string;
+        publicState: any;
+        privateState: any;
+      }>(`/games/sessions/${sessionId}`),
+    getState: (sessionId: string) =>
+      request<{
+        sessionId: string;
+        publicState: any;
+        privateState: any;
+      }>(`/games/sessions/${sessionId}/state`),
+    rematch: (sessionId: string) =>
+      request<{
+        sessionId: string;
+        gameId: string;
+        mode: string;
+        publicState: any;
+        privateState: any;
+      }>(`/games/sessions/${sessionId}/rematch`, {
+        method: 'POST',
+      }),
+  },
 };
+
 

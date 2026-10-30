@@ -1,0 +1,245 @@
+import {
+  BETWEEN_US_QUESTIONS,
+  type BetweenUsQuestion,
+} from '../../../../data/questions/betweenUsQuestions.js';
+import type {
+  IGameEngine,
+  GameEngineContext,
+  ActionResult,
+  GameParticipant,
+} from '../../core/gameEngine.types.js';
+import type {
+  BetweenUsPublicState,
+  BetweenUsPrivateState,
+  BetweenUsAction,
+} from './betweenUs.types.js';
+
+export class BetweenUsEngine
+  implements IGameEngine<BetweenUsPublicState, BetweenUsPrivateState, BetweenUsAction>
+{
+  readonly gameId = 'between-us';
+
+  private getEligibleQuestions(category: string, intensity: 1 | 2 | 3 | 4 | 5): BetweenUsQuestion[] {
+    const list = BETWEEN_US_QUESTIONS.filter((q) => {
+      const matchCat = category === 'All' || q.category === category;
+      const matchInt = q.intensity <= intensity;
+      return matchCat && matchInt;
+    });
+    return list.length > 0 ? list : BETWEEN_US_QUESTIONS;
+  }
+
+  createInitialState(params: {
+    sessionId: string;
+    mode: 'couple' | 'friend';
+    participants: GameParticipant[];
+    rngSeed: string;
+  }): {
+    state: BetweenUsPublicState;
+    privateStates: Record<string, BetweenUsPrivateState>;
+    scores: Record<string, number>;
+  } {
+    const category = 'All';
+    const intensity = 2;
+    const pool = this.getEligibleQuestions(category, intensity);
+    const privateStates: Record<string, BetweenUsPrivateState> = {};
+    const scores: Record<string, number> = {};
+
+    params.participants.forEach((p) => {
+      privateStates[p.userId] = { pendingAnswer: null };
+      scores[p.userId] = 0;
+    });
+
+    const state: BetweenUsPublicState = {
+      category,
+      intensity,
+      questionIndex: 0,
+      currentQuestion: pool[0],
+      phase: 'ANSWERING',
+      submittedUserIds: [],
+      adultConsentUserIds: [],
+      revealedAnswers: null,
+      questionsAnsweredCount: 0,
+    };
+
+    return {
+      state,
+      privateStates,
+      scores,
+    };
+  }
+
+  validateAction(
+    action: BetweenUsAction,
+    context: GameEngineContext<BetweenUsPublicState, BetweenUsPrivateState>,
+    actorUserId: string
+  ): { valid: boolean; error?: string } {
+    if (action.type === 'SUBMIT_ANSWER') {
+      if (context.state.phase !== 'ANSWERING') {
+        return { valid: false, error: 'Current prompt is already revealed.' };
+      }
+      if (context.state.submittedUserIds.includes(actorUserId)) {
+        return { valid: false, error: 'You have already submitted an answer.' };
+      }
+      if (!action.answer || action.answer.trim().length === 0) {
+        return { valid: false, error: 'Answer cannot be empty.' };
+      }
+      return { valid: true };
+    }
+
+    if (action.type === 'GRANT_ADULT_CONSENT') {
+      return { valid: true };
+    }
+
+    if (action.type === 'SET_SETTINGS') {
+      if (action.intensity === 5) {
+        // Both participants must have consented!
+        const consented = context.state.adultConsentUserIds;
+        const bothConsented = context.participants.every((p) => consented.includes(p.userId));
+        if (!bothConsented) {
+          return {
+            valid: false,
+            error: 'Level 5 (After Dark 18+) requires explicit mutual consent from both partners.',
+          };
+        }
+      }
+      return { valid: true };
+    }
+
+    if (action.type === 'NEXT_QUESTION') {
+      if (context.state.phase !== 'REVEAL') {
+        return { valid: false, error: 'Cannot advance until answers are revealed.' };
+      }
+      return { valid: true };
+    }
+
+    return { valid: false, error: 'Invalid action type.' };
+  }
+
+  applyAction(
+    action: BetweenUsAction,
+    context: GameEngineContext<BetweenUsPublicState, BetweenUsPrivateState>,
+    actorUserId: string
+  ): ActionResult<BetweenUsPublicState, BetweenUsPrivateState> {
+    const state = { ...context.state };
+    const privateStates = { ...context.privateStates };
+    const participants = context.participants;
+    const scores = { ...context.scores };
+
+    if (action.type === 'GRANT_ADULT_CONSENT') {
+      state.adultConsentUserIds = Array.from(
+        new Set([...state.adultConsentUserIds, actorUserId])
+      );
+      return {
+        success: true,
+        newState: state,
+        newPrivateStates: privateStates,
+      };
+    }
+
+    if (action.type === 'SET_SETTINGS') {
+      if (action.category) state.category = action.category;
+      if (action.intensity) state.intensity = action.intensity;
+
+      const pool = this.getEligibleQuestions(state.category, state.intensity);
+      state.currentQuestion = pool[state.questionIndex % pool.length];
+
+      return {
+        success: true,
+        newState: state,
+        newPrivateStates: privateStates,
+      };
+    }
+
+    if (action.type === 'SUBMIT_ANSWER') {
+      // Store in volatile memory only
+      privateStates[actorUserId] = { pendingAnswer: action.answer.trim() };
+      const submitted = Array.from(new Set([...state.submittedUserIds, actorUserId]));
+      state.submittedUserIds = submitted;
+
+      const allSubmitted = participants.every((p) => submitted.includes(p.userId));
+
+      if (allSubmitted) {
+        state.phase = 'REVEAL';
+        const revealed: Record<string, string> = {};
+        participants.forEach((p) => {
+          revealed[p.userId] = privateStates[p.userId]?.pendingAnswer || '';
+          // Wipe volatile answer buffer immediately after copying to single ephemeral reveal
+          privateStates[p.userId] = { pendingAnswer: null };
+        });
+
+        state.revealedAnswers = revealed;
+        state.questionsAnsweredCount += 1;
+
+        participants.forEach((p) => {
+          scores[p.userId] = (scores[p.userId] || 0) + 1;
+        });
+
+        return {
+          success: true,
+          newState: state,
+          newPrivateStates: privateStates,
+          scores,
+          events: [
+            {
+              type: 'betweenUs:revealed',
+              payload: {
+                revealedAnswers: revealed,
+                questionsAnsweredCount: state.questionsAnsweredCount,
+              },
+            },
+          ],
+        };
+      }
+
+      return {
+        success: true,
+        newState: state,
+        newPrivateStates: privateStates,
+      };
+    }
+
+    if (action.type === 'NEXT_QUESTION') {
+      const pool = this.getEligibleQuestions(state.category, state.intensity);
+      state.questionIndex = (state.questionIndex + 1) % pool.length;
+      state.currentQuestion = pool[state.questionIndex];
+      state.phase = 'ANSWERING';
+      state.submittedUserIds = [];
+      state.revealedAnswers = null;
+
+      participants.forEach((p) => {
+        privateStates[p.userId] = { pendingAnswer: null };
+      });
+
+      return {
+        success: true,
+        newState: state,
+        newPrivateStates: privateStates,
+      };
+    }
+
+    return { success: false, error: 'Unknown action.' };
+  }
+
+  getPublicProjection(state: BetweenUsPublicState): Record<string, unknown> {
+    return {
+      category: state.category,
+      intensity: state.intensity,
+      questionIndex: state.questionIndex,
+      currentQuestion: state.currentQuestion,
+      phase: state.phase,
+      submittedUserIds: state.submittedUserIds,
+      adultConsentUserIds: state.adultConsentUserIds,
+      revealedAnswers: state.revealedAnswers,
+      questionsAnsweredCount: state.questionsAnsweredCount,
+    };
+  }
+
+  getPrivateProjection(
+    privateState: BetweenUsPrivateState
+  ): Record<string, unknown> {
+    return {
+      pendingAnswer: privateState?.pendingAnswer ?? null,
+    };
+  }
+}
+

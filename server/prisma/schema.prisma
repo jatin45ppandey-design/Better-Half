@@ -40,6 +40,7 @@ model UserProfile {
   receivedRoomInvitations RoomInvitation[] @relation("ReceivedRoomInvitations")
   roomMessages           RoomMessage[]   @relation("RoomMessages")
   gameVotes              GameVote[]      @relation("GameVotes")
+  gameSessionParticipations GameSessionParticipant[] @relation("GameSessionParticipations")
 
   @@index([username])
   @@index([displayName])
@@ -128,6 +129,7 @@ model Room {
   invitations    RoomInvitation[]
   messages       RoomMessage[]
   gameVotes      GameVote[]
+  gameSessions   GameSession[]
 
   @@index([code])
   @@index([hostId])
@@ -202,3 +204,70 @@ model GameVote {
   @@index([roomId])
   @@index([gameId])
 }
+
+// -------------------------------------------------------------
+// PlaySpace Phase 3 Models: Game Sessions, Participants, Actions
+// -------------------------------------------------------------
+
+model GameSession {
+  id                String                   @id @default(uuid())
+  roomId            String
+  gameId            String
+  mode              String                   // "COUPLE" | "FRIEND"
+  status            String                   @default("ACTIVE") // STARTING, ACTIVE, PAUSED, COMPLETED, ABANDONED
+  startedAt         DateTime                 @default(now())
+  completedAt       DateTime?
+  currentRound      Int                      @default(1)
+  currentTurnUserId String?
+  stateVersion      Int                      @default(1)
+  publicState       Json
+  rngSeed           String?
+  deadlineAt        DateTime?
+  createdAt         DateTime                 @default(now())
+  updatedAt         DateTime                 @updatedAt
+
+  room              Room                     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  participants      GameSessionParticipant[]
+  actions           GameAction[]
+
+  @@index([roomId])
+  @@index([gameId])
+  @@index([status])
+}
+
+model GameSessionParticipant {
+  id           String      @id @default(uuid())
+  sessionId    String
+  userId       String
+  seatIndex    Int
+  status       String      @default("ACTIVE") // ACTIVE, DISCONNECTED, SPECTATING
+  score        Int         @default(0)
+  isActive     Boolean     @default(true)
+  privateState Json?       // E.g. UNO hand, never exposed publicly
+  joinedAt     DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  session      GameSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  user         UserProfile @relation("GameSessionParticipations", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, userId])
+  @@index([sessionId])
+  @@index([userId])
+}
+
+model GameAction {
+  id                String      @id @default(uuid())
+  sessionId         String
+  actorUserId       String
+  actionId          String
+  sequenceNumber    Int
+  actionType        String
+  sanitizedMetadata Json?
+  createdAt         DateTime    @default(now())
+
+  session           GameSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, actionId])
+  @@index([sessionId, sequenceNumber])
+}
+

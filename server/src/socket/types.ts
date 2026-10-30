@@ -54,6 +54,19 @@ export interface ServerToClientEvents {
   'room:reaction:new': (data: { senderId: string; reaction: string; timestamp: string }) => void;
   'room:presence:update': (data: { onlineUserIds: string[] }) => void;
   'room:error': (data: { code: string; message: string }) => void;
+
+  // Phase 3 Real-time Game Events (Server to Client)
+  'game:session:started': (data: { sessionId: string; gameId: string; roomCode: string }) => void;
+  'game:state': (data: { publicState: Record<string, unknown> }) => void;
+  'game:state:private': (data: { privateState: Record<string, unknown> }) => void;
+  'game:action:accepted': (data: { actionId: string; version: number }) => void;
+  'game:action:rejected': (data: { actionId: string; error: string }) => void;
+  'game:event': (data: { type: string; payload: unknown }) => void;
+  'game:paused': (data: { sessionId: string; pausedBy: string }) => void;
+  'game:resumed': (data: { sessionId: string; resumedBy: string }) => void;
+  'game:completed': (data: { sessionId: string; winnerUserId: string | null; scores: Record<string, number> }) => void;
+  'game:session:reconnected': (data: { publicState: Record<string, unknown>; privateState: Record<string, unknown> | null }) => void;
+  'game:error': (data: { code: string; message: string }) => void;
 }
 
 export interface ClientToServerEvents {
@@ -95,6 +108,42 @@ export interface ClientToServerEvents {
   ) => void;
   'room:reaction:send': (
     payload: { roomId: string; reaction: string },
+    callback?: (response: { success: boolean; error?: string }) => void
+  ) => void;
+
+  // Phase 3 Real-time Game Events (Client to Server)
+  'game:session:join': (
+    payload: { sessionId: string },
+    callback?: (response: {
+      success: boolean;
+      error?: string;
+      publicState?: Record<string, unknown>;
+      privateState?: Record<string, unknown> | null;
+    }) => void
+  ) => void;
+  'game:action': (
+    payload: {
+      sessionId: string;
+      actionId: string;
+      expectedVersion: number;
+      action: { type: string; [key: string]: unknown };
+    },
+    callback?: (response: { success: boolean; error?: string; version?: number }) => void
+  ) => void;
+  'game:pause': (
+    payload: { sessionId: string },
+    callback?: (response: { success: boolean; error?: string }) => void
+  ) => void;
+  'game:resume': (
+    payload: { sessionId: string },
+    callback?: (response: { success: boolean; error?: string }) => void
+  ) => void;
+  'game:rematch:request': (
+    payload: { sessionId: string },
+    callback?: (response: { success: boolean; error?: string; newSessionId?: string }) => void
+  ) => void;
+  'game:session:leave': (
+    payload: { sessionId: string },
     callback?: (response: { success: boolean; error?: string }) => void
   ) => void;
 }

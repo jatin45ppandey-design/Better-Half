@@ -5,6 +5,7 @@ import { settingsRoutes } from '../modules/settings/settings.routes.js';
 import { friendRoutes, blockRoutes } from '../modules/friends/friends.routes.js';
 import { roomRoutes } from '../modules/rooms/rooms.routes.js';
 import { invitationRoutes } from '../modules/invitations/invitations.routes.js';
+import { gamesRouter } from '../modules/games/games.routes.js';
 
 export const apiRouter = Router();
 
@@ -16,5 +17,6 @@ apiRouter.use('/blocks', blockRoutes);
 apiRouter.use('/rooms', roomRoutes);
 apiRouter.use('/invitations/rooms', invitationRoutes);
 apiRouter.use('/invitations', invitationRoutes);
+apiRouter.use('/games', gamesRouter);
 
 

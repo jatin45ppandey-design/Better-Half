@@ -23,6 +23,8 @@ import { Avatar } from '../components/ui/Avatar';
 import { GameIcon } from '../components/ui/GameIcon';
 import { Modal } from '../components/ui/Modal';
 import { soundService } from '../services/soundService';
+import { socketService } from '../services/socket';
+import { api } from '../services/api';
 import { useRoom } from '../context/RoomContext';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
@@ -77,6 +79,17 @@ export const RoomLobbyPage: React.FC = () => {
       }
     }
   }, [roomCode, currentRoom, joinRoom]);
+
+  // Listen for real-time game session start broadcast
+  useEffect(() => {
+    const unsubSession = socketService.on(
+      'game:session:started',
+      ({ sessionId, gameId, roomCode: startedRoomCode }: any) => {
+        navigate(`/game/${gameId}?room=${startedRoomCode || roomCode}&session=${sessionId}`);
+      }
+    );
+    return () => unsubSession();
+  }, [navigate, roomCode]);
 
   // Loading state
   if (isConnecting) {
@@ -162,7 +175,7 @@ export const RoomLobbyPage: React.FC = () => {
     setChatInput('');
   };
 
-  const handleStartGame = () => {
+  const handleStartGame = async () => {
     const check = canStartGame();
     if (!check.canStart) {
       setValidationError(check.reason || 'Cannot start match.');
@@ -174,8 +187,25 @@ export const RoomLobbyPage: React.FC = () => {
     }
 
     setValidationError(null);
-    addToast(`Launching ${selectedGame.name}!`, { type: 'success' });
-    navigate(`/game/${selectedGame.id}?room=${room.code}`);
+    const rId = room.id || room.code;
+    try {
+      socketService.emit('room:start:prepare', { roomId: rId }, (res: any) => {
+        if (!res?.success) {
+          api.games
+            .start(rId, selectedGame.id)
+            .then((startRes: any) => {
+              navigate(
+                `/game/${selectedGame.id}?room=${room.code}&session=${startRes.sessionId}`
+              );
+            })
+            .catch((err: any) => {
+              addToast(err.message || 'Failed to start game session', { type: 'error' });
+            });
+        }
+      });
+    } catch (err: any) {
+      addToast(err.message || 'Failed to start match', { type: 'error' });
+    }
   };
 
   const handleGameSelect = async (gameId: string) => {

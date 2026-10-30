@@ -1,5 +1,6 @@
 import type { Server, Socket } from 'socket.io';
 import { roomsService } from '../modules/rooms/rooms.service.js';
+import { gameSessionService } from '../modules/games/core/gameSession.service.js';
 import { presenceManager } from './presence.js';
 import { prisma } from '../config/prisma.js';
 import type {
@@ -218,7 +219,27 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
         return;
       }
 
+      // Initialize authoritative Phase 3 Game Session
+      let sessionId = '';
+      try {
+        const { session } = await gameSessionService.createSession(
+          roomId,
+          room.selectedGameId,
+          userId
+        );
+        sessionId = session.sessionId;
+      } catch (err: any) {
+        callback?.({ success: false, error: err.message || 'Failed to create game session' });
+        return;
+      }
+
       const roomChannel = `room:${roomId}`;
+      io.to(roomChannel).emit('game:session:started', {
+        sessionId,
+        gameId: room.selectedGameId,
+        roomCode: room.code,
+      });
+
       io.to(roomChannel).emit('room:start:launch', {
         gameId: room.selectedGameId,
         launchedAt: new Date().toISOString(),
