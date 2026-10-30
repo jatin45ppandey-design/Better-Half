@@ -151,12 +151,31 @@ export const RoomLobbyPage: React.FC = () => {
   const eligibleGames = getGamesForMode(room.mode);
   const selectedGame = getGameById(room.selectedGameId) || eligibleGames[0];
 
-  const currentUserParticipant =
-    room.participants.find((p: RoomParticipant) => p.id === user?.id) ||
-    room.participants.find((p: RoomParticipant) => p.isHost) ||
-    room.participants[0];
+  const currentUserParticipant = room.participants.find(
+    (participant: RoomParticipant) => participant.id === user?.id
+  );
 
-  const isHost = currentUserParticipant?.isHost ?? false;
+  if (!currentUserParticipant) {
+    return (
+      <div className="min-h-screen flex flex-col bg-[#FCFAFF]">
+        <Navbar />
+        <main className="flex-1 flex items-center justify-center px-4 py-16 text-center">
+          <div className="max-w-md rounded-3xl border border-[#EAE3F3] bg-white p-8">
+            <h1 className="text-xl font-black text-[#211A2D]">Room access unavailable</h1>
+            <p className="mt-2 text-sm text-[#756D82]">
+              Your account is not an active participant in this room. Join with a valid room invitation or code.
+            </p>
+            <Button variant="primary" className="mt-5" onClick={() => navigate('/dashboard')}>
+              Back to Dashboard
+            </Button>
+          </div>
+        </main>
+        <Footer />
+      </div>
+    );
+  }
+
+  const isHost = currentUserParticipant.isHost;
 
   const handleCopyCode = () => {
     navigator.clipboard?.writeText(room.code);
@@ -374,7 +393,7 @@ export const RoomLobbyPage: React.FC = () => {
                           {participant.name}
                         </span>
                         <span className="text-[10px] text-[#756D82]">
-                          {participant.isHost ? 'Host' : participant.isDemo ? 'Demo Friend' : 'Player'}
+                          {participant.isHost ? 'Host' : 'Player'}
                         </span>
                       </div>
                     </div>

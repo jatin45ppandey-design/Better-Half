@@ -21,13 +21,14 @@ import { Avatar } from '../ui/Avatar';
 import { Badge } from '../ui/Badge';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
-import { mockSocialAdapter } from '../../services/mockSocialAdapter';
+import { api } from '../../services/api';
 import { soundService } from '../../services/soundService';
 
 export const Navbar: React.FC = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
   const [pendingInvitesCount, setPendingInvitesCount] = useState(0);
+  const [canAccessAdmin, setCanAccessAdmin] = useState(false);
 
   const location = useLocation();
   const navigate = useNavigate();
@@ -35,25 +36,50 @@ export const Navbar: React.FC = () => {
   const { addToast } = useToast();
 
   useEffect(() => {
-    try {
-      const invites = mockSocialAdapter.getInvitations();
-      const pending = invites.filter((i) => i.status === 'pending').length;
-      setPendingInvitesCount(pending);
-    } catch {
+    let active = true;
+    if (!isAuthenticated || !user) {
       setPendingInvitesCount(0);
+      return () => { active = false; };
     }
-  }, [location.pathname]);
+
+    void api.roomInvitations.getReceived()
+      .then((response) => {
+        if (active) setPendingInvitesCount(response.invitations.length);
+      })
+      .catch(() => {
+        if (active) setPendingInvitesCount(0);
+      });
+
+    return () => { active = false; };
+  }, [location.pathname, isAuthenticated, user?.id]);
+
+  useEffect(() => {
+    let active = true;
+    setCanAccessAdmin(false);
+    if (!isAuthenticated || !user) {
+      return () => { active = false; };
+    }
+
+    // The server's moderator-protected overview endpoint is the authority.
+    void api.admin.getOverview()
+      .then((response) => {
+        if (active) setCanAccessAdmin(response.success === true);
+      })
+      .catch(() => {
+        if (active) setCanAccessAdmin(false);
+      });
+
+    return () => { active = false; };
+  }, [isAuthenticated, user?.id]);
 
   const isCurrent = (path: string) => location.pathname === path;
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     soundService.playClick();
-    logout();
+    await logout();
     setProfileDropdownOpen(false);
     setMobileMenuOpen(false);
-    addToast('Signed out of mock session', {
-      type: 'info',
-    });
+    addToast('Signed out of PlaySpace.', { type: 'info' });
     navigate('/login');
   };
 
@@ -171,7 +197,6 @@ export const Navbar: React.FC = () => {
                   initials={user.avatarInitials}
                   size="sm"
                   bgColor={user.avatarColor}
-                  isOnline
                 />
                 <span className="text-xs font-bold text-[#211A2D] max-w-[120px] truncate">
                   {user.name}
@@ -224,23 +249,25 @@ export const Navbar: React.FC = () => {
                       Settings & Sound
                     </Link>
 
-                    <Link
-                      to="/admin"
-                      onClick={() => {
-                        soundService.playClick();
-                        setProfileDropdownOpen(false);
-                      }}
-                      className="flex items-center gap-2.5 p-2 rounded-xl text-xs font-bold text-[#D97706] hover:bg-[#FEF3C7]/40 transition-colors"
-                    >
-                      <ShieldAlert className="w-4 h-4 text-[#D97706]" />
-                      Admin Preview
-                    </Link>
+                    {canAccessAdmin && (
+                      <Link
+                        to="/admin"
+                        onClick={() => {
+                          soundService.playClick();
+                          setProfileDropdownOpen(false);
+                        }}
+                        className="flex items-center gap-2.5 p-2 rounded-xl text-xs font-bold text-[#D97706] hover:bg-[#FEF3C7]/40 transition-colors"
+                      >
+                        <ShieldAlert className="w-4 h-4 text-[#D97706]" />
+                        Admin Console
+                      </Link>
+                    )}
                   </div>
 
                   <div className="pt-2 mt-2 border-t border-[#EAE3F3]">
                     <button
                       type="button"
-                      onClick={handleLogout}
+                      onClick={() => void handleLogout()}
                       className="w-full flex items-center gap-2 p-2 rounded-xl text-xs font-bold text-[#D94C65] hover:bg-[#FDF2F4] transition-colors cursor-pointer"
                     >
                       <LogOut className="w-4 h-4" />
@@ -383,17 +410,19 @@ export const Navbar: React.FC = () => {
               <span>Settings & Sound</span>
               <Settings className="w-4 h-4 text-[#756D82]" />
             </Link>
-            <Link
-              to="/admin"
-              onClick={() => {
-                soundService.playClick();
-                setMobileMenuOpen(false);
-              }}
-              className="px-3.5 py-2.5 rounded-xl hover:bg-[#FEF3C7]/50 text-[#D97706] transition-colors flex items-center justify-between"
-            >
-              <span>Admin Preview</span>
-              <ShieldAlert className="w-4 h-4 text-[#D97706]" />
-            </Link>
+            {canAccessAdmin && (
+              <Link
+                to="/admin"
+                onClick={() => {
+                  soundService.playClick();
+                  setMobileMenuOpen(false);
+                }}
+                className="px-3.5 py-2.5 rounded-xl hover:bg-[#FEF3C7]/50 text-[#D97706] transition-colors flex items-center justify-between"
+              >
+                <span>Admin Console</span>
+                <ShieldAlert className="w-4 h-4 text-[#D97706]" />
+              </Link>
+            )}
           </nav>
 
           <div className="pt-3 border-t border-[#EAE3F3] flex flex-col gap-2">

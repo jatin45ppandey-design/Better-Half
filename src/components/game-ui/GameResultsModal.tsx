@@ -1,11 +1,10 @@
 import React, { useEffect, useRef } from 'react';
-import { Trophy, RotateCcw, ArrowRight, Award } from 'lucide-react';
+import { Trophy, RotateCcw, ArrowRight } from 'lucide-react';
 import { Modal } from '../ui/Modal';
 import { Button } from '../ui/Button';
 import { Avatar } from '../ui/Avatar';
 import { Badge } from '../ui/Badge';
 import { soundService } from '../../services/soundService';
-import { mockSocialAdapter } from '../../services/mockSocialAdapter';
 
 export interface PlayerScoreSummary {
   id?: string;
@@ -46,38 +45,10 @@ export const GameResultsModal: React.FC<GameResultsModalProps> = ({
     if (isOpen && !hasRecordedRef.current) {
       hasRecordedRef.current = true;
       soundService.playVictory();
-
-      // Automatically record live match into local session history
-      try {
-        const numericScores = playerScores.map((p) => {
-          const num = typeof p.score === 'number' ? p.score : parseInt(String(p.score)) || 0;
-          return {
-            name: p.name,
-            avatarInitials: p.avatarInitials,
-            avatarColor: p.avatarColor,
-            score: num,
-            isWinner: !!p.isWinner,
-          };
-        });
-
-        mockSocialAdapter.recordMatch({
-          gameId: gameName.toLowerCase().replace(/\s+/g, '-'),
-          gameName,
-          mode: playerScores.length === 2 ? 'couple' : 'friend',
-          date: 'Just now',
-          duration: '3m 15s',
-          roundsPlayed: 1,
-          winnerName: isDraw ? 'Draw' : winnerName || 'Match Finished',
-          details: customMessage || `Match concluded with ${playerScores.length} players`,
-          participants: numericScores,
-        });
-      } catch {
-        // Safe failover for local session
-      }
     } else if (!isOpen) {
       hasRecordedRef.current = false;
     }
-  }, [isOpen, gameName, winnerName, isDraw, playerScores, customMessage]);
+  }, [isOpen]);
 
   const handleRematchClick = () => {
     soundService.playClick();
@@ -156,12 +127,6 @@ export const GameResultsModal: React.FC<GameResultsModalProps> = ({
               </div>
             </div>
           ))}
-        </div>
-
-        {/* Local Demo Badge */}
-        <div className="flex items-center justify-center gap-1.5 text-[11px] text-[#756D82]">
-          <Award className="w-3.5 h-3.5 text-[#9670E8]" />
-          <span>Local Demo Match Results Recorded to History</span>
         </div>
 
         {/* Action Buttons */}

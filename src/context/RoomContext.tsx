@@ -58,7 +58,7 @@ function formatSnapshotToRoomSession(snapshot: any): RoomSession {
         (snapshot.hostId && (p.userId || p.id) === snapshot.hostId),
       isReady: p.isReady ?? false,
       isDemo: false,
-      isOnline: p.isOnline ?? true,
+      isOnline: p.isOnline ?? false,
     })),
     gameVotes: snapshot.gameVotes || {},
     chatMessages: (snapshot.chatMessages || snapshot.messages || []).map((m: any) => ({

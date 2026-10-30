@@ -78,20 +78,16 @@ export const Footer: React.FC = () => {
                   Audio & Preferences
                 </Link>
               </li>
-              <li>
-                <Link to="/admin" className="hover:text-[#D97706] transition-colors">
-                  Admin Demo Preview
-                </Link>
-              </li>
+
             </ul>
           </div>
         </div>
 
         {/* Bottom divider and copyright */}
         <div className="pt-8 border-t border-[#EAE3F3] flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-[#756D82]">
-          <p>© 2026 PlaySpace. Complete Frontend Prototype (Phase 1, 2 & 3).</p>
+          <p>© 2026 PlaySpace.</p>
           <p className="text-center sm:text-right">
-            11 Local Playable Games • Web Audio API • Responsive Mobile & Desktop
+            11 games • Couple & Friend modes
           </p>
         </div>
       </div>
