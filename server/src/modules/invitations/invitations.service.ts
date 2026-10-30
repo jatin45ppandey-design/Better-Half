@@ -11,6 +11,23 @@ export class InvitationsService {
       throw new AppError('You cannot invite yourself', 400);
     }
 
+    // Check account status for both users
+    const [senderProfile, receiverProfile] = await Promise.all([
+      prisma.userProfile.findUnique({ where: { id: senderId } }),
+      prisma.userProfile.findUnique({
+        where: { id: receiverId },
+        include: { settings: true },
+      }),
+    ]);
+
+    if (!receiverProfile || receiverProfile.accountStatus === 'SUSPENDED') {
+      throw new ForbiddenError('Cannot invite this user');
+    }
+
+    if (senderProfile?.accountStatus === 'SUSPENDED') {
+      throw new ForbiddenError('Your account is suspended');
+    }
+
     // Check if blocked in either direction
     const isBlocked = await prisma.blockedUser.findFirst({
       where: {
@@ -23,6 +40,21 @@ export class InvitationsService {
 
     if (isBlocked) {
       throw new ForbiddenError('Cannot invite this user');
+    }
+
+    // Check receiver settings regarding direct invites
+    if (receiverProfile.settings?.allowDirectInvites === false) {
+      const isFriend = await prisma.friendship.findFirst({
+        where: {
+          OR: [
+            { userId: senderId, friendId: receiverId },
+            { userId: receiverId, friendId: senderId },
+          ],
+        },
+      });
+      if (!isFriend) {
+        throw new ForbiddenError('This user does not accept direct room invitations');
+      }
     }
 
     // Verify room exists and sender is an active participant
@@ -62,58 +94,71 @@ export class InvitationsService {
       throw new ConflictError('User is already in this room');
     }
 
-    // Check for existing pending invitation
-    const existingInvite = await prisma.roomInvitation.findFirst({
+    // Check for existing invitation record (reopen safely if previously declined/expired/cancelled)
+    const existingInvite = await prisma.roomInvitation.findUnique({
       where: {
-        roomId,
-        receiverId,
-        status: 'PENDING',
-        expiresAt: { gt: new Date() },
+        roomId_receiverId: {
+          roomId,
+          receiverId,
+        },
       },
     });
 
-    if (existingInvite) {
+    if (existingInvite && existingInvite.status === 'PENDING' && existingInvite.expiresAt > new Date()) {
       throw new ConflictError('A pending invitation already exists for this user');
     }
 
     const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
 
-    const invitation = await prisma.roomInvitation.create({
-      data: {
-        roomId,
-        senderId,
-        receiverId,
-        status: 'PENDING',
-        expiresAt,
-      },
-      include: {
-        sender: {
-          select: {
-            id: true,
-            username: true,
-            displayName: true,
-            avatarUrl: true,
-          },
-        },
-        receiver: {
-          select: {
-            id: true,
-            username: true,
-            displayName: true,
-            avatarUrl: true,
-          },
-        },
-        room: {
-          select: {
-            id: true,
-            code: true,
-            name: true,
-            mode: true,
-            maxPlayers: true,
-          },
+    const invitationIncludes = {
+      sender: {
+        select: {
+          id: true,
+          username: true,
+          displayName: true,
+          avatarUrl: true,
         },
       },
-    });
+      receiver: {
+        select: {
+          id: true,
+          username: true,
+          displayName: true,
+          avatarUrl: true,
+        },
+      },
+      room: {
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          mode: true,
+          maxPlayers: true,
+        },
+      },
+    };
+
+    const invitation = existingInvite
+      ? await prisma.roomInvitation.update({
+          where: { id: existingInvite.id },
+          data: {
+            senderId,
+            status: 'PENDING',
+            expiresAt,
+            createdAt: new Date(),
+          },
+          include: invitationIncludes,
+        })
+      : await prisma.roomInvitation.create({
+          data: {
+            roomId,
+            senderId,
+            receiverId,
+            status: 'PENDING',
+            expiresAt,
+          },
+          include: invitationIncludes,
+        });
 
     return invitation;
   }
@@ -177,6 +222,11 @@ export class InvitationsService {
    * Accept an invitation and join the room.
    */
   async acceptInvitation(invitationId: string, userId: string) {
+    const userProfile = await prisma.userProfile.findUnique({ where: { id: userId } });
+    if (userProfile?.accountStatus === 'SUSPENDED') {
+      throw new ForbiddenError('Your account is suspended');
+    }
+
     const invite = await prisma.roomInvitation.findUnique({
       where: { id: invitationId },
       include: { room: true },
@@ -195,22 +245,25 @@ export class InvitationsService {
     }
 
     if (invite.expiresAt < new Date()) {
-      await prisma.roomInvitation.update({
-        where: { id: invitationId },
+      await prisma.roomInvitation.updateMany({
+        where: { id: invitationId, status: 'PENDING' },
         data: { status: 'EXPIRED' },
       });
       throw new AppError('This invitation has expired', 400);
     }
 
-    // Join room using roomsService
-    const joinedRoom = await roomsService.joinRoom(userId, invite.room.code);
-
-    // Update invitation status
-    await prisma.roomInvitation.update({
-      where: { id: invitationId },
+    // Atomic conditional transition: only succeed if status is still PENDING
+    const updateResult = await prisma.roomInvitation.updateMany({
+      where: { id: invitationId, status: 'PENDING' },
       data: { status: 'ACCEPTED' },
     });
 
+    if (updateResult.count === 0) {
+      throw new ConflictError('Invitation has already been resolved or changed status');
+    }
+
+    // Join room using roomsService
+    const joinedRoom = await roomsService.joinRoom(userId, invite.room.code);
     return joinedRoom;
   }
 
@@ -234,12 +287,16 @@ export class InvitationsService {
       throw new AppError(`Invitation is already ${invite.status.toLowerCase()}`, 400);
     }
 
-    const updated = await prisma.roomInvitation.update({
-      where: { id: invitationId },
+    const updateResult = await prisma.roomInvitation.updateMany({
+      where: { id: invitationId, status: 'PENDING' },
       data: { status: 'DECLINED' },
     });
 
-    return updated;
+    if (updateResult.count === 0) {
+      throw new ConflictError('Invitation has already been resolved or changed status');
+    }
+
+    return { ...invite, status: 'DECLINED' };
   }
 
   /**
@@ -263,12 +320,16 @@ export class InvitationsService {
       throw new AppError(`Invitation is already ${invite.status.toLowerCase()}`, 400);
     }
 
-    const updated = await prisma.roomInvitation.update({
-      where: { id: invitationId },
+    const updateResult = await prisma.roomInvitation.updateMany({
+      where: { id: invitationId, status: 'PENDING' },
       data: { status: 'CANCELLED' },
     });
 
-    return updated;
+    if (updateResult.count === 0) {
+      throw new ConflictError('Invitation has already been resolved or changed status');
+    }
+
+    return { ...invite, status: 'CANCELLED' };
   }
 }
 

@@ -4,6 +4,19 @@ import { gameSessionService } from '../modules/games/core/gameSession.service.js
 import { presenceManager } from './presence.js';
 import { prisma } from '../config/prisma.js';
 import { safeSocketError } from './safeError.js';
+import {
+  roomJoinSchema,
+  roomLeaveSchema,
+  roomReadyUpdateSchema,
+  roomGameVoteSchema,
+  roomGameSelectSchema,
+  roomStartPrepareSchema,
+  roomHostTransferSchema,
+  roomPlayerKickSchema,
+  roomChatSendSchema,
+  roomReactionSendSchema,
+  validateSocketPayload,
+} from './socketSchemas.js';
 import type {
   ClientToServerEvents,
   ServerToClientEvents,
@@ -24,10 +37,24 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
   // Track socket connection in presence manager
   presenceManager.trackConnect(userId, socket.id);
 
+  const checkSuspension = (callback?: (res: { success: false; error: string }) => void): boolean => {
+    if (socket.data.accountStatus === 'SUSPENDED') {
+      callback?.({ success: false, error: 'Your account is suspended' });
+      socket.disconnect(true);
+      return true;
+    }
+    return false;
+  };
+
   /**
    * room:join
    */
-  socket.on('room:join', async (payload, callback) => {
+  socket.on('room:join', async (rawPayload, callback) => {
+    if (checkSuspension(callback)) return;
+
+    const payload = validateSocketPayload(roomJoinSchema, rawPayload, callback);
+    if (!payload) return;
+
     try {
       const { roomId, code } = payload;
       let targetRoom: any;
@@ -94,7 +121,12 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
   /**
    * room:leave
    */
-  socket.on('room:leave', async (payload, callback) => {
+  socket.on('room:leave', async (rawPayload, callback) => {
+    if (checkSuspension(callback)) return;
+
+    const payload = validateSocketPayload(roomLeaveSchema, rawPayload, callback);
+    if (!payload) return;
+
     try {
       const { roomId } = payload;
       const result = await roomsService.leaveRoom(roomId, userId);
@@ -127,7 +159,12 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
   /**
    * room:ready:update
    */
-  socket.on('room:ready:update', async (payload, callback) => {
+  socket.on('room:ready:update', async (rawPayload, callback) => {
+    if (checkSuspension(callback)) return;
+
+    const payload = validateSocketPayload(roomReadyUpdateSchema, rawPayload, callback);
+    if (!payload) return;
+
     try {
       const { roomId, isReady } = payload;
       const updatedRoom = await roomsService.toggleReady(roomId, userId, isReady);
@@ -139,7 +176,7 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
       const roomChannel = `room:${roomId}`;
       io.to(roomChannel).emit('room:player:ready', {
         userId,
-        isReady: participant ? participant.isReady : isReady,
+        isReady: participant ? participant.isReady : (isReady ?? false),
         roomStatus: updatedRoom.status,
       });
 
@@ -147,7 +184,7 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
 
       callback?.({
         success: true,
-        isReady: participant ? participant.isReady : isReady,
+        isReady: participant ? participant.isReady : (isReady ?? false),
       });
     } catch (err: any) {
       callback?.({ success: false, error: safeSocketError(err, 'Failed to update ready status') });
@@ -157,7 +194,12 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
   /**
    * room:game:vote
    */
-  socket.on('room:game:vote', async (payload, callback) => {
+  socket.on('room:game:vote', async (rawPayload, callback) => {
+    if (checkSuspension(callback)) return;
+
+    const payload = validateSocketPayload(roomGameVoteSchema, rawPayload, callback);
+    if (!payload) return;
+
     try {
       const { roomId, gameId } = payload;
       const updatedRoom = await roomsService.voteGame(roomId, userId, gameId);
@@ -180,7 +222,12 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
   /**
    * room:game:select
    */
-  socket.on('room:game:select', async (payload, callback) => {
+  socket.on('room:game:select', async (rawPayload, callback) => {
+    if (checkSuspension(callback)) return;
+
+    const payload = validateSocketPayload(roomGameSelectSchema, rawPayload, callback);
+    if (!payload) return;
+
     try {
       const { roomId, gameId } = payload;
       const updatedRoom = await roomsService.selectGame(roomId, userId, gameId);
@@ -201,7 +248,12 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
   /**
    * room:start:prepare
    */
-  socket.on('room:start:prepare', async (payload, callback) => {
+  socket.on('room:start:prepare', async (rawPayload, callback) => {
+    if (checkSuspension(callback)) return;
+
+    const payload = validateSocketPayload(roomStartPrepareSchema, rawPayload, callback);
+    if (!payload) return;
+
     try {
       const { roomId } = payload;
       const check = await roomsService.canStartGame(roomId, userId);
@@ -252,7 +304,12 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
   /**
    * room:host:transfer
    */
-  socket.on('room:host:transfer', async (payload, callback) => {
+  socket.on('room:host:transfer', async (rawPayload, callback) => {
+    if (checkSuspension(callback)) return;
+
+    const payload = validateSocketPayload(roomHostTransferSchema, rawPayload, callback);
+    if (!payload) return;
+
     try {
       const { roomId, newHostId } = payload;
       const updatedRoom = await roomsService.transferHost(roomId, userId, newHostId);
@@ -274,12 +331,28 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
   /**
    * room:player:kick
    */
-  socket.on('room:player:kick', async (payload, callback) => {
+  socket.on('room:player:kick', async (rawPayload, callback) => {
+    if (checkSuspension(callback)) return;
+
+    const payload = validateSocketPayload(roomPlayerKickSchema, rawPayload, callback);
+    if (!payload) return;
+
     try {
       const { roomId, targetUserId } = payload;
       const result = await roomsService.kickParticipant(roomId, userId, targetUserId);
 
       const roomChannel = `room:${roomId}`;
+
+      // Evict target user's active sockets from room channel and notify them
+      const targetSockets = presenceManager.getUserSockets(targetUserId);
+      for (const sId of targetSockets) {
+        const s = io.sockets.sockets.get(sId);
+        if (s) {
+          s.leave(roomChannel);
+          s.emit('room:player:kicked', { targetUserId, roomId });
+        }
+      }
+
       io.to(roomChannel).emit('room:player:kicked', { targetUserId });
       io.to(roomChannel).emit('room:state', result.room);
 
@@ -297,7 +370,12 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
   /**
    * room:chat:send
    */
-  socket.on('room:chat:send', async (payload, callback) => {
+  socket.on('room:chat:send', async (rawPayload, callback) => {
+    if (checkSuspension(callback)) return;
+
+    const payload = validateSocketPayload(roomChatSendSchema, rawPayload, callback);
+    if (!payload) return;
+
     try {
       const { roomId, message } = payload;
       const createdMessage = await roomsService.postMessage(roomId, userId, message);
@@ -314,12 +392,17 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
   /**
    * room:reaction:send
    */
-  socket.on('room:reaction:send', (payload, callback) => {
+  socket.on('room:reaction:send', (rawPayload, callback) => {
+    if (checkSuspension(callback)) return;
+
+    const payload = validateSocketPayload(roomReactionSendSchema, rawPayload, callback);
+    if (!payload) return;
+
     const { roomId, reaction } = payload;
 
-    // Verify user is an active participant / present in the room
-    const onlineUsers = presenceManager.getRoomOnlineUsers(roomId);
-    if (!onlineUsers.includes(userId)) {
+    // Verify user is present in the room
+    const userRooms = presenceManager.getUserRooms(userId);
+    if (!userRooms.includes(roomId)) {
       callback?.({ success: false, error: 'You are not present in this room' });
       return;
     }

@@ -112,6 +112,20 @@ export class MatchFinalizationService {
         },
       });
 
+      // Update room status to COMPLETED if associated with an active room
+      if (
+        context.roomId &&
+        context.roomId !== 'direct-room' &&
+        tx &&
+        tx.room &&
+        typeof tx.room.updateMany === 'function'
+      ) {
+        await tx.room.updateMany({
+          where: { id: context.roomId, status: 'IN_PROGRESS' },
+          data: { status: 'COMPLETED' },
+        });
+      }
+
       // 6. Create MatchParticipants
       for (const pResult of evaluation.participants) {
         const profile = userProfilesMap[pResult.userId] || {

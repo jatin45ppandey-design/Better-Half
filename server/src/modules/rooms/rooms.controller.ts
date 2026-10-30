@@ -155,8 +155,9 @@ export async function getMessages(req: Request, res: Response, next: NextFunctio
     const userId = req.user!.id;
     const roomId = getParam(req.params.id);
     const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 50;
-    const messages = await roomsService.getMessages(roomId, userId, limit);
-    res.status(200).json({ messages });
+    const cursor = typeof req.query.cursor === 'string' ? req.query.cursor : undefined;
+    const result = await roomsService.getMessages(roomId, userId, { cursor, limit });
+    res.status(200).json(result);
   } catch (error) {
     next(error);
   }

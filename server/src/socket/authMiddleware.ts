@@ -1,6 +1,7 @@
 import type { Socket } from 'socket.io';
 import { supabase } from '../config/supabase.js';
 import { prisma } from '../config/prisma.js';
+import { presenceManager } from './presence.js';
 
 export async function socketAuthMiddleware(
   socket: Socket,
@@ -55,6 +56,20 @@ export async function socketAuthMiddleware(
     socket.data.userId = userId;
     socket.data.email = email;
     socket.data.accountStatus = profile.accountStatus;
+
+    // Load user privacy settings for presence
+    try {
+      const settings = await prisma.userSettings.findUnique({
+        where: { userId },
+        select: { showOnlineStatus: true, ghostMode: true },
+      });
+      if (settings) {
+        presenceManager.setUserPrivacy(userId, settings);
+      }
+    } catch {
+      // Non-fatal fallback to defaults
+    }
+
     next();
   } catch (_err) {
     return next(new Error('Authentication failed: Account verification service unavailable'));

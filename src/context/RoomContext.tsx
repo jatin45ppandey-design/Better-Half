@@ -367,7 +367,7 @@ export const RoomProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setCurrentRoomCode(formatted.code);
 
         // Join socket channel
-        socketService.emit('room:join', { roomId: formatted.code, code: formatted.code });
+        socketService.emit('room:join', { roomId: formatted.id, code: formatted.code });
 
         return formatted;
       } catch (err: any) {
@@ -414,7 +414,7 @@ export const RoomProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setCurrentRoomCode(formatted.code);
 
         // Join socket channel
-        socketService.emit('room:join', { roomId: formatted.code, code: formatted.code });
+        socketService.emit('room:join', { roomId: formatted.id, code: formatted.code });
 
         return { success: true, room: formatted };
       } catch (err: any) {

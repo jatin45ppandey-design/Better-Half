@@ -1,4 +1,5 @@
 import { prisma } from '../../config/prisma.js';
+import { presenceManager } from '../../socket/presence.js';
 import type { z } from 'zod';
 import type { updateSettingsSchema } from './settings.schema.js';
 
@@ -42,6 +43,11 @@ export class SettingsService {
         volume: data.volume ?? 0.8,
         reducedMotion: data.reducedMotion ?? false,
       },
+    });
+
+    presenceManager.setUserPrivacy(userId, {
+      showOnlineStatus: updated.showOnlineStatus,
+      ghostMode: updated.ghostMode,
     });
 
     return updated;

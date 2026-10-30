@@ -10,6 +10,15 @@ import { gameActionService } from '../modules/games/core/gameAction.service.js';
 import { gameSessionService } from '../modules/games/core/gameSession.service.js';
 import { presenceManager } from './presence.js';
 import { safeSocketError } from './safeError.js';
+import {
+  gameSessionJoinSchema,
+  gameActionSchema,
+  gamePauseSchema,
+  gameResumeSchema,
+  gameRematchSchema,
+  gameSessionLeaveSchema,
+  validateSocketPayload,
+} from './socketSchemas.js';
 
 export function registerGameHandlers(
   io: Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>,
@@ -17,8 +26,22 @@ export function registerGameHandlers(
 ) {
   const userId = socket.data.userId;
 
+  const checkSuspension = (callback?: (res: { success: false; error: string }) => void): boolean => {
+    if (socket.data.accountStatus === 'SUSPENDED') {
+      callback?.({ success: false, error: 'Your account is suspended' });
+      socket.disconnect(true);
+      return true;
+    }
+    return false;
+  };
+
   // 1. Join Game Session
-  socket.on('game:session:join', async (payload, callback) => {
+  socket.on('game:session:join', async (rawPayload, callback) => {
+    if (checkSuspension(callback)) return;
+
+    const payload = validateSocketPayload(gameSessionJoinSchema, rawPayload, callback);
+    if (!payload) return;
+
     try {
       const { sessionId } = payload;
       const session = await gameSessionService.getOrRestoreSession(sessionId);
@@ -57,7 +80,12 @@ export function registerGameHandlers(
   });
 
   // 2. Submit Game Action
-  socket.on('game:action', async (payload, callback) => {
+  socket.on('game:action', async (rawPayload, callback) => {
+    if (checkSuspension(callback)) return;
+
+    const payload = validateSocketPayload(gameActionSchema, rawPayload, callback);
+    if (!payload) return;
+
     try {
       const result = await gameActionService.applyAction(payload, userId);
 
@@ -130,7 +158,12 @@ export function registerGameHandlers(
   });
 
   // 3. Pause Game Session
-  socket.on('game:pause', async (payload, callback) => {
+  socket.on('game:pause', async (rawPayload, callback) => {
+    if (checkSuspension(callback)) return;
+
+    const payload = validateSocketPayload(gamePauseSchema, rawPayload, callback);
+    if (!payload) return;
+
     try {
       await gameSessionService.pauseSession(payload.sessionId, userId);
       const publicState = gameStateService.getPublicProjection(payload.sessionId) || {};
@@ -148,7 +181,12 @@ export function registerGameHandlers(
   });
 
   // 4. Resume Game Session
-  socket.on('game:resume', async (payload, callback) => {
+  socket.on('game:resume', async (rawPayload, callback) => {
+    if (checkSuspension(callback)) return;
+
+    const payload = validateSocketPayload(gameResumeSchema, rawPayload, callback);
+    if (!payload) return;
+
     try {
       await gameSessionService.resumeSession(payload.sessionId, userId);
       const publicState = gameStateService.getPublicProjection(payload.sessionId) || {};
@@ -166,7 +204,12 @@ export function registerGameHandlers(
   });
 
   // 5. Rematch Request
-  socket.on('game:rematch:request', async (payload, callback) => {
+  socket.on('game:rematch:request', async (rawPayload, callback) => {
+    if (checkSuspension(callback)) return;
+
+    const payload = validateSocketPayload(gameRematchSchema, rawPayload, callback);
+    if (!payload) return;
+
     try {
       const newSession = await gameSessionService.rematchSession(payload.sessionId, userId);
 
@@ -183,7 +226,10 @@ export function registerGameHandlers(
   });
 
   // 6. Leave Game Session
-  socket.on('game:session:leave', (payload, callback) => {
+  socket.on('game:session:leave', (rawPayload, callback) => {
+    const payload = validateSocketPayload(gameSessionLeaveSchema, rawPayload, callback);
+    if (!payload) return;
+
     socket.leave(`session:${payload.sessionId}`);
     callback?.({ success: true });
   });
