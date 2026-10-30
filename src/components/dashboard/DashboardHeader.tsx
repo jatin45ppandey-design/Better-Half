@@ -184,7 +184,7 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
                 >
                   <span className="flex items-center gap-2">
                     <Users className="w-3.5 h-3.5" />
-                    Friend Mode (4P)
+                    Friend Mode (2–4P)
                   </span>
                   {activeMode === 'friend' && <span className="text-[10px]">Active</span>}
                 </button>

@@ -141,7 +141,7 @@ export const MatchHistoryPage: React.FC = () => {
               >
                 <option value="all">All Modes</option>
                 <option value="couple">Couple Mode (2P)</option>
-                <option value="friend">Friend Mode (4P)</option>
+                <option value="friend">Friend Mode (2–4P)</option>
               </select>
             </div>
 

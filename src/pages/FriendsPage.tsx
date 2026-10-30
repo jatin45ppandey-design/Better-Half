@@ -8,7 +8,7 @@ import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
 interface FriendItem {
   id: string; name: string; username: string; avatarInitials: string; avatarColor: string;
-  status: 'offline'; statusText: string; isMutualCouple?: boolean;
+  isMutualCouple?: boolean;
 }
 interface FriendRequestItem {
   id: string; name: string; username: string; avatarInitials: string; avatarColor: string;
@@ -63,7 +63,6 @@ export const FriendsPage: React.FC = () => {
       setFriends(friendsRes.friends.map((f) => ({
         id: f.id, name: f.displayName, username: `@${f.username}`,
         avatarInitials: f.avatarInitials || 'PL', avatarColor: f.avatarColor || '#9670E8',
-        status: 'offline', statusText: 'Presence unavailable',
       })));
       setRequests(requestsRes.incoming.map((r) => ({
         id: r.id, name: r.user.displayName, username: `@${r.user.username}`,

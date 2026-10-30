@@ -21,7 +21,7 @@ export const DashboardRoomActions: React.FC<DashboardRoomActionsProps> = ({
 
   const handleJoinSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!roomCodeInput.trim()) return;
+    if (roomCodeInput.trim().length !== 6) return;
     setJoinModalOpen(true);
   };
 
@@ -62,7 +62,7 @@ export const DashboardRoomActions: React.FC<DashboardRoomActionsProps> = ({
               }`}
             >
               <Users className="w-3.5 h-3.5" />
-              Friend (4P)
+              Friend (2–4P)
             </button>
           </div>
         </div>
@@ -136,7 +136,7 @@ export const DashboardRoomActions: React.FC<DashboardRoomActionsProps> = ({
               type="submit"
               variant="secondary"
               size="sm"
-              onClick={() => setJoinModalOpen(true)}
+              disabled={roomCodeInput.trim().length !== 6}
               className="font-bold shrink-0"
             >
               Join

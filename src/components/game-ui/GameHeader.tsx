@@ -59,7 +59,7 @@ export const GameHeader: React.FC<GameHeaderProps> = ({
                 {game.name}
               </h1>
               <Badge variant={mode === 'couple' ? 'pink' : 'lavender'} size="sm">
-                {mode === 'couple' ? 'Couple 2P' : 'Friend 4P'}
+                {mode === 'couple' ? 'Couple 2P' : 'Friend 2–4P'}
               </Badge>
             </div>
             {roomCode && (

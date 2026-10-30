@@ -12,7 +12,6 @@ import {
   Settings,
   Volume2,
   VolumeX,
-  Sparkles,
   Shield,
   LogOut,
   RefreshCw,
