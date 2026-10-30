@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Pause, HelpCircle, Clock, Volume2, VolumeX } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { GameIcon } from '../ui/GameIcon';
+import { Badge } from '../ui/Badge';
 import { soundService } from '../../services/soundService';
 import type { GameItem } from '../../types/game';
 
