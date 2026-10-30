@@ -2,9 +2,12 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { AlertCircle, Gamepad2, Loader2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../context/AuthContext';
 
 export const AuthCallbackPage: React.FC = () => {
   const navigate = useNavigate();
+  const { isAuthenticated, isLoading } = useAuth();
+  const [callbackComplete, setCallbackComplete] = useState(false);
   const completionRef = useRef<Promise<void> | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -69,7 +72,7 @@ export const AuthCallbackPage: React.FC = () => {
     void completionRef.current
       .then(() => {
         if (active) {
-          navigate('/dashboard', { replace: true });
+          setCallbackComplete(true);
         }
       })
       .catch((error: unknown) => {
@@ -89,6 +92,14 @@ export const AuthCallbackPage: React.FC = () => {
       active = false;
     };
   }, [navigate]);
+
+  useEffect(() => {
+    // Wait for AuthContext to consume the SIGNED_IN event (or its explicit
+    // getSession fallback) before entering a protected route.
+    if (callbackComplete && isAuthenticated && !isLoading) {
+      navigate('/dashboard', { replace: true });
+    }
+  }, [callbackComplete, isAuthenticated, isLoading, navigate]);
 
   return (
     <main className="min-h-screen flex items-center justify-center bg-[#FCFAFF] px-4 py-12">
