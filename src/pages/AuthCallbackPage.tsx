@@ -5,20 +5,13 @@ import { supabase } from '../lib/supabase';
 
 export const AuthCallbackPage: React.FC = () => {
   const navigate = useNavigate();
-  const startedRef = useRef(false);
+  const completionRef = useRef<Promise<void> | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
 
-    if (startedRef.current) {
-      return () => {
-        active = false;
-      };
-    }
-    startedRef.current = true;
-
-    const completeSignIn = async () => {
+    const completeSignIn = async (): Promise<void> => {
       const query = new URLSearchParams(window.location.search);
       const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''));
 
@@ -41,8 +34,8 @@ export const AuthCallbackPage: React.FC = () => {
         if (error) throw error;
         session = data.session;
       } else {
-        // Compatibility with an existing implicit-flow callback or a session
-        // already restored by another tab. No access token is logged or exposed.
+        // Compatibility with an implicit-flow callback or a session already
+        // restored by another tab. Tokens are never logged or rendered.
         const accessToken = hash.get('access_token');
         const refreshToken = hash.get('refresh_token');
 
@@ -65,24 +58,32 @@ export const AuthCallbackPage: React.FC = () => {
           'Google returned to PlaySpace, but no authenticated session was established. Please retry sign-in.'
         );
       }
-
-      if (active) {
-        navigate('/dashboard', { replace: true });
-      }
     };
 
-    void completeSignIn().catch((error: unknown) => {
-      if (!active) return;
-      console.error(
-        '[Auth Callback] Google sign-in could not be completed:',
-        error instanceof Error ? error.message : 'Unknown callback error'
-      );
-      setErrorMessage(
-        error instanceof Error
-          ? error.message
-          : 'Google sign-in could not be completed. Please try again.'
-      );
-    });
+    // React StrictMode replays effects in development. Keep one in-flight
+    // exchange promise so the single-use PKCE code is never exchanged twice.
+    if (!completionRef.current) {
+      completionRef.current = completeSignIn();
+    }
+
+    void completionRef.current
+      .then(() => {
+        if (active) {
+          navigate('/dashboard', { replace: true });
+        }
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        console.error(
+          '[Auth Callback] Google sign-in could not be completed:',
+          error instanceof Error ? error.message : 'Unknown callback error'
+        );
+        setErrorMessage(
+          error instanceof Error
+            ? error.message
+            : 'Google sign-in could not be completed. Please try again.'
+        );
+      });
 
     return () => {
       active = false;
