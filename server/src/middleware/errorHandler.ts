@@ -65,10 +65,18 @@ export function errorHandler(
     return;
   }
 
-  // 5. Generic 500 Server Error
-  // Log securely without leaking passwords or tokens
-  const safeMessage = err instanceof Error ? err.message : String(err);
-  console.error('[Internal Error]:', safeMessage);
+  // 5. Generic 500 Server Error.
+  // Do not write raw error messages, SQL, connection details, tokens or secrets to logs.
+  const errorName = err instanceof Error && /^[A-Za-z0-9_]+$/.test(err.name)
+    ? err.name
+    : 'UnknownError';
+  const errorCode = typeof err?.code === 'string' && /^[A-Z0-9_]+$/.test(err.code)
+    ? err.code
+    : undefined;
+  console.error('[Internal Error]', {
+    name: errorName,
+    ...(errorCode ? { code: errorCode } : {}),
+  });
 
   res.status(500).json({
     error: 'Internal Server Error',
