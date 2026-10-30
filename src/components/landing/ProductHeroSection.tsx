@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../../context/AuthContext';
 import { Gamepad2, Users, Heart, PlusCircle, LogIn } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { CreateRoomModal } from '../modals/CreateRoomModal';
@@ -8,10 +10,24 @@ export const ProductHeroSection: React.FC = () => {
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [joinModalOpen, setJoinModalOpen] = useState(false);
   const [joinInputCode, setJoinInputCode] = useState('');
+  const { isAuthenticated } = useAuth();
+  const navigate = useNavigate();
+
+  const handleCreateRoom = () => {
+    if (!isAuthenticated) {
+      navigate('/login');
+      return;
+    }
+    setCreateModalOpen(true);
+  };
 
   const handleInlineJoin = (e: React.FormEvent) => {
     e.preventDefault();
     if (joinInputCode.trim().length !== 6) return;
+    if (!isAuthenticated) {
+      navigate('/login');
+      return;
+    }
     setJoinModalOpen(true);
   };
 
@@ -46,7 +62,7 @@ export const ProductHeroSection: React.FC = () => {
               <Button
                 variant="primary"
                 size="lg"
-                onClick={() => setCreateModalOpen(true)}
+                onClick={handleCreateRoom}
                 leftIcon={<PlusCircle className="w-5 h-5" />}
                 className="w-full justify-center shadow-md shadow-[#593B91]/15 text-base font-bold"
               >

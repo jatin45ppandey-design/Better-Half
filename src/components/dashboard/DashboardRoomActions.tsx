@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { PlusCircle, LogIn, Sparkles, Heart, Users } from 'lucide-react';
 import { Button } from '../ui/Button';
-import { Badge } from '../ui/Badge';
 import { CreateRoomModal } from '../modals/CreateRoomModal';
 import { JoinRoomModal } from '../modals/JoinRoomModal';
 import { useAuth } from '../../context/AuthContext';
@@ -40,9 +39,6 @@ export const DashboardRoomActions: React.FC<DashboardRoomActionsProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
-          <Badge variant="purple" size="sm">
-            Phase 2 Live
-          </Badge>
           <div className="flex items-center gap-1 p-1 bg-[#F8F4FF] rounded-xl border border-[#EAE3F3]">
             <button
               type="button"
@@ -130,7 +126,7 @@ export const DashboardRoomActions: React.FC<DashboardRoomActionsProps> = ({
           <form onSubmit={handleJoinSubmit} className="flex items-center gap-2">
             <input
               type="text"
-              placeholder="e.g. LOVE22"
+              placeholder="6-character room code"
               value={roomCodeInput}
               onChange={(e) => setRoomCodeInput(e.target.value.toUpperCase().slice(0, 6))}
               className="flex-1 rounded-xl border border-[#EAE3F3] bg-[#FCFAFF] px-3.5 py-2 text-xs font-mono font-bold tracking-widest text-[#211A2D] placeholder-[#9D96A8] uppercase focus:border-[#9670E8] focus:bg-white focus:outline-none"

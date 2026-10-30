@@ -118,7 +118,7 @@ export const ModeSelector: React.FC<ModeSelectorProps> = ({
                   onClick={() => onOpenRoomModal(mode.id)}
                   className="text-xs text-[#593B91]"
                 >
-                  Room Preview
+                  Create Room
                 </Button>
               </div>
             </div>

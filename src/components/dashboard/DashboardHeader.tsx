@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   Gamepad2,
@@ -7,11 +7,12 @@ import {
   LogOut,
   ChevronDown,
   ExternalLink,
+  ShieldCheck,
 } from 'lucide-react';
 import { Avatar } from '../ui/Avatar';
-import { Badge } from '../ui/Badge';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
+import { api } from '../../services/api';
 
 interface DashboardHeaderProps {
   activeMode: 'couple' | 'friend';
@@ -24,15 +25,30 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
 }) => {
   const { user, logout } = useAuth();
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
+  const [canAccessAdmin, setCanAccessAdmin] = useState(false);
   const navigate = useNavigate();
   const { addToast } = useToast();
 
-  const handleLogout = () => {
-    logout();
-    addToast('Signed out of mock session', {
-      type: 'info',
-      message: 'You can sign back in anytime from the login page.',
-    });
+  useEffect(() => {
+    let active = true;
+    setCanAccessAdmin(false);
+    if (!user) return () => { active = false; };
+
+    void api.admin.getOverview()
+      .then((response) => {
+        if (active) setCanAccessAdmin(response.success === true);
+      })
+      .catch(() => {
+        if (active) setCanAccessAdmin(false);
+      });
+
+    return () => { active = false; };
+  }, [user?.id]);
+
+  const handleLogout = async () => {
+    await logout();
+    setProfileDropdownOpen(false);
+    addToast('Signed out of PlaySpace.', { type: 'info' });
     navigate('/login');
   };
 
@@ -124,11 +140,10 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
               initials={user?.avatarInitials || 'PL'}
               size="sm"
               bgColor={user?.avatarColor || 'bg-[#9670E8]'}
-              isOnline
             />
             <div className="hidden sm:flex flex-col text-left">
               <span className="text-xs font-bold text-[#211A2D] leading-tight">
-                {user?.name || 'Guest Player'}
+{user?.name || 'Player'}
               </span>
               <span className="text-[10px] text-[#756D82]">
                 {activeMode === 'couple' ? 'Couple Mode' : 'Friend Mode'}
@@ -142,12 +157,7 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
             <div className="absolute right-0 mt-2 w-64 bg-white rounded-2xl shadow-xl shadow-[#593B91]/10 border border-[#EAE3F3] p-3 z-50 animate-in fade-in zoom-in-95 duration-150">
               <div className="p-2.5 rounded-xl bg-[#F8F4FF] border border-[#EAE3F3] mb-2">
                 <p className="text-xs font-bold text-[#211A2D]">{user?.name || 'Player'}</p>
-                <p className="text-[11px] text-[#756D82] truncate">{user?.email || 'player@playspace.local'}</p>
-                <div className="mt-1.5 flex items-center gap-1.5">
-                  <Badge variant="warning" size="sm">
-                    Dev Mock Session
-                  </Badge>
-                </div>
+                <p className="text-[11px] text-[#756D82] truncate">{user?.email || 'Account'}</p>
               </div>
 
               <div className="flex flex-col gap-1 py-1 text-xs">
@@ -229,13 +239,16 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
                   Settings & Audio
                 </Link>
 
-                <Link
-                  to="/admin"
-                  onClick={() => setProfileDropdownOpen(false)}
-                  className="flex items-center gap-2 p-2 rounded-xl text-xs text-[#D97706] hover:bg-[#FEF3C7]/40 font-semibold transition-colors"
-                >
-                  Admin Preview
-                </Link>
+                {canAccessAdmin && (
+                  <Link
+                    to="/admin"
+                    onClick={() => setProfileDropdownOpen(false)}
+                    className="flex items-center gap-2 p-2 rounded-xl text-xs text-[#D97706] hover:bg-[#FEF3C7]/40 font-semibold transition-colors"
+                  >
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    Admin Console
+                  </Link>
+                )}
 
                 <Link
                   to="/"
@@ -248,7 +261,7 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
 
                 <button
                   type="button"
-                  onClick={handleLogout}
+                  onClick={() => void handleLogout()}
                   className="flex items-center gap-2 p-2 rounded-xl text-xs text-[#D94C65] hover:bg-[#FDF2F4] transition-colors cursor-pointer font-bold"
                 >
                   <LogOut className="w-3.5 h-3.5" />

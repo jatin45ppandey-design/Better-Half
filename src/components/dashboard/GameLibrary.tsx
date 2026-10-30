@@ -173,7 +173,7 @@ export const GameLibrary: React.FC<GameLibraryProps> = ({
                   }}
                   rightIcon={<Play className="w-3 h-3 fill-current" />}
                 >
-                  Preview
+                  View Rules
                 </Button>
               </div>
             </div>
