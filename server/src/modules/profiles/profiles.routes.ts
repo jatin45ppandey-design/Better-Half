@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { requireAuth } from '../../middleware/auth.js';
+import { requireAuth, requireAuthForProfileBootstrap } from '../../middleware/auth.js';
 import { validateRequest } from '../../middleware/validate.js';
 import { rateLimiter } from '../../middleware/rateLimiter.js';
 import {
@@ -13,7 +13,7 @@ import { updateProfileSchema, searchProfileSchema } from './profiles.schema.js';
 export const profileRoutes = Router();
 
 // Authenticated user's profile
-profileRoutes.get('/me', requireAuth, getMyProfile);
+profileRoutes.get('/me', requireAuthForProfileBootstrap, getMyProfile);
 profileRoutes.patch(
   '/me',
   requireAuth,
