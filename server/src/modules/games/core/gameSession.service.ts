@@ -1,3 +1,4 @@
+import { NotFoundError, ForbiddenError, AppError } from '../../../utils/errors.js';
 import { prisma } from '../../../config/prisma.js';
 import { isGameEligibleForMode, validatePlayerCount } from './gameRegistry.js';
 import { gameEngineFactory } from './gameEngineFactory.js';
@@ -36,12 +37,12 @@ export class GameSessionService {
     }
 
     if (!room) {
-      throw new Error('Room not found');
+      throw new NotFoundError('Room not found');
     }
 
     // 2. Validate host authority
     if (room.hostId !== hostUserId) {
-      throw new Error('Only the room host can start a game session');
+      throw new ForbiddenError('Only the room host can start a game session');
     }
 
     // 3. Validate mode eligibility
@@ -50,11 +51,11 @@ export class GameSessionService {
 
     // Enforce Couple-only hardcoded restriction
     if (mode === 'friend' && ['truth-or-dare', 'would-you-rather', 'between-us'].includes(gameId)) {
-      throw new Error(`Game "${gameId}" is restricted to Couple Mode only.`);
+      throw new AppError(`Game "${gameId}" is restricted to Couple Mode only.`, 400);
     }
 
     if (!isGameEligibleForMode(gameId, mode)) {
-      throw new Error(`Game "${gameId}" is not allowed in ${room.mode} Mode`);
+      throw new AppError(`Game "${gameId}" is not allowed in ${room.mode} Mode`, 400);
     }
 
     // Enforce GameConfiguration server-side check
@@ -63,30 +64,30 @@ export class GameSessionService {
     });
     if (gameConfig) {
       if (!gameConfig.isEnabled) {
-        throw new Error(`Game "${gameId}" is currently disabled by administrators.`);
+        throw new AppError(`Game "${gameId}" is currently disabled by administrators.`, 400);
       }
       if (mode === 'friend' && !gameConfig.friendEnabled) {
-        throw new Error(`Game "${gameId}" is disabled in Friend Mode.`);
+        throw new AppError(`Game "${gameId}" is disabled in Friend Mode.`, 400);
       }
       if (mode === 'couple' && !gameConfig.coupleEnabled) {
-        throw new Error(`Game "${gameId}" is disabled in Couple Mode.`);
+        throw new AppError(`Game "${gameId}" is disabled in Couple Mode.`, 400);
       }
     }
 
     // 4. Validate participant counts & readiness
     const activeParticipants = room.participants.filter((p) => !p.leftAt);
     if (!validatePlayerCount(gameId, activeParticipants.length)) {
-      throw new Error(`Invalid player count (${activeParticipants.length}) for game "${gameId}"`);
+      throw new AppError(`Invalid player count (${activeParticipants.length}) for game "${gameId}"`, 400);
     }
 
     if (mode === 'couple' && activeParticipants.length !== 2) {
-      throw new Error('Couple Mode requires exactly 2 players to start');
+      throw new AppError('Couple Mode requires exactly 2 players to start', 400);
     }
 
     // Check readiness (all non-host players must be ready, or in 2-player mode all ready)
     const notReady = activeParticipants.filter((p) => p.userId !== hostUserId && !p.isReady);
     if (notReady.length > 0) {
-      throw new Error('All players must be ready before starting the match');
+      throw new AppError('All players must be ready before starting the match', 400);
     }
 
     // 5. Query active questions from QuestionEntry if applicable
@@ -191,10 +192,10 @@ export class GameSessionService {
     actorUserId: string
   ): Promise<GameEngineContext> {
     const session = gameStateService.getSession(sessionId);
-    if (!session) throw new Error('Session not found');
+    if (!session) throw new NotFoundError('Session not found');
 
     const participant = session.participants.find((p) => p.userId === actorUserId);
-    if (!participant) throw new Error('Unauthorized');
+    if (!participant) throw new ForbiddenError('Not a participant of this game session');
 
     const nextVersion = session.version + 1;
 
@@ -249,11 +250,11 @@ export class GameSessionService {
     hostUserId: string
   ): Promise<GameEngineContext> {
     const prevSession = gameStateService.getSession(sessionId);
-    if (!prevSession) throw new Error('Session not found');
+    if (!prevSession) throw new NotFoundError('Session not found');
 
     const hostParticipant = prevSession.participants.find((p) => p.userId === hostUserId);
     if (!hostParticipant || !hostParticipant.isHost) {
-      throw new Error('Only the host can initiate a rematch');
+      throw new ForbiddenError('Only the host can initiate a rematch');
     }
 
     const gameId = prevSession.gameId;
@@ -269,7 +270,7 @@ export class GameSessionService {
 
     // Enforce Couple-only restriction
     if (mode === 'friend' && ['truth-or-dare', 'would-you-rather', 'between-us'].includes(gameId)) {
-      throw new Error(`Game "${gameId}" is restricted to Couple Mode only.`);
+      throw new AppError(`Game "${gameId}" is restricted to Couple Mode only.`, 400);
     }
 
     // Query active questions from QuestionEntry if applicable
