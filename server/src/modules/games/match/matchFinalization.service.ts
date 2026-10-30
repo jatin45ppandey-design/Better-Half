@@ -196,7 +196,6 @@ export class MatchFinalizationService {
 
           const isCoop = evaluation.resultType === 'COOPERATIVE';
           const isComp = evaluation.resultType === 'COMPETITIVE' || evaluation.resultType === 'DRAW';
-          const isAbandoned = evaluation.resultType === 'ABANDONED';
 
           let lowWon = false;
           let highWon = false;
