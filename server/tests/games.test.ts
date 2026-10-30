@@ -5,6 +5,7 @@ import { createApp } from '../src/app.js';
 import { createSocketServer } from '../src/socket/index.js';
 import { gameSessionService } from '../src/modules/games/core/gameSession.service.js';
 import { gameEngineFactory } from '../src/modules/games/core/gameEngineFactory.js';
+import { gameStateService } from '../src/modules/games/core/gameState.service.js';
 import { prisma } from '../src/config/prisma.js';
 
 describe('PlaySpace Phase 3 — All 11 Server Game Engines & Real-time Integration', () => {
@@ -911,4 +912,47 @@ describe('PlaySpace Phase 3 — All 11 Server Game Engines & Real-time Integrati
       expect(resumeDataB.sessionId).toBe(session.sessionId);
     });
   });
+  describe('Session private projection authorization', () => {
+    it('returns each participant only their own private state and denies outsiders', () => {
+      const sessionId = 'wave1-private-projection-test';
+      const project = vi.fn((privateState: unknown) => ({ privateState }));
+      const engineSpy = vi.spyOn(gameEngineFactory, 'getEngine').mockReturnValue({
+        getPrivateProjection: project,
+      } as any);
+
+      gameStateService.setSession(sessionId, {
+        sessionId,
+        gameId: 'truth-or-dare',
+        mode: 'couple',
+        participants: [
+          { userId: 'private-user-a', name: 'Player A', seatIndex: 0 },
+          { userId: 'private-user-b', name: 'Player B', seatIndex: 1 },
+        ],
+        state: { round: 1 },
+        privateStates: {
+          'private-user-a': { secret: 'A-only-answer' },
+          'private-user-b': { secret: 'B-only-answer' },
+        },
+        version: 1,
+        isPaused: false,
+        status: 'ACTIVE',
+        scores: {},
+      } as any);
+
+      try {
+        expect(gameStateService.getPrivateProjection(sessionId, 'private-user-a')).toEqual({
+          privateState: { secret: 'A-only-answer' },
+        });
+        expect(gameStateService.getPrivateProjection(sessionId, 'private-user-b')).toEqual({
+          privateState: { secret: 'B-only-answer' },
+        });
+        expect(gameStateService.getPrivateProjection(sessionId, 'unrelated-user')).toBeNull();
+        expect(project).toHaveBeenCalledTimes(2);
+      } finally {
+        gameStateService.removeSession(sessionId);
+        engineSpy.mockRestore();
+      }
+    });
+  });
+
 });
