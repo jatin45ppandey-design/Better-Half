@@ -613,9 +613,7 @@ export const RoomLobbyPage: React.FC = () => {
                   <MessageSquare className="w-3.5 h-3.5" />
                   Room Chat
                 </span>
-                <Badge variant="subtle" size="sm">
-                  Simulated
-                </Badge>
+
               </div>
 
               {/* Chat Message Scroll */}

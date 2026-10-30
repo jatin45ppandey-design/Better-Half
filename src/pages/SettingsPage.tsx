@@ -96,13 +96,12 @@ export const SettingsPage: React.FC = () => {
     navigate('/login');
   };
 
-  const toggleRows: Array<{ key: Exclude<EditableSetting, 'volume'>; title: string; description: string }> = [
+  const toggleRows: Array<{ key: Exclude<EditableSetting, 'volume' | 'soundMuted'>; title: string; description: string }> = [
     { key: 'showOnlineStatus', title: 'Show online status', description: 'Let friends see when you are available.' },
     { key: 'allowDirectInvites', title: 'Allow direct invitations', description: 'Allow friends to invite you to their rooms.' },
     { key: 'publicMatchHistory', title: 'Public match history', description: 'Allow your recorded match history on your public profile.' },
     { key: 'ghostMode', title: 'Ghost mode', description: 'Hide your presence from friend discovery.' },
     { key: 'reducedMotion', title: 'Reduced motion', description: 'Reduce motion effects and animations throughout PlaySpace.' },
-    { key: 'soundMuted', title: 'Mute sound effects', description: 'Turn off synthesized interface and game sound effects.' },
   ];
 
   return (
