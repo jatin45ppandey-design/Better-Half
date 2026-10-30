@@ -549,7 +549,7 @@ export const FriendsPage: React.FC = () => {
                 </div>
                 <p className="text-xs text-[#756D82]">{selectedFriend.username}</p>
                 <div className="mt-1.5">
-                  {getStatusBadge(selectedFriend.status, selectedFriend.statusText)}
+                  {getStatusBadge()}
                 </div>
               </div>
             </div>

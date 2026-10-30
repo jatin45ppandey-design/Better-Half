@@ -173,7 +173,7 @@ export const SettingsPage: React.FC = () => {
                       variant="outline"
                       size="sm"
                       disabled={settings.soundMuted || savingField !== null || volumeDraft === settings.volume}
-                      loading={savingField === 'volume'}
+                      isLoading={savingField === 'volume'}
                       onClick={() => void saveSetting('volume', volumeDraft)}
                     >
                       Save

@@ -30,7 +30,7 @@ export const CompactGameDiscovery: React.FC = () => {
         <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-8">
           <div>
             <Badge variant="subtle" size="sm" className="mb-2">
-              Game Catalog Preview
+              Explore the Games
             </Badge>
             <h2 className="text-2xl sm:text-3xl font-extrabold text-[#211A2D] tracking-tight">
               Featured Multiplayer Games

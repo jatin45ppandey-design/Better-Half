@@ -611,7 +611,7 @@ export const RoomLobbyPage: React.FC = () => {
               <div className="flex items-center justify-between pb-3 border-b border-[#F4EFFB] mb-3">
                 <span className="text-xs font-bold uppercase tracking-wider text-[#593B91] flex items-center gap-1.5">
                   <MessageSquare className="w-3.5 h-3.5" />
-                  Room Chat (Demo)
+                  Room Chat
                 </span>
                 <Badge variant="subtle" size="sm">
                   Simulated
