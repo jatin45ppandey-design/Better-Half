@@ -275,7 +275,7 @@ export class TicTacToeEngine
       roundStatus: state.roundStatus,
       winningCombo: state.winningCombo,
       matchWinnerUserId: state.matchWinnerUserId,
-      history: state.history.slice(0, 5),
+      history: (state.history || []).slice(0, 5),
     };
   }
 

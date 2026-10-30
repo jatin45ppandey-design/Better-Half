@@ -45,6 +45,7 @@ describe('PlaySpace Phase 3 — All 11 Server Game Engines & Real-time Integrati
 
     vi.spyOn(prisma.gameAction, 'findFirst').mockResolvedValue(null);
     vi.spyOn(prisma.gameSession, 'update').mockResolvedValue({} as any);
+    vi.spyOn(prisma.gameSession, 'updateMany').mockResolvedValue({ count: 1 } as any);
     vi.spyOn(prisma.gameConfiguration, 'findUnique').mockResolvedValue(null);
     vi.spyOn(prisma, '$transaction').mockImplementation(async (arg: any) => {
       if (typeof arg === 'function') {

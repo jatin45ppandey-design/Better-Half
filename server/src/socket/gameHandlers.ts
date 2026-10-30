@@ -21,7 +21,7 @@ export function registerGameHandlers(
   socket.on('game:session:join', async (payload, callback) => {
     try {
       const { sessionId } = payload;
-      const session = gameStateService.getSession(sessionId);
+      const session = await gameSessionService.getOrRestoreSession(sessionId);
 
       if (!session) {
         callback?.({ success: false, error: 'Game session not found.' });

@@ -8,5 +8,11 @@ export function safeSocketError(error: unknown, fallback: string): string {
   if (error instanceof AppError) {
     return error.message;
   }
+  if (
+    error instanceof Error &&
+    (error.message === 'Room not found' || error.message === 'Game session not found.')
+  ) {
+    return error.message;
+  }
   return fallback;
 }

@@ -3,6 +3,7 @@ import { createApp } from './app.js';
 import { env } from './config/env.js';
 import { prisma } from './config/prisma.js';
 import { createSocketServer } from './socket/index.js';
+import { gameSessionService } from './modules/games/core/gameSession.service.js';
 
 const app = createApp();
 const httpServer = http.createServer(app);
@@ -20,6 +21,15 @@ httpServer.listen(PORT, HOST, () => {
   console.log(`🩺 Health: http://${HOST}:${PORT}/api/v1/health`);
   console.log(`🗄️ Ready:  http://${HOST}:${PORT}/api/v1/ready`);
   console.log(`===============================================`);
+
+  // Restore any active or paused sessions from DB on startup
+  gameSessionService.restoreActiveSessions().then((count) => {
+    if (count > 0) {
+      console.log(`🔄 Restored ${count} active/paused game session(s) from database.`);
+    }
+  }).catch((err) => {
+    console.warn('Could not restore sessions on startup:', err);
+  });
 });
 
 // Graceful shutdown

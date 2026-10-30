@@ -67,7 +67,7 @@ export const gamesController = {
         return res.status(401).json({ error: 'Unauthorized' });
       }
 
-      const session = gameStateService.getSession(sessionId);
+      const session = await gameSessionService.getOrRestoreSession(sessionId);
       if (!session) {
         return res.status(404).json({ error: 'Game session not found' });
       }
@@ -100,7 +100,7 @@ export const gamesController = {
         return res.status(401).json({ error: 'Unauthorized' });
       }
 
-      const session = gameStateService.getSession(sessionId);
+      const session = await gameSessionService.getOrRestoreSession(sessionId);
       if (!session) return res.status(404).json({ error: 'Game session not found' });
 
       if (!gameStateService.getSessionForParticipant(sessionId, userId)) {

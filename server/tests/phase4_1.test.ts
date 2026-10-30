@@ -150,6 +150,17 @@ describe('PlaySpace Phase 4.1 — Production Correctness & Reliability Remediati
       gameStateService.setSession('sess-prev-1', existingSession);
 
       vi.spyOn(prisma.gameConfiguration, 'findUnique').mockResolvedValue(null);
+      vi.spyOn(prisma.room, 'findUnique').mockResolvedValue({
+        id: 'room-rematch-1',
+        code: 'RMTCH1',
+        hostId: userHost.id,
+        mode: 'COUPLE',
+        status: 'READY_TO_START',
+        participants: [
+          { userId: userHost.id, leftAt: null, isReady: true, user: userHost },
+          { userId: userGuest.id, leftAt: null, isReady: true, user: userGuest },
+        ],
+      } as any);
       const txSpy = vi.spyOn(prisma, '$transaction').mockResolvedValueOnce([{}, {}] as any);
 
       const rematch = await gameSessionService.rematchSession('sess-prev-1', userHost.id);
@@ -639,8 +650,9 @@ describe('PlaySpace Phase 4.1 — Production Correctness & Reliability Remediati
       vi.spyOn(prisma.userProfile, 'findUnique').mockResolvedValueOnce(null);
 
       const res = await request(app)
-        .get('/api/v1/profiles/me')
-        .set('Authorization', 'Bearer test-mock-token-non-existent-user');
+        .patch('/api/v1/profiles/me')
+        .set('Authorization', 'Bearer test-mock-token-non-existent-user')
+        .send({ displayName: 'New Name' });
 
       expect(res.status).toBe(403);
       expect(res.body.code).toBe('PROFILE_NOT_FOUND');

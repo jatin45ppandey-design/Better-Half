@@ -1,4 +1,5 @@
 import type { GameActionEnvelope, ActionResult, GameEngineContext } from './gameEngine.types.js';
+import { gameSessionService } from './gameSession.service.js';
 import { gameStateService } from './gameState.service.js';
 import { gameEngineFactory } from './gameEngineFactory.js';
 import { prisma } from '../../../config/prisma.js';
@@ -46,7 +47,10 @@ export class GameActionService {
   ): Promise<ActionExecutionResult> {
     const { sessionId, actionId, expectedVersion, action } = envelope;
 
-    const session = gameStateService.getSession(sessionId);
+    let session = gameStateService.getSession(sessionId);
+    if (!session) {
+      session = await gameSessionService.getOrRestoreSession(sessionId);
+    }
     if (!session) {
       return { success: false, error: 'Session not found.', version: 0 };
     }
