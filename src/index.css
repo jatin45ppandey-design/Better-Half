@@ -1,0 +1,121 @@
+@import "tailwindcss";
+
+@theme {
+  --font-heading: "Outfit", sans-serif;
+  --font-sans: "Plus Jakarta Sans", sans-serif;
+
+  --color-bg-primary: #FCFAFF;
+  --color-surface: #FFFFFF;
+  --color-lavender-surface: #F1EAFF;
+  --color-lavender-subtle: #F8F4FF;
+  --color-lavender-primary: #9670E8;
+  --color-lavender-hover: #865CE3;
+  --color-purple-dark: #593B91;
+  --color-purple-deep: #3B2368;
+  --color-text-main: #211A2D;
+  --color-text-secondary: #756D82;
+  --color-border-main: #EAE3F3;
+  --color-border-subtle: #F4EFFB;
+  --color-status-success: #248A62;
+  --color-status-error: #D94C65;
+}
+
+:root {
+  --bg-primary: #FCFAFF;
+  --surface: #FFFFFF;
+  --lavender-surface: #F1EAFF;
+  --lavender-subtle: #F8F4FF;
+  --lavender-primary: #9670E8;
+  --purple-dark: #593B91;
+  --purple-deep: #3B2368;
+  --text-main: #211A2D;
+  --text-secondary: #756D82;
+  --border-main: #EAE3F3;
+  --border-subtle: #F4EFFB;
+  --status-success: #248A62;
+  --status-error: #D94C65;
+}
+
+html {
+  scroll-behavior: smooth;
+  font-family: var(--font-sans);
+  background-color: var(--bg-primary);
+  color: var(--text-main);
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow-x: hidden;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-heading);
+}
+
+/* Subtle gaming background pattern */
+.gaming-bg-grid {
+  background-image: radial-gradient(#9670E8 0.75px, transparent 0.75px);
+  background-size: 20px 20px;
+  background-position: 0 0;
+}
+
+/* Card depth & elevation */
+.gaming-panel {
+  background: #FFFFFF;
+  border: 1px solid #EAE3F3;
+  box-shadow: 0 2px 8px -2px rgba(89, 59, 145, 0.05), 0 1px 3px rgba(33, 26, 45, 0.03);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.gaming-panel-interactive {
+  background: #FFFFFF;
+  border: 1px solid #EAE3F3;
+  box-shadow: 0 2px 8px -2px rgba(89, 59, 145, 0.05), 0 1px 3px rgba(33, 26, 45, 0.03);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.gaming-panel-interactive:hover {
+  transform: translateY(-2px);
+  border-color: #D5C7EE;
+  box-shadow: 0 12px 24px -6px rgba(89, 59, 145, 0.09), 0 4px 8px -2px rgba(89, 59, 145, 0.04);
+}
+
+/* Custom soft scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #F8F4FF;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #D9CAFA;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #9670E8;
+}
+
+/* Reduced motion preference */
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* User manual reduced motion preference */
+html.reduce-motion *, html.reduce-motion ::before, html.reduce-motion ::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}

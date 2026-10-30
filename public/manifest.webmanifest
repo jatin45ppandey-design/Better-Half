@@ -1,0 +1,17 @@
+{
+  "name": "PlaySpace — Social Multiplayer Gaming",
+  "short_name": "PlaySpace",
+  "description": "Playful social multiplayer gaming platform for couples and groups of friends.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#FCFAFF",
+  "theme_color": "#593B91",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
