@@ -2,7 +2,12 @@ import { Request, Response, NextFunction } from 'express';
 import { supabase } from '../config/supabase.js';
 import { checkAccountStatus } from './rbac.js';
 
-export async function requireAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
+async function authenticateRequest(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+  allowProfileBootstrap = false
+): Promise<void> {
   const authHeader = req.headers.authorization;
 
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -23,7 +28,12 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     return;
   }
 
-  // Support test mocking when running tests with TEST_AUTH_USER_ID
+  const verifyAccount = () =>
+    checkAccountStatus(req, res, next, {
+      allowMissingProfile: allowProfileBootstrap,
+    });
+
+  // Support test mocking when running tests with test-mock-token-* tokens.
   if (process.env.NODE_ENV === 'test' && token.startsWith('test-mock-token-')) {
     const testUserId = token.replace('test-mock-token-', '');
     req.user = {
@@ -32,8 +42,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
       user_metadata: { name: 'Test User' },
     };
 
-    // Execute account status verification after identity is established
-    await checkAccountStatus(req, res, next);
+    await verifyAccount();
     return;
   }
 
@@ -54,8 +63,9 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
       user_metadata: data.user.user_metadata,
     };
 
-    // Execute account status verification after identity is established
-    await checkAccountStatus(req, res, next);
+    // The profile bootstrap exception is used only by GET /profiles/me.
+    // Suspended existing accounts and database verification failures still fail closed.
+    await verifyAccount();
   } catch (err) {
     console.error('Error during token verification:', err instanceof Error ? err.message : err);
     res.status(401).json({
@@ -63,4 +73,16 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
       message: 'Failed to verify token credentials',
     });
   }
+}
+
+export async function requireAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
+  await authenticateRequest(req, res, next, false);
+}
+
+export async function requireAuthForProfileBootstrap(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  await authenticateRequest(req, res, next, true);
 }
