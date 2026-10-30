@@ -65,8 +65,7 @@ export const gamesController = {
         return res.status(404).json({ error: 'Game session not found' });
       }
 
-      const participant = session.participants.find((p) => p.userId === userId);
-      if (!participant) {
+      if (!gameStateService.getSessionForParticipant(sessionId, userId)) {
         return res.status(403).json({ error: 'Not a participant of this game session' });
       }
 
@@ -94,20 +93,23 @@ export const gamesController = {
         return res.status(401).json({ error: 'Unauthorized' });
       }
 
-      const publicState = gameStateService.getPublicProjection(sessionId);
-      if (!publicState) {
-        return res.status(404).json({ error: 'Game session not found' });
+      const session = gameStateService.getSession(sessionId);
+      if (!session) return res.status(404).json({ error: 'Game session not found' });
+
+      if (!gameStateService.getSessionForParticipant(sessionId, userId)) {
+        return res.status(403).json({ error: 'Not a participant of this game session' });
       }
 
-      const privateState = gameStateService.getPrivateProjection(sessionId, userId);
+      const publicState = gameStateService.getPublicProjection(sessionId);
+      if (!publicState) return res.status(404).json({ error: 'Game session not found' });
 
-      return res.status(200).json({
-        sessionId,
-        publicState,
-        privateState,
+      const privateState = gameStateService.getPrivateProjection(sessionId, userId);
+      return res.status(200).json({ sessionId, publicState, privateState });
+    } catch {
+      return res.status(500).json({
+        error: 'Internal Server Error',
+        message: 'Unable to retrieve game session state.',
       });
-    } catch (err: any) {
-      return res.status(500).json({ error: err.message || 'Internal server error' });
     }
   },
 

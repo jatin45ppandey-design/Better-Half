@@ -19,7 +19,7 @@ export async function createRoom(req: Request, res: Response, next: NextFunction
 export async function getRoomById(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const roomId = getParam(req.params.id);
-    const room = await roomsService.getRoomById(roomId);
+    const room = await roomsService.getRoomById(roomId, req.user!.id);
     res.status(200).json(room);
   } catch (error) {
     next(error);
@@ -29,7 +29,7 @@ export async function getRoomById(req: Request, res: Response, next: NextFunctio
 export async function getRoomByCode(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const code = getParam(req.params.code).toUpperCase().trim();
-    const room = await roomsService.getRoomByCode(code);
+    const room = await roomsService.getRoomByCode(code, req.user!.id);
     res.status(200).json(room);
   } catch (error) {
     next(error);

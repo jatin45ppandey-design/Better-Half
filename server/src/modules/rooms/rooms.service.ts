@@ -217,26 +217,81 @@ export class RoomsService {
   }
 
   /**
-   * Get room snapshot by ID
+   * Resolve room access for the caller. Active members receive the complete
+   * snapshot; non-members receive a join-safe projection with no internal IDs,
+   * host ownership metadata, votes or chat history.
    */
-  async getRoomById(roomId: string) {
-    const room = await this.findRoomWithRelations({ id: roomId });
-    if (!room) {
-      throw new NotFoundError('Room not found');
+  private async getRoomForUser(where: { id?: string; code?: string }, userId: string) {
+    const room = await prisma.room.findFirst({
+      where,
+      select: {
+        id: true, code: true, name: true, mode: true, status: true,
+        maxPlayers: true, selectedGameId: true, hostId: true, expiresAt: true,
+        host: { select: { displayName: true } },
+        participants: {
+          where: { leftAt: null },
+          select: {
+            userId: true, role: true, isReady: true,
+            user: { select: { displayName: true, avatarUrl: true, avatarInitials: true, avatarColor: true } },
+          },
+          orderBy: { joinedAt: 'asc' },
+        },
+      },
+    });
+    if (!room) throw new NotFoundError('Room not found');
+
+    if (room.participants.some((participant) => participant.userId === userId)) {
+      const fullRoom = await this.findRoomWithRelations({ id: room.id });
+      if (!fullRoom) throw new NotFoundError('Room not found');
+      return this.formatRoomSnapshot(fullRoom);
     }
-    return this.formatRoomSnapshot(room);
+
+    const participantCount = room.participants.length;
+    const isBlocked = await prisma.blockedUser.findFirst({
+      where: { OR: [
+        { blockerId: userId, blockedUserId: room.hostId },
+        { blockerId: room.hostId, blockedUserId: userId },
+      ] },
+      select: { id: true },
+    });
+    const isInactive = room.status === ROOM_STATUS.CLOSED || room.status === ROOM_STATUS.EXPIRED;
+    const isExpired = room.expiresAt <= new Date();
+    const isFull = participantCount >= room.maxPlayers;
+    const canJoin = !isBlocked && !isInactive && !isExpired && !isFull;
+
+    return {
+      isJoinPreview: true,
+      code: room.code,
+      name: room.name,
+      mode: room.mode.toLowerCase() as 'couple' | 'friend',
+      status: room.status,
+      maxPlayers: room.maxPlayers,
+      selectedGameId: room.selectedGameId || (room.mode.toLowerCase() === 'couple' ? 'between-us' : 'uno-style'),
+      hostName: room.host?.displayName || 'Host',
+      participantCount,
+      participants: room.participants.map((participant) => ({
+        name: participant.user.displayName || 'Player',
+        avatarInitials: participant.user.avatarInitials || 'PL',
+        avatarColor: participant.user.avatarColor || '#9670E8',
+        avatarUrl: participant.user.avatarUrl,
+        isHost: participant.role === ROOM_PARTICIPANT_ROLES.HOST,
+        isReady: participant.isReady,
+      })),
+      canJoin,
+      joinUnavailableReason: isBlocked ? 'You are not allowed to join this room.'
+        : (isInactive || isExpired) ? 'This room is no longer active.'
+        : isFull ? 'This room is full.' : null,
+    };
   }
 
-  /**
-   * Get room snapshot by Code
-   */
-  async getRoomByCode(code: string) {
-    const cleanCode = code.trim().toUpperCase();
-    const room = await this.findRoomWithRelations({ code: cleanCode });
-    if (!room) {
-      throw new NotFoundError(`Room code '${cleanCode}' not found`);
-    }
-    return this.formatRoomSnapshot(room);
+  /** Full snapshot for active members; safe preview for all other callers. */
+  async getRoomById(roomId: string, userId: string) {
+    return this.getRoomForUser({ id: roomId }, userId);
+  }
+
+  /** Full snapshot for active members; safe preview for all other callers. */
+  async getRoomByCode(code: string, userId: string) {
+    return this.getRoomForUser({ code: code.trim().toUpperCase() }, userId);
   }
 
   /**

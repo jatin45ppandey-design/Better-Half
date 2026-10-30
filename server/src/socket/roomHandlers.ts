@@ -29,18 +29,17 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
   socket.on('room:join', async (payload, callback) => {
     try {
       const { roomId, code } = payload;
-      let targetRoom: RoomSnapshot | undefined;
+      let targetRoom: any;
 
       if (roomId) {
         try {
-          targetRoom = await roomsService.getRoomById(roomId);
+          targetRoom = await roomsService.getRoomById(roomId, userId);
         } catch {
-          if (code) {
-            targetRoom = await roomsService.getRoomByCode(code);
-          }
+          if (code) targetRoom = await roomsService.getRoomByCode(code, userId);
+          else throw new Error('Room not found');
         }
       } else if (code) {
-        targetRoom = await roomsService.getRoomByCode(code);
+        targetRoom = await roomsService.getRoomByCode(code, userId);
       }
 
       if (!targetRoom) {
@@ -48,17 +47,15 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
         return;
       }
 
-      // Check if user is already an active participant
-      const isParticipant = targetRoom.participants.some(
-        (p: { userId: string }) => p.userId === userId
-      );
-
-      let roomSnapshot: RoomSnapshot = targetRoom;
-
-      if (!isParticipant) {
-        // Join the room in DB
-        const joinResult = await roomsService.joinRoom(userId, targetRoom.code);
-        roomSnapshot = joinResult.room;
+      let roomSnapshot: RoomSnapshot;
+      if (targetRoom.isJoinPreview) {
+        if (!targetRoom.canJoin) {
+          callback?.({ success: false, error: targetRoom.joinUnavailableReason || 'This room cannot be joined.' });
+          return;
+        }
+        roomSnapshot = (await roomsService.joinRoom(userId, targetRoom.code)).room;
+      } else {
+        roomSnapshot = targetRoom as RoomSnapshot;
       }
 
       const roomChannel = `room:${roomSnapshot.id}`;
@@ -213,7 +210,7 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
         return;
       }
 
-      const room = await roomsService.getRoomById(roomId);
+      const room = await roomsService.getRoomById(roomId, userId);
       if (!room.selectedGameId) {
         callback?.({ success: false, error: 'No game selected' });
         return;

@@ -27,8 +27,8 @@ export function registerGameHandlers(
         return;
       }
 
-      const participant = session.participants.find((p) => p.userId === userId);
-      if (!participant) {
+      const authorizedSession = gameStateService.getSessionForParticipant(sessionId, userId);
+      if (!authorizedSession) {
         callback?.({ success: false, error: 'You are not a participant of this game session.' });
         return;
       }
