@@ -1,5 +1,5 @@
 import React from 'react';
-import { Users, Clock, Play, ShieldAlert } from 'lucide-react';
+import { Users, Clock, Play } from 'lucide-react';
 import { Modal } from '../ui/Modal';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';

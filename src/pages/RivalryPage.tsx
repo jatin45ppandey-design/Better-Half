@@ -255,7 +255,6 @@ export const RivalryPage: React.FC = () => {
                     initials={user?.avatarInitials || 'ME'}
                     size="lg"
                     bgColor="#9670E8"
-                    isOnline
                   />
                   <div>
                     <span className="text-xs font-bold text-[#9670E8] block uppercase tracking-wider">You</span>
@@ -290,7 +289,6 @@ export const RivalryPage: React.FC = () => {
                     src={rivalryDetail.rival.avatarUrl || undefined}
                     size="lg"
                     bgColor={rivalryDetail.rival.avatarColor || '#EC4899'}
-                    isOnline
                   />
                   <div>
                     <span className="text-xs font-bold text-[#EC4899] block uppercase tracking-wider">Opponent</span>

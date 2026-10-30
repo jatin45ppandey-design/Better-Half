@@ -34,6 +34,7 @@ interface RoomContextType {
 
 function formatSnapshotToRoomSession(snapshot: any): RoomSession {
   return {
+    id: snapshot.id,
     code: snapshot.code,
     name: snapshot.name,
     mode: (snapshot.mode || 'couple').toLowerCase() as 'couple' | 'friend',
