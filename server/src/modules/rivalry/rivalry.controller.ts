@@ -19,7 +19,12 @@ export class RivalryController {
       const detail = await rivalryService.getRivalryWithUser(currentUserId, rivalUserId);
       res.json({ success: true, data: detail });
     } catch (err: any) {
-      const status = err.message?.includes('not found') ? 404 : 400;
+      const message = err instanceof Error ? err.message : '';
+      const status = message.toLowerCase().includes('not found')
+        ? 404
+        : message.toLowerCase().includes('private') || message.toLowerCase().includes('not accessible')
+          ? 403
+          : 400;
       res.status(status).json({ success: false, error: err.message || 'Failed to fetch rivalry details.' });
     }
   }
@@ -32,7 +37,9 @@ export class RivalryController {
       const history = await rivalryService.getRivalryHistory(currentUserId, rivalUserId, limit);
       res.json({ success: true, data: history });
     } catch (err: any) {
-      res.status(400).json({ success: false, error: err.message || 'Failed to fetch rivalry match history.' });
+      const message = err instanceof Error ? err.message.toLowerCase() : '';
+      const status = message.includes('private') || message.includes('not accessible') ? 403 : 400;
+      res.status(status).json({ success: false, error: err.message || 'Failed to fetch rivalry match history.' });
     }
   }
 }

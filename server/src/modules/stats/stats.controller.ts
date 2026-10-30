@@ -39,7 +39,7 @@ export class StatsController {
       const stats = await statsService.getUserStats(targetUserId, requestingUserId);
       res.json({ success: true, data: stats });
     } catch (err: any) {
-      const status = err.message?.includes('private') ? 403 : 400;
+      const status = err.message?.includes('private') || err.message?.includes('not accessible') ? 403 : 400;
       res.status(status).json({ success: false, error: err.message || 'Failed to fetch player stats.' });
     }
   }
