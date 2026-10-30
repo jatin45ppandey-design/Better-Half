@@ -1,5 +1,11 @@
 import { Request, Response, NextFunction } from 'express';
 import { roomsService } from './rooms.service.js';
+import { NotFoundError } from '../../utils/errors.js';
+import {
+  getClientIp,
+  isRoomLookupBlocked,
+  recordFailedRoomLookup,
+} from '../../middleware/rateLimiter.js';
 
 function getParam(param: string | string[] | undefined): string {
   if (!param) return '';
@@ -28,10 +34,26 @@ export async function getRoomById(req: Request, res: Response, next: NextFunctio
 
 export async function getRoomByCode(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
+    const key = req.user?.id || getClientIp(req);
+    const bruteForceCheck = isRoomLookupBlocked(key);
+    if (bruteForceCheck.blocked) {
+      res.setHeader('Retry-After', bruteForceCheck.retryAfterSeconds);
+      res.status(429).json({
+        error: 'Too Many Requests',
+        message: 'Too many failed room lookup attempts. Please wait before trying again.',
+        retryAfter: bruteForceCheck.retryAfterSeconds,
+      });
+      return;
+    }
+
     const code = getParam(req.params.code).toUpperCase().trim();
     const room = await roomsService.getRoomByCode(code, req.user!.id);
     res.status(200).json(room);
   } catch (error) {
+    if (error instanceof NotFoundError) {
+      const key = req.user?.id || getClientIp(req);
+      recordFailedRoomLookup(key);
+    }
     next(error);
   }
 }

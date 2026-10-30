@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { api } from '../services/api';
+import { socketService } from '../services/socket';
 import type { User, AuthState } from '../types/auth';
 
 interface AuthContextType extends AuthState {
@@ -314,6 +315,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     try {
+      socketService.disconnect();
       const { error: signOutError } = await supabase.auth.signOut();
       if (signOutError) throw signOutError;
     } catch (err) {

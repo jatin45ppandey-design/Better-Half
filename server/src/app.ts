@@ -9,6 +9,9 @@ import { errorHandler } from './middleware/errorHandler.js';
 export function createApp() {
   const app = express();
 
+  // Trust first proxy hop (Render / reverse proxy headers)
+  app.set('trust proxy', 1);
+
   // Security Headers
   app.use(helmet());
 

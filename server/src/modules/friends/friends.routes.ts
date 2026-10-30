@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { requireAuth } from '../../middleware/auth.js';
 import { validateRequest } from '../../middleware/validate.js';
-import { rateLimiter } from '../../middleware/rateLimiter.js';
+import { rateLimiter, friendRequestsLimiter } from '../../middleware/rateLimiter.js';
 import {
   getFriends,
   getFriendRequests,
@@ -32,7 +32,7 @@ friendRoutes.get('/', getFriends);
 friendRoutes.get('/requests', getFriendRequests);
 friendRoutes.post(
   '/requests',
-  rateLimiter({ windowMs: 60 * 1000, max: 20 }),
+  friendRequestsLimiter,
   validateRequest({ body: sendFriendRequestSchema }),
   sendFriendRequest
 );
