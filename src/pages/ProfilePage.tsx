@@ -1,473 +1,251 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Navbar } from '../components/navigation/Navbar';
 import { Footer } from '../components/navigation/Footer';
 import { Avatar } from '../components/ui/Avatar';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
-import { mockSocialAdapter } from '../services/mockSocialAdapter';
-import type { PlayerProfileData } from '../services/mockSocialAdapter';
-import { api } from '../services/api';
+import { api, type UserProfileResponse, type UserSettingsResponse } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
-import { soundService } from '../services/soundService';
-import {
-  Trophy,
-  Swords,
-  HeartHandshake,
-  Percent,
-  Edit3,
-  Lock,
-  Gamepad2,
-  Calendar,
-  Sparkles,
-  CheckCircle2,
-} from 'lucide-react';
+import { GAMES_DATA } from '../data/games';
+import { Trophy, Gamepad2, Percent, Calendar, Lock, Edit3, RefreshCw } from 'lucide-react';
+
+type PrivacySettingKey = 'showOnlineStatus' | 'allowDirectInvites' | 'publicMatchHistory' | 'ghostMode';
+interface ProfileStats {
+  totalMatches: number; wins: number; losses: number; draws: number;
+  winRate: number; currentStreak: number;
+}
+interface GameStat {
+  gameId: string; matchesPlayed: number; wins?: number; losses?: number; draws?: number;
+}
+interface RecentMatch {
+  matchId: string; gameId: string; mode: string; outcome: string;
+  scoreLabel?: string | null; completedAt?: string | null;
+}
 
 export const ProfilePage: React.FC = () => {
-  const { user, refreshProfile } = useAuth();
-  const [profile, setProfile] = useState<PlayerProfileData>(() => mockSocialAdapter.getProfile());
-  const [isEditing, setIsEditing] = useState(false);
-  const [bioInput, setBioInput] = useState(profile.bio);
-  const [nameInput, setNameInput] = useState(profile.name);
-  const [usernameInput, setUsernameInput] = useState(profile.username.replace(/^@/, ''));
-  const [isSaving, setIsSaving] = useState(false);
+  const { refreshProfile } = useAuth();
   const { addToast } = useToast();
+  const [profile, setProfile] = useState<UserProfileResponse | null>(null);
+  const [settings, setSettings] = useState<UserSettingsResponse | null>(null);
+  const [stats, setStats] = useState<ProfileStats | null>(null);
+  const [gameStats, setGameStats] = useState<GameStat[]>([]);
+  const [recentMatches, setRecentMatches] = useState<RecentMatch[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [nameInput, setNameInput] = useState('');
+  const [usernameInput, setUsernameInput] = useState('');
+  const [bioInput, setBioInput] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+  const [savingSetting, setSavingSetting] = useState<PrivacySettingKey | null>(null);
 
-  // Load real backend profile and settings on mount
-  useEffect(() => {
-    let isMounted = true;
-    async function loadData() {
-      try {
-        const [backendProfile, backendSettings] = await Promise.all([
-          api.profiles.getMe().catch(() => null),
-          api.settings.get().catch(() => null),
-        ]);
-
-        if (backendProfile && isMounted) {
-          setProfile((prev) => ({
-            ...prev,
-            id: backendProfile.id,
-            name: backendProfile.displayName || prev.name,
-            username: `@${backendProfile.username}`,
-            avatarInitials: backendProfile.avatarInitials || prev.avatarInitials,
-            avatarColor: backendProfile.avatarColor || prev.avatarColor,
-            bio: backendProfile.bio ?? prev.bio,
-            joinedDate: backendProfile.createdAt
-              ? `Joined ${new Date(backendProfile.createdAt).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}`
-              : prev.joinedDate,
-            privacy: backendSettings
-              ? {
-                  showOnlineStatus: backendSettings.showOnlineStatus,
-                  allowDirectInvites: backendSettings.allowDirectInvites,
-                  publicMatchHistory: backendSettings.publicMatchHistory,
-                }
-              : prev.privacy,
-          }));
-          setBioInput(backendProfile.bio ?? '');
-          setNameInput(backendProfile.displayName || '');
-          setUsernameInput(backendProfile.username || '');
-        }
-      } catch (err) {
-        console.warn('Failed to load profile from backend:', err);
-      }
+  const loadProfileData = useCallback(async () => {
+    setIsLoading(true);
+    setLoadError(null);
+    try {
+      const [profileResponse, settingsResponse, statsResponse, gamesResponse, recentResponse] = await Promise.all([
+        api.profiles.getMe(), api.settings.get(), api.stats.getMyStats(),
+        api.stats.getMyGames(), api.stats.getMyRecent(),
+      ]);
+      setProfile(profileResponse);
+      setSettings(settingsResponse);
+      setStats(statsResponse.data);
+      setGameStats(gamesResponse.data);
+      setRecentMatches(recentResponse.data);
+      setNameInput(profileResponse.displayName || '');
+      setUsernameInput(profileResponse.username || '');
+      setBioInput(profileResponse.bio || '');
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : 'Your profile data could not be loaded.');
+    } finally {
+      setIsLoading(false);
     }
-    loadData();
-    return () => {
-      isMounted = false;
-    };
-  }, [user]);
+  }, []);
 
-  const winRate = Math.round((profile.wins / (profile.totalMatches || 1)) * 100);
+  useEffect(() => { void loadProfileData(); }, [loadProfileData]);
 
   const handleSaveProfile = async () => {
+    if (!profile) return;
     setIsSaving(true);
-    soundService.playSuccess();
     try {
-      const cleanUsername = usernameInput.trim().replace(/^@/, '');
-      const updatedBackend = await api.profiles.updateMe({
-        displayName: nameInput.trim() || profile.name,
+      const updated = await api.profiles.updateMe({
+        displayName: nameInput.trim(),
+        username: usernameInput.trim().replace(/^@/, ''),
         bio: bioInput.trim(),
-        ...(cleanUsername ? { username: cleanUsername } : {}),
       });
-
-      setProfile((prev) => ({
-        ...prev,
-        name: updatedBackend.displayName,
-        username: `@${updatedBackend.username}`,
-        bio: updatedBackend.bio ?? '',
-      }));
-
-      // Also update mock adapter cache for fallback
-      mockSocialAdapter.updateProfile({
-        name: updatedBackend.displayName,
-        bio: updatedBackend.bio ?? '',
-      });
-
+      setProfile(updated);
       await refreshProfile();
       setIsEditing(false);
-      addToast('Profile saved successfully!', { type: 'success' });
-    } catch (err: any) {
-      addToast(err.message || 'Failed to update profile', { type: 'error' });
-    } finally {
-      setIsSaving(false);
-    }
+      addToast('Profile saved.', { type: 'success' });
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : 'Profile could not be saved.', { type: 'error' });
+    } finally { setIsSaving(false); }
   };
 
-  const handleTogglePrivacy = async (key: keyof PlayerProfileData['privacy']) => {
-    soundService.playClick();
-    const nextVal = !profile.privacy[key];
-    const nextPrivacy = {
-      ...profile.privacy,
-      [key]: nextVal,
-    };
-
-    setProfile((prev) => ({ ...prev, privacy: nextPrivacy }));
-    mockSocialAdapter.updateProfile({ privacy: nextPrivacy });
-
+  const handleTogglePrivacy = async (key: PrivacySettingKey) => {
+    if (!settings || savingSetting) return;
+    setSavingSetting(key);
     try {
-      await api.settings.update({
-        [key]: nextVal,
-      });
-      addToast('Privacy preference saved', { type: 'info' });
+      const updated = await api.settings.update({ [key]: !settings[key] });
+      setSettings(updated);
+      addToast('Privacy setting saved.', { type: 'success' });
     } catch (err) {
-      console.warn('Failed to persist privacy setting to backend:', err);
+      addToast(err instanceof Error ? err.message : 'Privacy setting could not be saved.', { type: 'error' });
+    } finally { setSavingSetting(null); }
+  };
+
+  const formatOutcome = (outcome: string) => {
+    switch (outcome) {
+      case 'WIN': return 'Won';
+      case 'LOSS': return 'Lost';
+      case 'DRAW': return 'Draw';
+      case 'COMPLETED': return 'Completed';
+      case 'ABANDONED': return 'Abandoned';
+      default: return outcome.replace(/_/g, ' ').toLowerCase();
     }
   };
 
   return (
     <div className="min-h-screen flex flex-col bg-[#FCFAFF]">
       <Navbar />
-
       <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
-        {/* Profile Header Card */}
-        <div className="relative bg-white rounded-3xl border border-[#EAE3F3] shadow-sm overflow-hidden p-6 sm:p-8 mb-8">
-          <div className="absolute top-0 right-0 w-96 h-48 bg-gradient-to-bl from-[#E3D6FA]/40 to-transparent rounded-bl-full pointer-events-none" />
-
-          <div className="relative flex flex-col sm:flex-row items-center sm:items-start gap-6">
-            <div className="relative">
-              <Avatar
-                name={profile.name}
-                initials={profile.avatarInitials}
-                size="lg"
-                bgColor={profile.avatarColor}
-                isOnline={profile.privacy.showOnlineStatus}
-              />
-              <div className="absolute -bottom-1 -right-1 bg-white p-1 rounded-full shadow-xs border border-[#EAE3F3]">
-                <Sparkles className="w-4 h-4 text-[#9670E8]" />
-              </div>
-            </div>
-
-            <div className="flex-1 text-center sm:text-left space-y-2">
-              <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2.5">
-                <h1 className="text-2xl sm:text-3xl font-black text-[#211A2D] tracking-tight">
-                  {profile.name}
-                </h1>
-                <Badge variant="purple" size="sm">PlaySpace Player</Badge>
-                <span className="text-sm font-semibold text-[#756D82]">{profile.username}</span>
-              </div>
-
-              <p className="text-sm text-[#756D82] max-w-2xl leading-relaxed">
-                {profile.bio || 'Ready for friendly game nights and couple showdowns!'}
-              </p>
-
-              <div className="flex flex-wrap items-center justify-center sm:justify-start gap-4 pt-1 text-xs text-[#756D82]">
-                <span className="flex items-center gap-1.5">
-                  <Calendar className="w-3.5 h-3.5 text-[#9670E8]" />
-                  {profile.joinedDate}
-                </span>
-                <span className="flex items-center gap-1.5">
-                  <Gamepad2 className="w-3.5 h-3.5 text-[#9670E8]" />
-                  Favorite: {profile.favouriteGames.join(', ')}
-                </span>
-              </div>
-            </div>
-
-            <div className="shrink-0">
-              <Button
-                variant="outline"
-                size="sm"
-                leftIcon={<Edit3 className="w-4 h-4" />}
-                onClick={() => {
-                  soundService.playClick();
-                  setNameInput(profile.name);
-                  setBioInput(profile.bio);
-                  setUsernameInput(profile.username.replace(/^@/, ''));
-                  setIsEditing(true);
-                }}
-              >
-                Edit Profile
-              </Button>
-            </div>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-7">
+          <div>
+            <h1 className="text-2xl sm:text-3xl font-black text-[#211A2D] tracking-tight">Your Profile</h1>
+            <p className="text-sm text-[#756D82] mt-1">Your PlaySpace account and recorded game activity.</p>
           </div>
+          <Button variant="outline" size="sm" onClick={() => void loadProfileData()} disabled={isLoading} leftIcon={<RefreshCw className="w-3.5 h-3.5" />}>Refresh</Button>
         </div>
 
-        {/* Career Statistics Grid */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
-          <div className="bg-white p-5 rounded-2xl border border-[#EAE3F3] shadow-xs flex flex-col justify-between">
-            <div className="flex items-center justify-between text-[#756D82] mb-2">
-              <span className="text-xs font-bold uppercase tracking-wider">Matches</span>
-              <Gamepad2 className="w-4 h-4 text-[#9670E8]" />
-            </div>
-            <div className="text-2xl sm:text-3xl font-black text-[#211A2D]">{profile.totalMatches}</div>
-            <span className="text-[11px] text-[#756D82] mt-1">Across all 11 games</span>
+        {isLoading ? (
+          <div className="rounded-3xl border border-[#EAE3F3] bg-white p-10 text-center text-sm text-[#756D82]">Loading your profile…</div>
+        ) : loadError || !profile || !settings || !stats ? (
+          <div className="rounded-3xl border border-[#F8D2D9] bg-white p-10 text-center">
+            <p className="text-sm text-[#A52E45]">{loadError || 'Profile data is unavailable.'}</p>
+            <Button variant="outline" size="sm" className="mt-3" onClick={() => void loadProfileData()}>Try again</Button>
           </div>
-
-          <div className="bg-white p-5 rounded-2xl border border-[#EAE3F3] shadow-xs flex flex-col justify-between">
-            <div className="flex items-center justify-between text-[#756D82] mb-2">
-              <span className="text-xs font-bold uppercase tracking-wider">Victories</span>
-              <Trophy className="w-4 h-4 text-[#F2A33A]" />
-            </div>
-            <div className="text-2xl sm:text-3xl font-black text-[#248A62]">{profile.wins}</div>
-            <span className="text-[11px] text-[#248A62] font-semibold mt-1">{profile.losses} Losses • {profile.draws} Draws</span>
-          </div>
-
-          <div className="bg-white p-5 rounded-2xl border border-[#EAE3F3] shadow-xs flex flex-col justify-between">
-            <div className="flex items-center justify-between text-[#756D82] mb-2">
-              <span className="text-xs font-bold uppercase tracking-wider">Win Rate</span>
-              <Percent className="w-4 h-4 text-[#9670E8]" />
-            </div>
-            <div className="text-2xl sm:text-3xl font-black text-[#593B91]">{winRate}%</div>
-            <span className="text-[11px] text-[#756D82] mt-1">Competitive matches</span>
-          </div>
-
-          <div className="bg-white p-5 rounded-2xl border border-[#EAE3F3] shadow-xs flex flex-col justify-between">
-            <div className="flex items-center justify-between text-[#756D82] mb-2">
-              <span className="text-xs font-bold uppercase tracking-wider">Top Rival</span>
-              <Swords className="w-4 h-4 text-[#EC4899]" />
-            </div>
-            <div className="text-xl sm:text-2xl font-black text-[#211A2D] truncate">Jordan T.</div>
-            <span className="text-[11px] text-[#756D82] mt-1">18 Head-to-Head</span>
-          </div>
-        </div>
-
-        {/* Detailed Tabs / Section split */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Game-Specific Breakdown */}
-          <div className="lg:col-span-2 space-y-6">
-            <div className="bg-white p-6 rounded-3xl border border-[#EAE3F3] shadow-sm">
-              <div className="flex items-center justify-between mb-5">
-                <div>
-                  <h2 className="text-lg font-black text-[#211A2D]">Game Mastery</h2>
-                  <p className="text-xs text-[#756D82]">Sample local records across tested game modes</p>
+        ) : (
+          <>
+            <section className="relative bg-white rounded-3xl border border-[#EAE3F3] shadow-sm overflow-hidden p-6 sm:p-8 mb-7">
+              <div className="absolute top-0 right-0 w-80 h-40 bg-gradient-to-bl from-[#E3D6FA]/40 to-transparent rounded-bl-full pointer-events-none" />
+              <div className="relative flex flex-col sm:flex-row items-center sm:items-start gap-5">
+                <Avatar name={profile.displayName} initials={profile.avatarInitials || undefined} src={profile.avatarUrl || undefined} size="lg" bgColor={profile.avatarColor || '#9670E8'} />
+                <div className="flex-1 text-center sm:text-left min-w-0">
+                  <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2">
+                    <h2 className="text-2xl font-black text-[#211A2D]">{profile.displayName}</h2>
+                    <Badge variant="purple" size="sm">PlaySpace Player</Badge>
+                  </div>
+                  <p className="text-sm text-[#756D82] mt-1">@{profile.username}</p>
+                  {profile.bio && <p className="text-sm text-[#756D82] mt-3 max-w-2xl">{profile.bio}</p>}
+                  <p className="text-xs text-[#9D96A8] mt-3 flex items-center justify-center sm:justify-start gap-1.5">
+                    <Calendar className="w-3.5 h-3.5" />
+                    Member since {new Date(profile.createdAt).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}
+                  </p>
                 </div>
-                <Badge variant="lavender" size="sm">4 Recorded</Badge>
+                <Button variant="outline" size="sm" leftIcon={<Edit3 className="w-4 h-4" />} onClick={() => setIsEditing(true)}>Edit Profile</Button>
               </div>
+            </section>
 
-              <div className="space-y-4">
-                <div className="p-4 rounded-2xl bg-[#FCFAFF] border border-[#EAE3F3] flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-[#E3D6FA] flex items-center justify-center text-[#593B91] font-black">
-                      ⛳
-                    </div>
-                    <div>
-                      <h3 className="font-extrabold text-sm text-[#211A2D]">Aloo Golf</h3>
-                      <p className="text-xs text-[#756D82]">10 matches • 70% win rate</p>
-                    </div>
+            <section className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-7">
+              {[
+                { label: 'Matches', value: stats.totalMatches ?? 0, icon: <Gamepad2 className="w-4 h-4 text-[#9670E8]" /> },
+                { label: 'Wins', value: stats.wins ?? 0, icon: <Trophy className="w-4 h-4 text-[#F2A33A]" /> },
+                { label: 'Win rate', value: `${Math.round(stats.winRate ?? 0)}%`, icon: <Percent className="w-4 h-4 text-[#9670E8]" /> },
+                { label: 'Current streak', value: stats.currentStreak ?? 0, icon: <Trophy className="w-4 h-4 text-[#593B91]" /> },
+              ].map((metric) => (
+                <div key={metric.label} className="bg-white p-5 rounded-2xl border border-[#EAE3F3] shadow-xs">
+                  <div className="flex items-center justify-between text-[#756D82] mb-3">
+                    <span className="text-xs font-bold uppercase tracking-wider">{metric.label}</span>{metric.icon}
                   </div>
-                  <div className="text-right">
-                    <span className="text-xs font-bold text-[#248A62] block">Best Score: -2</span>
-                    <Badge variant="success" size="sm">Course Ace</Badge>
-                  </div>
+                  <div className="text-2xl sm:text-3xl font-black text-[#211A2D]">{metric.value}</div>
                 </div>
+              ))}
+            </section>
 
-                <div className="p-4 rounded-2xl bg-[#FCFAFF] border border-[#EAE3F3] flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-[#FDE68A] flex items-center justify-center text-[#92400E] font-black">
-                      🃏
-                    </div>
-                    <div>
-                      <h3 className="font-extrabold text-sm text-[#211A2D]">Original Card Game</h3>
-                      <p className="text-xs text-[#756D82]">8 matches • 5 wins</p>
-                    </div>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-7">
+              <section className="lg:col-span-2 bg-white p-6 rounded-3xl border border-[#EAE3F3] shadow-sm">
+                <h2 className="text-lg font-black text-[#211A2D] mb-5">Game breakdown</h2>
+                {gameStats.length > 0 ? (
+                  <div className="space-y-3">
+                    {gameStats.map((item) => {
+                      const game = GAMES_DATA.find((entry) => entry.id === item.gameId);
+                      return (
+                        <div key={item.gameId} className="flex items-center justify-between gap-3 p-3 rounded-2xl bg-[#FCFAFF] border border-[#EAE3F3]">
+                          <div className="min-w-0">
+                            <p className="text-sm font-bold text-[#211A2D]">{game?.name || item.gameId}</p>
+                            <p className="text-xs text-[#756D82]">{item.matchesPlayed} recorded matches</p>
+                          </div>
+                          <div className="text-right text-xs text-[#756D82]">
+                            <p>{item.wins ?? 0} wins</p><p>{item.losses ?? 0} losses</p>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
-                  <div className="text-right">
-                    <span className="text-xs font-bold text-[#593B91] block">62.5% WR</span>
-                    <Badge variant="purple" size="sm">Card Shark</Badge>
-                  </div>
-                </div>
+                ) : (
+                  <div className="rounded-2xl border border-dashed border-[#D5C7EE] p-7 text-center text-sm text-[#756D82]">No per-game stats recorded yet.</div>
+                )}
+              </section>
 
-                <div className="p-4 rounded-2xl bg-[#FCFAFF] border border-[#EAE3F3] flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-[#FECDD3] flex items-center justify-center text-[#9D174D] font-black">
-                      🏀
-                    </div>
-                    <div>
-                      <h3 className="font-extrabold text-sm text-[#211A2D]">Basketball Rivalry</h3>
-                      <p className="text-xs text-[#756D82]">2 matches • Highscore: 32 pts</p>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <span className="text-xs font-bold text-[#211A2D] block">Sharpshooter</span>
-                    <Badge variant="pink" size="sm">Arcade</Badge>
-                  </div>
+              <section className="bg-white p-6 rounded-3xl border border-[#EAE3F3] shadow-sm">
+                <div className="flex items-center gap-2 mb-4"><Lock className="w-4 h-4 text-[#9670E8]" /><h2 className="text-base font-black text-[#211A2D]">Privacy</h2></div>
+                <div className="space-y-3">
+                  {([
+                    ['showOnlineStatus', 'Show online status', 'Let friends see your availability.'],
+                    ['allowDirectInvites', 'Allow direct invites', 'Allow friends to invite you to rooms.'],
+                    ['publicMatchHistory', 'Public match history', 'Allow match history on your public profile.'],
+                    ['ghostMode', 'Ghost mode', 'Hide your presence from friend discovery.'],
+                  ] as Array<[PrivacySettingKey, string, string]>).map(([key, title, description]) => (
+                    <label key={key} className="flex items-center justify-between gap-3 p-3 rounded-2xl bg-[#FCFAFF] border border-[#EAE3F3]">
+                      <span><span className="text-xs font-bold text-[#211A2D] block">{title}</span><span className="text-[11px] text-[#756D82]">{description}</span></span>
+                      <input type="checkbox" checked={Boolean(settings[key])} disabled={savingSetting !== null} onChange={() => void handleTogglePrivacy(key)} className="w-4 h-4 accent-[#593B91] cursor-pointer" />
+                    </label>
+                  ))}
                 </div>
-
-                <div className="p-4 rounded-2xl bg-[#FCFAFF] border border-[#EAE3F3] flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-[#C6ECD9] flex items-center justify-center text-[#248A62] font-black">
-                      ⭕
-                    </div>
-                    <div>
-                      <h3 className="font-extrabold text-sm text-[#211A2D]">Tic Tac Toe</h3>
-                      <p className="text-xs text-[#756D82]">4 matches • 2 wins • 1 draw</p>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <span className="text-xs font-bold text-[#211A2D] block">Classic Duel</span>
-                    <Badge variant="outline" size="sm">Strategist</Badge>
-                  </div>
-                </div>
-              </div>
+              </section>
             </div>
 
-            {/* Recent Highlights Feed */}
-            <div className="bg-white p-6 rounded-3xl border border-[#EAE3F3] shadow-sm">
-              <h2 className="text-lg font-black text-[#211A2D] mb-4">Recent Highlights</h2>
-              <div className="space-y-3">
-                <div className="flex items-start gap-3 p-3 rounded-2xl bg-[#F8F4FF] border border-[#EAE3F3]">
-                  <CheckCircle2 className="w-4 h-4 text-[#248A62] mt-0.5 shrink-0" />
-                  <div className="text-xs">
-                    <span className="font-bold text-[#211A2D]">Won Aloo Golf match</span> against Jordan Taylor (Score: -2).
-                    <span className="block text-[11px] text-[#756D82] mt-0.5">Today at 2:15 PM</span>
-                  </div>
+            <section className="bg-white p-6 rounded-3xl border border-[#EAE3F3] shadow-sm mt-7">
+              <h2 className="text-lg font-black text-[#211A2D] mb-4">Recent match history</h2>
+              {recentMatches.length > 0 ? (
+                <div className="divide-y divide-[#F4EFFB]">
+                  {recentMatches.slice(0, 6).map((match) => {
+                    const game = GAMES_DATA.find((entry) => entry.id === match.gameId);
+                    return (
+                      <div key={match.matchId} className="py-3 flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-bold text-[#211A2D]">{game?.name || match.gameId}</p>
+                          <p className="text-xs text-[#756D82]">{match.mode} · {match.completedAt ? new Date(match.completedAt).toLocaleString() : 'Date unavailable'}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-sm font-semibold text-[#593B91]">{formatOutcome(match.outcome)}</p>
+                          {match.scoreLabel && <p className="text-xs text-[#756D82]">{match.scoreLabel}</p>}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-                <div className="flex items-start gap-3 p-3 rounded-2xl bg-[#F8F4FF] border border-[#EAE3F3]">
-                  <HeartHandshake className="w-4 h-4 text-[#9670E8] mt-0.5 shrink-0" />
-                  <div className="text-xs">
-                    <span className="font-bold text-[#211A2D]">Tied Blind Ranking with Jordan</span> on Top Vacation Destinations.
-                    <span className="block text-[11px] text-[#756D82] mt-0.5">Oct 25, 2026</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Privacy & Account Settings Widget */}
-          <div className="space-y-6">
-            <div className="bg-white p-6 rounded-3xl border border-[#EAE3F3] shadow-sm">
-              <div className="flex items-center gap-2 mb-4">
-                <Lock className="w-4 h-4 text-[#9670E8]" />
-                <h2 className="text-base font-black text-[#211A2D]">Privacy Preferences</h2>
-              </div>
-              <p className="text-xs text-[#756D82] mb-5">
-                Control your visibility in lobbies and public search.
-              </p>
-
-              <div className="space-y-4">
-                <div className="flex items-center justify-between gap-3 p-3 rounded-2xl bg-[#FCFAFF] border border-[#EAE3F3]">
-                  <div>
-                    <span className="text-xs font-bold text-[#211A2D] block">Show Online Status</span>
-                    <span className="text-[11px] text-[#756D82]">Let friends see when you are in game</span>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={profile.privacy.showOnlineStatus}
-                    onChange={() => handleTogglePrivacy('showOnlineStatus')}
-                    className="w-4 h-4 accent-[#593B91] cursor-pointer"
-                  />
-                </div>
-
-                <div className="flex items-center justify-between gap-3 p-3 rounded-2xl bg-[#FCFAFF] border border-[#EAE3F3]">
-                  <div>
-                    <span className="text-xs font-bold text-[#211A2D] block">Allow Direct Room Invites</span>
-                    <span className="text-[11px] text-[#756D82]">Receive lobby popups from friends</span>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={profile.privacy.allowDirectInvites}
-                    onChange={() => handleTogglePrivacy('allowDirectInvites')}
-                    className="w-4 h-4 accent-[#593B91] cursor-pointer"
-                  />
-                </div>
-
-                <div className="flex items-center justify-between gap-3 p-3 rounded-2xl bg-[#FCFAFF] border border-[#EAE3F3]">
-                  <div>
-                    <span className="text-xs font-bold text-[#211A2D] block">Public Match History</span>
-                    <span className="text-[11px] text-[#756D82]">Display recent game results on profile</span>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={profile.privacy.publicMatchHistory}
-                    onChange={() => handleTogglePrivacy('publicMatchHistory')}
-                    className="w-4 h-4 accent-[#593B91] cursor-pointer"
-                  />
-                </div>
-              </div>
-
-              <div className="mt-5 p-3 rounded-xl bg-[#F8F4FF] border border-[#EAE3F3] text-[11px] text-[#756D82]">
-                <strong>Between Us Privacy Shield:</strong> Responses in BETWEEN US are never saved in profile history or localStorage.
-              </div>
-            </div>
-          </div>
-        </div>
+              ) : (
+                <div className="rounded-2xl border border-dashed border-[#D5C7EE] p-7 text-center text-sm text-[#756D82]">No completed matches have been recorded yet.</div>
+              )}
+            </section>
+          </>
+        )}
       </main>
 
-      {/* Edit Profile Modal */}
-      <Modal
-        isOpen={isEditing}
-        onClose={() => setIsEditing(false)}
-        title="Edit Profile"
-        description="Update your display name, username, and bio."
-      >
+      <Modal isOpen={isEditing} onClose={() => setIsEditing(false)} title="Edit Profile" description="Update your account details.">
         <div className="space-y-4 pt-2">
-          <div>
-            <label className="text-xs font-bold text-[#211A2D] block mb-1">Display Name</label>
-            <input
-              type="text"
-              value={nameInput}
-              onChange={(e) => setNameInput(e.target.value)}
-              className="w-full px-3.5 py-2.5 rounded-xl border border-[#EAE3F3] focus:border-[#9670E8] focus:ring-2 focus:ring-[#9670E8]/20 outline-none text-sm text-[#211A2D]"
-              maxLength={40}
-            />
-          </div>
-
-          <div>
-            <label className="text-xs font-bold text-[#211A2D] block mb-1">Username (Handle)</label>
-            <div className="relative">
-              <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm text-[#756D82]">@</span>
-              <input
-                type="text"
-                value={usernameInput}
-                onChange={(e) => setUsernameInput(e.target.value.toLowerCase().replace(/[^a-z0-9_.]/g, ''))}
-                className="w-full pl-8 pr-3.5 py-2.5 rounded-xl border border-[#EAE3F3] focus:border-[#9670E8] focus:ring-2 focus:ring-[#9670E8]/20 outline-none text-sm text-[#211A2D]"
-                maxLength={24}
-              />
-            </div>
-            <span className="text-[11px] text-[#756D82] block mt-1">
-              Letters, numbers, underscores, and dots (min 3 chars).
-            </span>
-          </div>
-
-          <div>
-            <label className="text-xs font-bold text-[#211A2D] block mb-1">Bio / About</label>
-            <textarea
-              value={bioInput}
-              onChange={(e) => setBioInput(e.target.value)}
-              className="w-full px-3.5 py-2.5 rounded-xl border border-[#EAE3F3] focus:border-[#9670E8] focus:ring-2 focus:ring-[#9670E8]/20 outline-none text-sm text-[#211A2D] resize-none h-24"
-              maxLength={150}
-            />
-            <span className="text-[11px] text-[#756D82] text-right block mt-1">
-              {bioInput.length} / 150 characters
-            </span>
-          </div>
-
-          <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-[#EAE3F3]">
-            <Button variant="ghost" size="sm" onClick={() => setIsEditing(false)}>
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              size="sm"
-              isLoading={isSaving}
-              onClick={handleSaveProfile}
-            >
-              Save Profile
-            </Button>
+          <div><label className="text-xs font-bold text-[#211A2D] block mb-1">Display name</label><input value={nameInput} onChange={(event) => setNameInput(event.target.value)} maxLength={50} className="w-full px-3.5 py-2.5 rounded-xl border border-[#EAE3F3] text-sm" /></div>
+          <div><label className="text-xs font-bold text-[#211A2D] block mb-1">Username</label><input value={usernameInput} onChange={(event) => setUsernameInput(event.target.value.toLowerCase().replace(/[^a-z0-9_.]/g, ''))} maxLength={24} minLength={3} className="w-full px-3.5 py-2.5 rounded-xl border border-[#EAE3F3] text-sm" /></div>
+          <div><label className="text-xs font-bold text-[#211A2D] block mb-1">Bio</label><textarea value={bioInput} onChange={(event) => setBioInput(event.target.value)} maxLength={250} rows={3} className="w-full px-3.5 py-2.5 rounded-xl border border-[#EAE3F3] text-sm resize-none" /></div>
+          <div className="flex justify-end gap-2 border-t border-[#EAE3F3] pt-3">
+            <Button variant="ghost" size="sm" onClick={() => setIsEditing(false)}>Cancel</Button>
+            <Button variant="primary" size="sm" isLoading={isSaving} disabled={isSaving} onClick={() => void handleSaveProfile()}>Save Profile</Button>
           </div>
         </div>
       </Modal>
-
       <Footer />
     </div>
   );
