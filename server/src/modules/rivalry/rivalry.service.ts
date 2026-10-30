@@ -1,6 +1,35 @@
 import { prisma } from '../../config/prisma.js';
 
 export class RivalryService {
+  private async assertCanViewRivalry(currentUserId: string, rivalUserId: string): Promise<void> {
+    if (currentUserId === rivalUserId) {
+      throw new Error('Cannot view rivalry with oneself.');
+    }
+
+    const [settings, block] = await Promise.all([
+      prisma.userSettings.findUnique({
+        where: { userId: rivalUserId },
+        select: { publicMatchHistory: true },
+      }),
+      prisma.blockedUser.findFirst({
+        where: {
+          OR: [
+            { blockerId: currentUserId, blockedUserId: rivalUserId },
+            { blockerId: rivalUserId, blockedUserId: currentUserId },
+          ],
+        },
+        select: { id: true },
+      }),
+    ]);
+
+    if (settings && !settings.publicMatchHistory) {
+      throw new Error('User statistics are private.');
+    }
+    if (block) {
+      throw new Error('User profile is not accessible.');
+    }
+  }
+
   async getRivalries(currentUserId: string) {
     const records = await prisma.rivalryStats.findMany({
       where: {
@@ -31,7 +60,39 @@ export class RivalryService {
       orderBy: [{ matchesPlayed: 'desc' }, { lastMatchAt: 'desc' }],
     });
 
-    return records.map((r) => {
+    const rivalUserIds = [...new Set(records.map((record) =>
+      record.userLowId === currentUserId ? record.userHighId : record.userLowId
+    ))];
+
+    if (rivalUserIds.length === 0) return [];
+
+    const [settings, blocks] = await Promise.all([
+      prisma.userSettings.findMany({
+        where: { userId: { in: rivalUserIds } },
+        select: { userId: true, publicMatchHistory: true },
+      }),
+      prisma.blockedUser.findMany({
+        where: {
+          OR: [
+            { blockerId: currentUserId, blockedUserId: { in: rivalUserIds } },
+            { blockerId: { in: rivalUserIds }, blockedUserId: currentUserId },
+          ],
+        },
+        select: { blockerId: true, blockedUserId: true },
+      }),
+    ]);
+
+    const privateUserIds = new Set(
+      settings.filter((setting) => !setting.publicMatchHistory).map((setting) => setting.userId)
+    );
+    const blockedUserIds = new Set(
+      blocks.map((block) => block.blockerId === currentUserId ? block.blockedUserId : block.blockerId)
+    );
+
+    return records.filter((record) => {
+      const rivalUserId = record.userLowId === currentUserId ? record.userHighId : record.userLowId;
+      return !privateUserIds.has(rivalUserId) && !blockedUserIds.has(rivalUserId);
+    }).map((r) => {
       const isLow = r.userLowId === currentUserId;
       const rival = isLow ? r.userHigh : r.userLow;
       const userWins = isLow ? r.userLowWins : r.userHighWins;
@@ -54,9 +115,7 @@ export class RivalryService {
   }
 
   async getRivalryWithUser(currentUserId: string, rivalUserId: string) {
-    if (currentUserId === rivalUserId) {
-      throw new Error('Cannot view rivalry with oneself.');
-    }
+    await this.assertCanViewRivalry(currentUserId, rivalUserId);
 
     const userLowId = currentUserId < rivalUserId ? currentUserId : rivalUserId;
     const userHighId = currentUserId < rivalUserId ? rivalUserId : currentUserId;
@@ -136,6 +195,8 @@ export class RivalryService {
   }
 
   async getRivalryHistory(currentUserId: string, rivalUserId: string, limit = 10) {
+    await this.assertCanViewRivalry(currentUserId, rivalUserId);
+
     const matches = await prisma.match.findMany({
       where: {
         AND: [
