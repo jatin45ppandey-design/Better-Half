@@ -1,5 +1,4 @@
 import { prisma } from '../../config/prisma.js';
-import { logger } from '../../utils/logger.js';
 
 export interface AuditLogOptions {
   action?: string;
@@ -9,15 +8,39 @@ export interface AuditLogOptions {
   limit?: number;
 }
 
-function sanitizeAuditMetadata(meta: any): any {
-  if (!meta || typeof meta !== 'object') return meta;
-  const sanitized = { ...meta };
-  delete sanitized.password;
-  delete sanitized.token;
-  delete sanitized.secret;
-  delete sanitized.answerText;
-  delete sanitized.answer;
-  delete sanitized.answers;
+const SENSITIVE_KEYS = new Set([
+  'password',
+  'token',
+  'accesstoken',
+  'refreshtoken',
+  'secret',
+  'answer',
+  'answers',
+  'answertext',
+  'apikey',
+  'privatekey',
+  'sessiontoken',
+]);
+
+/**
+ * Recursively redacts sensitive values from audit log metadata.
+ */
+function sanitizeAuditMetadata(meta: any, depth = 0): any {
+  if (!meta || typeof meta !== 'object' || depth > 5) return meta;
+  if (Array.isArray(meta)) {
+    return meta.map((item) => sanitizeAuditMetadata(item, depth + 1));
+  }
+
+  const sanitized: Record<string, any> = {};
+  for (const [key, value] of Object.entries(meta)) {
+    if (SENSITIVE_KEYS.has(key.toLowerCase())) {
+      sanitized[key] = '[REDACTED]';
+    } else if (value && typeof value === 'object') {
+      sanitized[key] = sanitizeAuditMetadata(value, depth + 1);
+    } else {
+      sanitized[key] = value;
+    }
+  }
   return sanitized;
 }
 
@@ -27,22 +50,20 @@ export class AuditService {
     action: string,
     targetType: string,
     targetId: string | null,
-    metadata?: Record<string, any>
+    metadata?: Record<string, any>,
+    tx?: any
   ): Promise<void> {
-    try {
-      const sanitized = sanitizeAuditMetadata(metadata);
-      await prisma.auditLog.create({
-        data: {
-          actorUserId,
-          action,
-          targetType,
-          targetId,
-          metadata: sanitized ? (sanitized as any) : undefined,
-        },
-      });
-    } catch (err: any) {
-      logger.warn(`Failed to create audit log entry: ${err?.message || err}`);
-    }
+    const db = tx || prisma;
+    const sanitized = sanitizeAuditMetadata(metadata);
+    await db.auditLog.create({
+      data: {
+        actorUserId,
+        action,
+        targetType,
+        targetId,
+        metadata: sanitized ? (sanitized as any) : undefined,
+      },
+    });
   }
 
   async listAuditLogs(options: AuditLogOptions = {}) {

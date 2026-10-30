@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../../context/AuthContext';
 import { Heart, Users, Check, ArrowRight } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
@@ -7,8 +9,14 @@ import { CreateRoomModal } from '../modals/CreateRoomModal';
 export const ProductModeSection: React.FC = () => {
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [targetMode, setTargetMode] = useState<'couple' | 'friend'>('couple');
+  const { isAuthenticated } = useAuth();
+  const navigate = useNavigate();
 
   const handleLaunchCreate = (mode: 'couple' | 'friend') => {
+    if (!isAuthenticated) {
+      navigate('/login');
+      return;
+    }
     setTargetMode(mode);
     setCreateModalOpen(true);
   };

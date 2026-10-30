@@ -9,6 +9,12 @@ export class GameStateService {
     return this.activeSessions.get(sessionId) || null;
   }
 
+  getSessionForParticipant(sessionId: string, userId: string): GameEngineContext | null {
+    const session = this.getSession(sessionId);
+    if (!session || !session.participants.some((participant) => participant.userId === userId)) return null;
+    return session;
+  }
+
   setSession(sessionId: string, context: GameEngineContext): void {
     this.activeSessions.set(sessionId, context);
     if (!this.processedActionIds.has(sessionId)) {
@@ -61,7 +67,7 @@ export class GameStateService {
     sessionId: string,
     userId: string
   ): Record<string, unknown> | null {
-    const session = this.getSession(sessionId);
+    const session = this.getSessionForParticipant(sessionId, userId);
     if (!session) return null;
 
     const engine = gameEngineFactory.getEngine(session.gameId);

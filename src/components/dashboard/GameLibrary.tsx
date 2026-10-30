@@ -55,7 +55,7 @@ export const GameLibrary: React.FC<GameLibraryProps> = ({
             Game Library ({filteredGames.length} / 11)
           </h2>
           <p className="text-xs sm:text-sm text-[#756D82] mt-0.5">
-            Select any game to view rules, configure preview cards, and prepare for Phase 2 gameplay.
+            Choose a game to review its mechanics and create a room.
           </p>
         </div>
 
@@ -173,7 +173,7 @@ export const GameLibrary: React.FC<GameLibraryProps> = ({
                   }}
                   rightIcon={<Play className="w-3 h-3 fill-current" />}
                 >
-                  Preview
+                  View Rules
                 </Button>
               </div>
             </div>

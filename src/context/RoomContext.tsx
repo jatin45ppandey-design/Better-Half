@@ -34,6 +34,7 @@ interface RoomContextType {
 
 function formatSnapshotToRoomSession(snapshot: any): RoomSession {
   return {
+    id: snapshot.id,
     code: snapshot.code,
     name: snapshot.name,
     mode: (snapshot.mode || 'couple').toLowerCase() as 'couple' | 'friend',
@@ -58,7 +59,7 @@ function formatSnapshotToRoomSession(snapshot: any): RoomSession {
         (snapshot.hostId && (p.userId || p.id) === snapshot.hostId),
       isReady: p.isReady ?? false,
       isDemo: false,
-      isOnline: p.isOnline ?? true,
+      isOnline: p.isOnline ?? false,
     })),
     gameVotes: snapshot.gameVotes || {},
     chatMessages: (snapshot.chatMessages || snapshot.messages || []).map((m: any) => ({
@@ -366,7 +367,7 @@ export const RoomProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setCurrentRoomCode(formatted.code);
 
         // Join socket channel
-        socketService.emit('room:join', { roomId: formatted.code, code: formatted.code });
+        socketService.emit('room:join', { roomId: formatted.id, code: formatted.code });
 
         return formatted;
       } catch (err: any) {
@@ -413,7 +414,7 @@ export const RoomProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setCurrentRoomCode(formatted.code);
 
         // Join socket channel
-        socketService.emit('room:join', { roomId: formatted.code, code: formatted.code });
+        socketService.emit('room:join', { roomId: formatted.id, code: formatted.code });
 
         return { success: true, room: formatted };
       } catch (err: any) {

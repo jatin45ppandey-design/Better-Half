@@ -131,14 +131,26 @@ export class MatchesService {
     // If requester is not participant, verify if participants have public history
     if (!isParticipant) {
       const participantUserIds = match.participants.map((p) => p.userId);
-      const privateSettings = await prisma.userSettings.findFirst({
-        where: {
-          userId: { in: participantUserIds },
-          publicMatchHistory: false,
-        },
-      });
+      const [privateSettings, block] = await Promise.all([
+        prisma.userSettings.findFirst({
+          where: {
+            userId: { in: participantUserIds },
+            publicMatchHistory: false,
+          },
+          select: { userId: true },
+        }),
+        prisma.blockedUser.findFirst({
+          where: {
+            OR: [
+              { blockerId: requestingUserId, blockedUserId: { in: participantUserIds } },
+              { blockerId: { in: participantUserIds }, blockedUserId: requestingUserId },
+            ],
+          },
+          select: { id: true },
+        }),
+      ]);
 
-      if (privateSettings) {
+      if (privateSettings || block) {
         throw new Error('You do not have permission to view this match.');
       }
     }

@@ -8,5 +8,5 @@ export const updateSettingsSchema = z.object({
   soundMuted: z.boolean().optional(),
   volume: z.number().min(0).max(1).optional(),
   reducedMotion: z.boolean().optional(),
-});
+}).strict();
 

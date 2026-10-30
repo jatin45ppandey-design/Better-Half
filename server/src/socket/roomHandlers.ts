@@ -3,6 +3,20 @@ import { roomsService } from '../modules/rooms/rooms.service.js';
 import { gameSessionService } from '../modules/games/core/gameSession.service.js';
 import { presenceManager } from './presence.js';
 import { prisma } from '../config/prisma.js';
+import { safeSocketError } from './safeError.js';
+import {
+  roomJoinSchema,
+  roomLeaveSchema,
+  roomReadyUpdateSchema,
+  roomGameVoteSchema,
+  roomGameSelectSchema,
+  roomStartPrepareSchema,
+  roomHostTransferSchema,
+  roomPlayerKickSchema,
+  roomChatSendSchema,
+  roomReactionSendSchema,
+  validateSocketPayload,
+} from './socketSchemas.js';
 import type {
   ClientToServerEvents,
   ServerToClientEvents,
@@ -23,24 +37,43 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
   // Track socket connection in presence manager
   presenceManager.trackConnect(userId, socket.id);
 
+  const checkSuspension = (callback?: (res: { success: false; error: string }) => void): boolean => {
+    if (socket.data.accountStatus === 'SUSPENDED') {
+      callback?.({ success: false, error: 'Your account is suspended' });
+      socket.disconnect(true);
+      return true;
+    }
+    if (socket.data.tokenExp && Date.now() > socket.data.tokenExp) {
+      callback?.({ success: false, error: 'Authentication token has expired' });
+      socket.emit('room:error', { code: 'TOKEN_EXPIRED', message: 'Authentication token has expired.' });
+      socket.disconnect(true);
+      return true;
+    }
+    return false;
+  };
+
   /**
    * room:join
    */
-  socket.on('room:join', async (payload, callback) => {
+  socket.on('room:join', async (rawPayload, callback) => {
+    if (checkSuspension(callback)) return;
+
+    const payload = validateSocketPayload(roomJoinSchema, rawPayload, callback);
+    if (!payload) return;
+
     try {
       const { roomId, code } = payload;
-      let targetRoom: RoomSnapshot | undefined;
+      let targetRoom: any;
 
       if (roomId) {
         try {
-          targetRoom = await roomsService.getRoomById(roomId);
+          targetRoom = await roomsService.getRoomById(roomId, userId);
         } catch {
-          if (code) {
-            targetRoom = await roomsService.getRoomByCode(code);
-          }
+          if (code) targetRoom = await roomsService.getRoomByCode(code, userId);
+          else throw new Error('Room not found');
         }
       } else if (code) {
-        targetRoom = await roomsService.getRoomByCode(code);
+        targetRoom = await roomsService.getRoomByCode(code, userId);
       }
 
       if (!targetRoom) {
@@ -48,17 +81,15 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
         return;
       }
 
-      // Check if user is already an active participant
-      const isParticipant = targetRoom.participants.some(
-        (p: { userId: string }) => p.userId === userId
-      );
-
-      let roomSnapshot: RoomSnapshot = targetRoom;
-
-      if (!isParticipant) {
-        // Join the room in DB
-        const joinResult = await roomsService.joinRoom(userId, targetRoom.code);
-        roomSnapshot = joinResult.room;
+      let roomSnapshot: RoomSnapshot;
+      if (targetRoom.isJoinPreview) {
+        if (!targetRoom.canJoin) {
+          callback?.({ success: false, error: targetRoom.joinUnavailableReason || 'This room cannot be joined.' });
+          return;
+        }
+        roomSnapshot = (await roomsService.joinRoom(userId, targetRoom.code)).room;
+      } else {
+        roomSnapshot = targetRoom as RoomSnapshot;
       }
 
       const roomChannel = `room:${roomSnapshot.id}`;
@@ -89,14 +120,19 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
 
       callback?.({ success: true, room: roomSnapshot });
     } catch (err: any) {
-      callback?.({ success: false, error: err?.message || 'Failed to join room' });
+      callback?.({ success: false, error: safeSocketError(err, 'Failed to join room') });
     }
   });
 
   /**
    * room:leave
    */
-  socket.on('room:leave', async (payload, callback) => {
+  socket.on('room:leave', async (rawPayload, callback) => {
+    if (checkSuspension(callback)) return;
+
+    const payload = validateSocketPayload(roomLeaveSchema, rawPayload, callback);
+    if (!payload) return;
+
     try {
       const { roomId } = payload;
       const result = await roomsService.leaveRoom(roomId, userId);
@@ -122,14 +158,19 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
 
       callback?.({ success: true });
     } catch (err: any) {
-      callback?.({ success: false, error: err?.message || 'Failed to leave room' });
+      callback?.({ success: false, error: safeSocketError(err, 'Failed to leave room') });
     }
   });
 
   /**
    * room:ready:update
    */
-  socket.on('room:ready:update', async (payload, callback) => {
+  socket.on('room:ready:update', async (rawPayload, callback) => {
+    if (checkSuspension(callback)) return;
+
+    const payload = validateSocketPayload(roomReadyUpdateSchema, rawPayload, callback);
+    if (!payload) return;
+
     try {
       const { roomId, isReady } = payload;
       const updatedRoom = await roomsService.toggleReady(roomId, userId, isReady);
@@ -141,7 +182,7 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
       const roomChannel = `room:${roomId}`;
       io.to(roomChannel).emit('room:player:ready', {
         userId,
-        isReady: participant ? participant.isReady : isReady,
+        isReady: participant ? participant.isReady : (isReady ?? false),
         roomStatus: updatedRoom.status,
       });
 
@@ -149,17 +190,22 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
 
       callback?.({
         success: true,
-        isReady: participant ? participant.isReady : isReady,
+        isReady: participant ? participant.isReady : (isReady ?? false),
       });
     } catch (err: any) {
-      callback?.({ success: false, error: err?.message || 'Failed to update ready status' });
+      callback?.({ success: false, error: safeSocketError(err, 'Failed to update ready status') });
     }
   });
 
   /**
    * room:game:vote
    */
-  socket.on('room:game:vote', async (payload, callback) => {
+  socket.on('room:game:vote', async (rawPayload, callback) => {
+    if (checkSuspension(callback)) return;
+
+    const payload = validateSocketPayload(roomGameVoteSchema, rawPayload, callback);
+    if (!payload) return;
+
     try {
       const { roomId, gameId } = payload;
       const updatedRoom = await roomsService.voteGame(roomId, userId, gameId);
@@ -175,14 +221,19 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
 
       callback?.({ success: true, votes: updatedRoom.gameVotes });
     } catch (err: any) {
-      callback?.({ success: false, error: err?.message || 'Failed to submit vote' });
+      callback?.({ success: false, error: safeSocketError(err, 'Failed to submit vote') });
     }
   });
 
   /**
    * room:game:select
    */
-  socket.on('room:game:select', async (payload, callback) => {
+  socket.on('room:game:select', async (rawPayload, callback) => {
+    if (checkSuspension(callback)) return;
+
+    const payload = validateSocketPayload(roomGameSelectSchema, rawPayload, callback);
+    if (!payload) return;
+
     try {
       const { roomId, gameId } = payload;
       const updatedRoom = await roomsService.selectGame(roomId, userId, gameId);
@@ -196,14 +247,19 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
 
       callback?.({ success: true });
     } catch (err: any) {
-      callback?.({ success: false, error: err?.message || 'Failed to select game' });
+      callback?.({ success: false, error: safeSocketError(err, 'Failed to select game') });
     }
   });
 
   /**
    * room:start:prepare
    */
-  socket.on('room:start:prepare', async (payload, callback) => {
+  socket.on('room:start:prepare', async (rawPayload, callback) => {
+    if (checkSuspension(callback)) return;
+
+    const payload = validateSocketPayload(roomStartPrepareSchema, rawPayload, callback);
+    if (!payload) return;
+
     try {
       const { roomId } = payload;
       const check = await roomsService.canStartGame(roomId, userId);
@@ -213,7 +269,7 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
         return;
       }
 
-      const room = await roomsService.getRoomById(roomId);
+      const room = await roomsService.getRoomById(roomId, userId);
       if (!room.selectedGameId) {
         callback?.({ success: false, error: 'No game selected' });
         return;
@@ -229,7 +285,7 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
         );
         sessionId = session.sessionId;
       } catch (err: any) {
-        callback?.({ success: false, error: err.message || 'Failed to create game session' });
+        callback?.({ success: false, error: safeSocketError(err, 'Failed to create game session') });
         return;
       }
 
@@ -247,14 +303,19 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
 
       callback?.({ success: true });
     } catch (err: any) {
-      callback?.({ success: false, error: err?.message || 'Failed to start game' });
+      callback?.({ success: false, error: safeSocketError(err, 'Failed to start game') });
     }
   });
 
   /**
    * room:host:transfer
    */
-  socket.on('room:host:transfer', async (payload, callback) => {
+  socket.on('room:host:transfer', async (rawPayload, callback) => {
+    if (checkSuspension(callback)) return;
+
+    const payload = validateSocketPayload(roomHostTransferSchema, rawPayload, callback);
+    if (!payload) return;
+
     try {
       const { roomId, newHostId } = payload;
       const updatedRoom = await roomsService.transferHost(roomId, userId, newHostId);
@@ -269,19 +330,35 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
 
       callback?.({ success: true });
     } catch (err: any) {
-      callback?.({ success: false, error: err?.message || 'Failed to transfer host' });
+      callback?.({ success: false, error: safeSocketError(err, 'Failed to transfer host') });
     }
   });
 
   /**
    * room:player:kick
    */
-  socket.on('room:player:kick', async (payload, callback) => {
+  socket.on('room:player:kick', async (rawPayload, callback) => {
+    if (checkSuspension(callback)) return;
+
+    const payload = validateSocketPayload(roomPlayerKickSchema, rawPayload, callback);
+    if (!payload) return;
+
     try {
       const { roomId, targetUserId } = payload;
       const result = await roomsService.kickParticipant(roomId, userId, targetUserId);
 
       const roomChannel = `room:${roomId}`;
+
+      // Evict target user's active sockets from room channel and notify them
+      const targetSockets = presenceManager.getUserSockets(targetUserId);
+      for (const sId of targetSockets) {
+        const s = io.sockets.sockets.get(sId);
+        if (s) {
+          s.leave(roomChannel);
+          s.emit('room:player:kicked', { targetUserId, roomId });
+        }
+      }
+
       io.to(roomChannel).emit('room:player:kicked', { targetUserId });
       io.to(roomChannel).emit('room:state', result.room);
 
@@ -292,14 +369,19 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
 
       callback?.({ success: true });
     } catch (err: any) {
-      callback?.({ success: false, error: err?.message || 'Failed to kick player' });
+      callback?.({ success: false, error: safeSocketError(err, 'Failed to kick player') });
     }
   });
 
   /**
    * room:chat:send
    */
-  socket.on('room:chat:send', async (payload, callback) => {
+  socket.on('room:chat:send', async (rawPayload, callback) => {
+    if (checkSuspension(callback)) return;
+
+    const payload = validateSocketPayload(roomChatSendSchema, rawPayload, callback);
+    if (!payload) return;
+
     try {
       const { roomId, message } = payload;
       const createdMessage = await roomsService.postMessage(roomId, userId, message);
@@ -309,19 +391,24 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
 
       callback?.({ success: true, message: createdMessage });
     } catch (err: any) {
-      callback?.({ success: false, error: err?.message || 'Failed to send message' });
+      callback?.({ success: false, error: safeSocketError(err, 'Failed to send message') });
     }
   });
 
   /**
    * room:reaction:send
    */
-  socket.on('room:reaction:send', (payload, callback) => {
+  socket.on('room:reaction:send', (rawPayload, callback) => {
+    if (checkSuspension(callback)) return;
+
+    const payload = validateSocketPayload(roomReactionSendSchema, rawPayload, callback);
+    if (!payload) return;
+
     const { roomId, reaction } = payload;
 
-    // Verify user is an active participant / present in the room
-    const onlineUsers = presenceManager.getRoomOnlineUsers(roomId);
-    if (!onlineUsers.includes(userId)) {
+    // Verify user is present in the room
+    const userRooms = presenceManager.getUserRooms(userId);
+    if (!userRooms.includes(roomId)) {
       callback?.({ success: false, error: 'You are not present in this room' });
       return;
     }

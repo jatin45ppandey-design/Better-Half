@@ -271,8 +271,8 @@ export const AdminDashboardPage: React.FC = () => {
             >
               Refresh
             </Button>
-            <Badge variant="success" size="md">
-              Live Production
+            <Badge variant={import.meta.env.PROD ? 'success' : 'purple'} size="md">
+              {import.meta.env.PROD ? 'Production Environment' : 'Development Environment'}
             </Badge>
           </div>
         </div>

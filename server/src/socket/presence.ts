@@ -11,6 +11,9 @@ export class PresenceManager {
   // roomId -> Set of userIds currently in room
   private roomPresence = new Map<string, Set<string>>();
 
+  // userId -> Privacy configuration
+  private userPrivacy = new Map<string, { showOnlineStatus: boolean; ghostMode: boolean }>();
+
   // Default grace period: 15 seconds
   private gracePeriodMs: number;
 
@@ -110,6 +113,28 @@ export class PresenceManager {
   }
 
   /**
+   * Set user privacy settings for presence visibility
+   */
+  setUserPrivacy(userId: string, privacy: { showOnlineStatus?: boolean; ghostMode?: boolean }): void {
+    const existing = this.userPrivacy.get(userId) || { showOnlineStatus: true, ghostMode: false };
+    this.userPrivacy.set(userId, {
+      showOnlineStatus: privacy.showOnlineStatus !== undefined ? privacy.showOnlineStatus : existing.showOnlineStatus,
+      ghostMode: privacy.ghostMode !== undefined ? privacy.ghostMode : existing.ghostMode,
+    });
+  }
+
+  /**
+   * Determine if a user's presence should be visible to other players
+   */
+  isUserVisible(userId: string): boolean {
+    const priv = this.userPrivacy.get(userId);
+    if (!priv) return true;
+    if (priv.ghostMode) return false;
+    if (priv.showOnlineStatus === false) return false;
+    return true;
+  }
+
+  /**
    * Check if a user is currently considered online
    */
   isUserOnline(userId: string): boolean {
@@ -117,12 +142,18 @@ export class PresenceManager {
   }
 
   /**
-   * Get all online user IDs in a specific room
+   * Get all online user IDs in a specific room, respecting user privacy settings.
+   * If requestingUserId is supplied, that user always sees their own online presence.
    */
-  getRoomOnlineUsers(roomId: string): string[] {
+  getRoomOnlineUsers(roomId: string, requestingUserId?: string): string[] {
     const roomUsers = this.roomPresence.get(roomId);
     if (!roomUsers) return [];
-    return Array.from(roomUsers).filter((uid) => this.isUserOnline(uid));
+    return Array.from(roomUsers).filter((uid) => {
+      const isOnline = this.isUserOnline(uid);
+      if (!isOnline) return false;
+      if (requestingUserId && uid === requestingUserId) return true;
+      return this.isUserVisible(uid);
+    });
   }
 
   /**
@@ -148,6 +179,7 @@ export class PresenceManager {
     this.disconnectTimers.clear();
     this.userSockets.clear();
     this.roomPresence.clear();
+    this.userPrivacy.clear();
   }
 }
 

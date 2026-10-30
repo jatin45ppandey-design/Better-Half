@@ -18,7 +18,31 @@ export interface MatchEvaluationResult {
 }
 
 export function evaluateGameResult(context: GameEngineContext): MatchEvaluationResult {
-  const { gameId, mode, participants, scores, state, winnerUserId } = context;
+  const { gameId, mode, participants, scores, state, winnerUserId, status } = context;
+
+  // 0. Abandoned Match Evaluation
+  if (status === 'ABANDONED') {
+    const participantResults: ParticipantResult[] = participants.map((p) => ({
+      userId: p.userId,
+      placement: 1,
+      scoreValue: scores[p.userId] || 0,
+      scoreLabel: `${scores[p.userId] || 0} pts`,
+      isWinner: false,
+      outcome: 'ABANDONED',
+    }));
+
+    return {
+      resultType: 'ABANDONED',
+      winnerUserId: null,
+      participants: participantResults,
+      roundsPlayed: state?.round || state?.currentRound || 1,
+      resultSummary: {
+        gameId,
+        mode,
+        type: 'match_abandoned',
+      },
+    };
+  }
 
   // 1. Cooperative Games: Truth or Dare, Would You Rather, BETWEEN US
   if (gameId === 'truth-or-dare' || gameId === 'would-you-rather' || gameId === 'between-us') {

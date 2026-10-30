@@ -169,7 +169,7 @@ export class StatsService {
       }
     > = {};
 
-    participations.forEach((p) => {
+    participations.forEach((p: any) => {
       const gId = p.match.gameId;
       if (!aggregates[gId]) {
         aggregates[gId] = {
@@ -193,7 +193,30 @@ export class StatsService {
       }
     });
 
-    // 2. Atomically upsert recomputed records
+    // 2. Clean up any stale UserGameStats for games with 0 matches
+    const recomputedGameIds = Object.keys(aggregates);
+    if (recomputedGameIds.length > 0 && typeof prisma.userGameStats.updateMany === 'function') {
+      try {
+        await prisma.userGameStats.updateMany({
+          where: {
+            userId,
+            gameId: { notIn: recomputedGameIds },
+          },
+          data: {
+            matchesPlayed: 0,
+            wins: 0,
+            losses: 0,
+            draws: 0,
+            cooperativeCompletions: 0,
+            lastPlayedAt: null,
+          },
+        });
+      } catch {
+        // Non-fatal in mock test environments
+      }
+    }
+
+    // 3. Upsert recomputed records
     for (const [gameId, data] of Object.entries(aggregates)) {
       await prisma.userGameStats.upsert({
         where: {

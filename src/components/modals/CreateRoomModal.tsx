@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Heart,
@@ -44,11 +44,22 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
     user?.name ? `${user.name.split(' ')[0]}'s Game Room` : 'Evening Game Room'
   );
   const [selectedGameId, setSelectedGameId] = useState<string>(
-    initialGame ? initialGame.id : 'between-us'
+    initialGame
+      ? initialGame.id
+      : initialMode === 'couple'
+      ? 'between-us'
+      : 'uno-style'
   );
   const [activeRoomCode, setActiveRoomCode] = useState<string>('');
   const [copied, setCopied] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    setSelectedMode(initialMode);
+    if (!initialGame) {
+      setSelectedGameId(initialMode === 'couple' ? 'between-us' : 'uno-style');
+    }
+  }, [initialMode, initialGame, isOpen]);
 
   const handleClose = () => {
     setStep('configure');

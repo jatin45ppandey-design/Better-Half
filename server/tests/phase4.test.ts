@@ -6,8 +6,10 @@ import { prisma } from '../src/config/prisma.js';
 import { evaluateGameResult } from '../src/modules/games/match/resultPolicies.js';
 import { matchFinalizationService } from '../src/modules/games/match/matchFinalization.service.js';
 import { statsService } from '../src/modules/stats/stats.service.js';
+import { matchesService } from '../src/modules/matches/matches.service.js';
 import { rivalryService } from '../src/modules/rivalry/rivalry.service.js';
 import { adminService } from '../src/modules/admin/admin.service.js';
+import { gamesController } from '../src/modules/games/games.controller.js';
 import { auditService } from '../src/modules/admin/audit.service.js';
 import type { GameEngineContext } from '../src/modules/games/core/gameEngine.types.js';
 
@@ -384,6 +386,8 @@ describe('PlaySpace Phase 4 — Match History, Stats, Rivalry, RBAC & Admin Suit
       const userLowId = normalUserA.id < normalUserB.id ? normalUserA.id : normalUserB.id;
       const userHighId = normalUserA.id < normalUserB.id ? normalUserB.id : normalUserA.id;
 
+      vi.spyOn(prisma.userSettings, 'findUnique').mockResolvedValue(null);
+      vi.spyOn(prisma.blockedUser, 'findFirst').mockResolvedValue(null);
       vi.spyOn(prisma.rivalryStats, 'findUnique').mockResolvedValue({
         id: 'riv-1',
         userLowId,
@@ -413,6 +417,88 @@ describe('PlaySpace Phase 4 — Match History, Stats, Rivalry, RBAC & Admin Suit
       expect(rivalry.userWins).toBe(normalUserA.id === userLowId ? 4 : 2);
       expect(rivalry.favoriteGames[0].gameId).toBe('basketball-rivalry');
       expect(rivalry.favoriteGames[0].count).toBe(2);
+    });
+
+    it('does not disclose rivalry detail when the rival made match history private', async () => {
+      vi.spyOn(prisma.userSettings, 'findUnique').mockResolvedValueOnce({
+        userId: normalUserB.id,
+        publicMatchHistory: false,
+      } as any);
+      vi.spyOn(prisma.blockedUser, 'findFirst').mockResolvedValueOnce(null);
+
+      await expect(
+        rivalryService.getRivalryWithUser(normalUserA.id, normalUserB.id)
+      ).rejects.toThrow('User statistics are private');
+    });
+
+    it('does not disclose rivalry history when either player blocked the other', async () => {
+      vi.spyOn(prisma.userSettings, 'findUnique').mockResolvedValueOnce({
+        userId: normalUserB.id,
+        publicMatchHistory: true,
+      } as any);
+      vi.spyOn(prisma.blockedUser, 'findFirst').mockResolvedValueOnce({
+        id: 'block-relationship',
+      } as any);
+
+      await expect(
+        rivalryService.getRivalryHistory(normalUserA.id, normalUserB.id)
+      ).rejects.toThrow('User profile is not accessible');
+    });
+
+    it('hides rivalries from the list when the rival is private or blocked', async () => {
+      const record = {
+        id: 'rivalry-hidden',
+        userLowId: normalUserA.id < normalUserB.id ? normalUserA.id : normalUserB.id,
+        userHighId: normalUserA.id < normalUserB.id ? normalUserB.id : normalUserA.id,
+        matchesPlayed: 4,
+        competitiveMatches: 4,
+        userLowWins: 2,
+        userHighWins: 2,
+        draws: 0,
+        cooperativeCompletions: 0,
+        currentStreakHolder: null,
+        currentStreakCount: 0,
+        lastMatchAt: new Date(),
+        userLow: normalUserA.id < normalUserB.id ? normalUserA : normalUserB,
+        userHigh: normalUserA.id < normalUserB.id ? normalUserB : normalUserA,
+      };
+      vi.spyOn(prisma.rivalryStats, 'findMany').mockResolvedValueOnce([record] as any);
+      vi.spyOn(prisma.userSettings, 'findMany').mockResolvedValueOnce([{
+        userId: normalUserB.id,
+        publicMatchHistory: false,
+      }] as any);
+      vi.spyOn(prisma.blockedUser, 'findMany').mockResolvedValueOnce([]);
+
+      const result = await rivalryService.getRivalries(normalUserA.id);
+      expect(result).toHaveLength(0);
+    });
+
+    it('does not disclose match details to a blocked non-participant', async () => {
+      vi.spyOn(prisma.match, 'findUnique').mockResolvedValueOnce({
+        id: 'private-match',
+        participants: [
+          { userId: normalUserA.id },
+          { userId: normalUserB.id },
+        ],
+      } as any);
+      vi.spyOn(prisma.userSettings, 'findFirst').mockResolvedValueOnce(null);
+      vi.spyOn(prisma.blockedUser, 'findFirst').mockResolvedValueOnce({
+        id: 'block-match-viewer',
+      } as any);
+
+      await expect(
+        matchesService.getMatchById('private-match', 'unrelated-viewer')
+      ).rejects.toThrow('You do not have permission to view this match');
+    });
+
+    it('keeps match details available to a participant even when public history is disabled', async () => {
+      vi.spyOn(prisma.match, 'findUnique').mockResolvedValueOnce({
+        id: 'own-match',
+        participants: [{ userId: normalUserA.id }],
+      } as any);
+
+      const match = await matchesService.getMatchById('own-match', normalUserA.id);
+      expect(match.id).toBe('own-match');
     });
 
     it('rejects rivalry with oneself', async () => {
@@ -500,6 +586,25 @@ describe('PlaySpace Phase 4 — Match History, Stats, Rivalry, RBAC & Admin Suit
           }),
         })
       );
+    });
+  });
+
+  describe('Wave 1 — Safe game catalog failure', () => {
+    it('does not return a successful empty catalog when the database service fails', async () => {
+      vi.spyOn(adminService, 'listGames').mockRejectedValueOnce(
+        new Error('database password must never reach the client')
+      );
+      const status = vi.fn().mockReturnThis();
+      const json = vi.fn();
+
+      await gamesController.getCatalog({} as any, { status, json } as any);
+
+      expect(status).toHaveBeenCalledWith(503);
+      expect(json).toHaveBeenCalledWith({
+        success: false,
+        error: 'Game catalog is temporarily unavailable.',
+      });
+      expect(JSON.stringify(json.mock.calls[0][0])).not.toContain('database password');
     });
   });
 

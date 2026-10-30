@@ -1,7 +1,11 @@
 import { Router } from 'express';
 import { requireAuth } from '../../middleware/auth.js';
 import { validateRequest } from '../../middleware/validate.js';
-import { rateLimiter } from '../../middleware/rateLimiter.js';
+import {
+  roomCreateLimiter,
+  roomJoinLimiter,
+  chatLimiter,
+} from '../../middleware/rateLimiter.js';
 import {
   createRoom,
   getRoomById,
@@ -38,7 +42,7 @@ roomRoutes.use(requireAuth);
 // Room creation & lookup
 roomRoutes.post(
   '/',
-  rateLimiter({ windowMs: 60 * 1000, max: 20 }),
+  roomCreateLimiter,
   validateRequest({ body: createRoomSchema }),
   createRoom
 );
@@ -50,7 +54,7 @@ roomRoutes.get('/:id', getRoomById);
 // Join, leave & close
 roomRoutes.post(
   '/join',
-  rateLimiter({ windowMs: 60 * 1000, max: 30 }),
+  roomJoinLimiter,
   validateRequest({ body: joinRoomSchema }),
   joinRoom
 );
@@ -96,7 +100,7 @@ roomRoutes.post(
 roomRoutes.get('/:id/messages', getMessages);
 roomRoutes.post(
   '/:id/messages',
-  rateLimiter({ windowMs: 60 * 1000, max: 60 }),
+  chatLimiter,
   validateRequest({ body: postMessageSchema }),
   postMessage
 );

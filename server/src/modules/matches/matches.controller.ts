@@ -18,8 +18,8 @@ export class MatchesController {
       });
 
       res.json({ success: true, data: result });
-    } catch (err: any) {
-      res.status(400).json({ success: false, error: err.message || 'Failed to fetch match history.' });
+    } catch {
+      res.status(500).json({ success: false, error: 'Match history is temporarily unavailable.' });
     }
   }
 
@@ -30,12 +30,20 @@ export class MatchesController {
 
       const match = await matchesService.getMatchById(matchId, requestingUserId);
       res.json({ success: true, data: match });
-    } catch (err: any) {
-      const status = err.message?.includes('permission') ? 403 : err.message?.includes('not found') ? 404 : 400;
-      res.status(status).json({ success: false, error: err.message || 'Failed to fetch match.' });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : '';
+      const normalized = message.toLowerCase();
+      const status = normalized.includes('permission') ? 403 : normalized.includes('not found') ? 404 : 500;
+      res.status(status).json({
+        success: false,
+        error: status === 403
+          ? 'You do not have permission to view this match.'
+          : status === 404
+            ? 'Match not found.'
+            : 'Match details are temporarily unavailable.',
+      });
     }
   }
 }
 
 export const matchesController = new MatchesController();
-

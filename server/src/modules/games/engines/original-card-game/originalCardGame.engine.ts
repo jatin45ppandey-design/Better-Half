@@ -116,14 +116,16 @@ export class OriginalCardGameEngine
       searchIdx++;
     }
 
-    this.serverPiles.set(params.sessionId, {
+    const serverPiles = {
       drawPile: deck,
       discardPile: [topDiscard],
-    });
+    };
+
+    this.serverPiles.set(params.sessionId, serverPiles);
 
     const currentTurnUserId = params.participants[0].userId;
 
-    const state: UnoPublicState = {
+    const state: UnoPublicState & { _serverPiles?: typeof serverPiles } = {
       currentTurnUserId,
       topDiscard,
       activeColor: topDiscard.color,
@@ -133,6 +135,7 @@ export class OriginalCardGameEngine
       lastPlayedCard: topDiscard,
       winnerUserId: null,
       drawPileCount: deck.length,
+      _serverPiles: serverPiles,
     };
 
     return {
@@ -206,6 +209,11 @@ export class OriginalCardGameEngine
     const participants = context.participants;
     let piles = this.serverPiles.get(context.sessionId);
 
+    if (!piles && (state as any)._serverPiles) {
+      piles = (state as any)._serverPiles;
+      this.serverPiles.set(context.sessionId, piles!);
+    }
+
     if (!piles) {
       piles = {
         drawPile: this.generateDeck(),
@@ -241,6 +249,7 @@ export class OriginalCardGameEngine
 
       state.hasDrawnThisTurn = true;
       state.drawPileCount = piles.drawPile.length;
+      (state as any)._serverPiles = piles;
 
       return {
         success: true,
@@ -254,6 +263,7 @@ export class OriginalCardGameEngine
       state.hasDrawnThisTurn = false;
       const nextUserId = getNextPlayerId(actorUserId, 1);
       state.currentTurnUserId = nextUserId;
+      (state as any)._serverPiles = piles;
 
       return {
         success: true,
@@ -364,6 +374,7 @@ export class OriginalCardGameEngine
       const nextTurnUserId = getNextPlayerId(actorUserId, stepsToNext);
       state.currentTurnUserId = nextTurnUserId;
       state.drawPileCount = piles.drawPile.length;
+      (state as any)._serverPiles = piles;
 
       return {
         success: true,

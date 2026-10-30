@@ -368,8 +368,8 @@ describe('PlaySpace Phase 2 — Real Multiplayer Rooms & Socket.IO Test Suite', 
         ],
       };
 
-      vi.spyOn(roomsService, 'getRoomByCode').mockResolvedValue(testRoomSnapshot as any);
-      vi.spyOn(roomsService, 'getRoomById').mockResolvedValue(testRoomSnapshot as any);
+      vi.spyOn(roomsService, 'getRoomByCode').mockResolvedValue({ isJoinPreview: true, canJoin: true, code: 'LIVE77' } as any);
+      vi.spyOn(roomsService, 'getRoomById').mockResolvedValue({ isJoinPreview: true, canJoin: true, code: 'LIVE77' } as any);
       vi.spyOn(roomsService, 'joinRoom').mockResolvedValue({
         room: updatedSnapshotWithB,
         isNewJoin: true,

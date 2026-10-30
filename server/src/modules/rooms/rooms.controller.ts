@@ -1,5 +1,11 @@
 import { Request, Response, NextFunction } from 'express';
 import { roomsService } from './rooms.service.js';
+import { NotFoundError } from '../../utils/errors.js';
+import {
+  getClientIp,
+  isRoomLookupBlocked,
+  recordFailedRoomLookup,
+} from '../../middleware/rateLimiter.js';
 
 function getParam(param: string | string[] | undefined): string {
   if (!param) return '';
@@ -19,7 +25,7 @@ export async function createRoom(req: Request, res: Response, next: NextFunction
 export async function getRoomById(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const roomId = getParam(req.params.id);
-    const room = await roomsService.getRoomById(roomId);
+    const room = await roomsService.getRoomById(roomId, req.user!.id);
     res.status(200).json(room);
   } catch (error) {
     next(error);
@@ -28,10 +34,26 @@ export async function getRoomById(req: Request, res: Response, next: NextFunctio
 
 export async function getRoomByCode(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
+    const key = req.user?.id || getClientIp(req);
+    const bruteForceCheck = isRoomLookupBlocked(key);
+    if (bruteForceCheck.blocked) {
+      res.setHeader('Retry-After', bruteForceCheck.retryAfterSeconds);
+      res.status(429).json({
+        error: 'Too Many Requests',
+        message: 'Too many failed room lookup attempts. Please wait before trying again.',
+        retryAfter: bruteForceCheck.retryAfterSeconds,
+      });
+      return;
+    }
+
     const code = getParam(req.params.code).toUpperCase().trim();
-    const room = await roomsService.getRoomByCode(code);
+    const room = await roomsService.getRoomByCode(code, req.user!.id);
     res.status(200).json(room);
   } catch (error) {
+    if (error instanceof NotFoundError) {
+      const key = req.user?.id || getClientIp(req);
+      recordFailedRoomLookup(key);
+    }
     next(error);
   }
 }
@@ -39,7 +61,9 @@ export async function getRoomByCode(req: Request, res: Response, next: NextFunct
 export async function getMyActiveRooms(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const userId = req.user!.id;
-    const rooms = await roomsService.getUserActiveRooms(userId);
+    const limit = req.query.limit ? Math.min(Math.max(1, parseInt(req.query.limit as string, 10) || 20), 100) : undefined;
+    const offset = req.query.offset ? Math.max(0, parseInt(req.query.offset as string, 10) || 0) : undefined;
+    const rooms = await roomsService.getUserActiveRooms(userId, { limit, offset });
     res.status(200).json({ rooms });
   } catch (error) {
     next(error);
@@ -155,8 +179,9 @@ export async function getMessages(req: Request, res: Response, next: NextFunctio
     const userId = req.user!.id;
     const roomId = getParam(req.params.id);
     const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 50;
-    const messages = await roomsService.getMessages(roomId, userId, limit);
-    res.status(200).json({ messages });
+    const cursor = typeof req.query.cursor === 'string' ? req.query.cursor : undefined;
+    const result = await roomsService.getMessages(roomId, userId, { cursor, limit });
+    res.status(200).json(result);
   } catch (error) {
     next(error);
   }

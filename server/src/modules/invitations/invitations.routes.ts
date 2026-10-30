@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { requireAuth } from '../../middleware/auth.js';
 import { validateRequest } from '../../middleware/validate.js';
-import { rateLimiter } from '../../middleware/rateLimiter.js';
+import { invitationsLimiter } from '../../middleware/rateLimiter.js';
 import {
   sendRoomInvitation,
   getReceivedInvitations,
@@ -18,7 +18,7 @@ invitationRoutes.use(requireAuth);
 
 invitationRoutes.post(
   '/',
-  rateLimiter({ windowMs: 60 * 1000, max: 20 }),
+  invitationsLimiter,
   validateRequest({ body: sendRoomInvitationSchema }),
   sendRoomInvitation
 );

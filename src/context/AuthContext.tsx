@@ -1,13 +1,13 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { api } from '../services/api';
+import { socketService } from '../services/socket';
 import type { User, AuthState } from '../types/auth';
 
 interface AuthContextType extends AuthState {
   loginWithGoogle: () => Promise<void>;
   logout: () => Promise<void>;
   refreshProfile: () => Promise<void>;
-  setDevUser: (mode?: 'couple' | 'friend') => void;
   // Backward compatibility signatures for existing consumers during transition
   login: (email?: string, password?: string) => Promise<{ success: boolean; error?: string }>;
   signup: (name?: string, email?: string, password?: string) => Promise<{ success: boolean; error?: string }>;
@@ -315,6 +315,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     try {
+      socketService.disconnect();
       const { error: signOutError } = await supabase.auth.signOut();
       if (signOutError) throw signOutError;
     } catch (err) {
@@ -344,12 +345,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const setDevUser = (mode?: 'couple' | 'friend') => {
-    if (user) {
-      setUser({ ...user, preferredMode: mode || user.preferredMode || 'couple' });
-    }
-  };
-
   return (
     <AuthContext.Provider
       value={{
@@ -360,7 +355,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         loginWithGoogle,
         logout,
         refreshProfile,
-        setDevUser,
         login,
         signup,
       }}

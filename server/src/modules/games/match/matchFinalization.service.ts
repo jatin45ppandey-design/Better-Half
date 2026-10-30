@@ -112,6 +112,20 @@ export class MatchFinalizationService {
         },
       });
 
+      // Update room status to COMPLETED if associated with an active room
+      if (
+        context.roomId &&
+        context.roomId !== 'direct-room' &&
+        tx &&
+        tx.room &&
+        typeof tx.room.updateMany === 'function'
+      ) {
+        await tx.room.updateMany({
+          where: { id: context.roomId, status: 'IN_PROGRESS' },
+          data: { status: 'COMPLETED' },
+        });
+      }
+
       // 6. Create MatchParticipants
       for (const pResult of evaluation.participants) {
         const profile = userProfilesMap[pResult.userId] || {
@@ -181,12 +195,13 @@ export class MatchFinalizationService {
           const userHighId = pA.userId < pB.userId ? pB.userId : pA.userId;
 
           const isCoop = evaluation.resultType === 'COOPERATIVE';
-          const isComp = evaluation.resultType === 'COMPETITIVE';
+          const isComp = evaluation.resultType === 'COMPETITIVE' || evaluation.resultType === 'DRAW';
 
           let lowWon = false;
           let highWon = false;
           let pairDraw = false;
 
+          // Derive pairwise outcome strictly from individual placements in competitive/draw games
           if (isComp) {
             const resLow = pA.userId === userLowId ? pA : pB;
             const resHigh = pA.userId === userHighId ? pA : pB;
@@ -198,8 +213,6 @@ export class MatchFinalizationService {
             } else {
               pairDraw = true;
             }
-          } else if (evaluation.resultType === 'DRAW') {
-            pairDraw = true;
           }
 
           // Fetch existing rivalry pair to calculate streak
@@ -229,7 +242,7 @@ export class MatchFinalizationService {
               newStreakHolder = userHighId;
               newStreakCount = 1;
             }
-          } else if (pairDraw) {
+          } else if (pairDraw && isComp) {
             newStreakCount = 0;
             newStreakHolder = null;
           }

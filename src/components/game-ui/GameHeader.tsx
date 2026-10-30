@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Pause, HelpCircle, Sparkles, Clock, Volume2, VolumeX } from 'lucide-react';
-import { Badge } from '../ui/Badge';
+import { Pause, HelpCircle, Clock, Volume2, VolumeX } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { GameIcon } from '../ui/GameIcon';
+import { Badge } from '../ui/Badge';
 import { soundService } from '../../services/soundService';
 import type { GameItem } from '../../types/game';
 
@@ -59,7 +59,7 @@ export const GameHeader: React.FC<GameHeaderProps> = ({
                 {game.name}
               </h1>
               <Badge variant={mode === 'couple' ? 'pink' : 'lavender'} size="sm">
-                {mode === 'couple' ? 'Couple 2P' : 'Friend 4P'}
+                {mode === 'couple' ? 'Couple 2P' : 'Friend 2–4P'}
               </Badge>
             </div>
             {roomCode && (
@@ -101,12 +101,8 @@ export const GameHeader: React.FC<GameHeaderProps> = ({
           )}
         </div>
 
-        {/* Right: Controls, Sound Toggle & Demo Badge */}
+        {/* Match Controls */}
         <div className="flex items-center gap-2">
-          <Badge variant="subtle" size="sm" className="hidden sm:inline-flex">
-            <Sparkles className="w-3 h-3 text-[#9670E8]" />
-            Local Match
-          </Badge>
 
           {/* Quick Sound Toggle Button */}
           <button

@@ -6,11 +6,14 @@ import { Avatar } from '../components/ui/Avatar';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
-import { mockSocialAdapter } from '../services/mockSocialAdapter';
-import type {
-  FriendItem,
-  FriendRequestItem,
-} from '../services/mockSocialAdapter';
+interface FriendItem {
+  id: string; name: string; username: string; avatarInitials: string; avatarColor: string;
+  isMutualCouple?: boolean;
+}
+interface FriendRequestItem {
+  id: string; name: string; username: string; avatarInitials: string; avatarColor: string;
+  timestamp: string; mutualFriends: number;
+}
 import { api, type UserProfileResponse } from '../services/api';
 import { useRoom } from '../context/RoomContext';
 import { useToast } from '../context/ToastContext';
@@ -31,8 +34,11 @@ import {
 } from 'lucide-react';
 
 export const FriendsPage: React.FC = () => {
-  const [friends, setFriends] = useState<FriendItem[]>(() => mockSocialAdapter.getFriends());
-  const [requests, setRequests] = useState<FriendRequestItem[]>(() => mockSocialAdapter.getFriendRequests());
+  const [friends, setFriends] = useState<FriendItem[]>([]);
+  const [requests, setRequests] = useState<FriendRequestItem[]>([]);
+  const [isLoadingSocial, setIsLoadingSocial] = useState(true);
+  const [socialError, setSocialError] = useState<string | null>(null);
+  const [invitingFriendId, setInvitingFriendId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedFriend, setSelectedFriend] = useState<FriendItem | null>(null);
   const [friendToRemove, setFriendToRemove] = useState<FriendItem | null>(null);
@@ -50,41 +56,25 @@ export const FriendsPage: React.FC = () => {
 
   // Load real friends & requests from backend API
   const loadSocialData = async () => {
+    setIsLoadingSocial(true);
+    setSocialError(null);
     try {
-      const [friendsRes, requestsRes] = await Promise.all([
-        api.friends.list().catch(() => null),
-        api.friends.listRequests().catch(() => null),
-      ]);
-
-      if (friendsRes?.friends && friendsRes.friends.length > 0) {
-        setFriends(
-          friendsRes.friends.map((f) => ({
-            id: f.id,
-            name: f.displayName,
-            username: `@${f.username}`,
-            avatarInitials: f.avatarInitials || 'PL',
-            avatarColor: f.avatarColor || '#9670E8',
-            status: f.showOnlineStatus ? 'online' : 'offline',
-            statusText: f.showOnlineStatus ? 'Active' : 'Offline',
-          }))
-        );
-      }
-
-      if (requestsRes?.incoming) {
-        setRequests(
-          requestsRes.incoming.map((r) => ({
-            id: r.id,
-            name: r.user.displayName,
-            username: `@${r.user.username}`,
-            avatarInitials: r.user.avatarInitials || 'PL',
-            avatarColor: r.user.avatarColor || '#9670E8',
-            timestamp: new Date(r.createdAt).toLocaleDateString(),
-            mutualFriends: 0,
-          }))
-        );
-      }
+      const [friendsRes, requestsRes] = await Promise.all([api.friends.list(), api.friends.listRequests()]);
+      setFriends(friendsRes.friends.map((f) => ({
+        id: f.id, name: f.displayName, username: `@${f.username}`,
+        avatarInitials: f.avatarInitials || 'PL', avatarColor: f.avatarColor || '#9670E8',
+      })));
+      setRequests(requestsRes.incoming.map((r) => ({
+        id: r.id, name: r.user.displayName, username: `@${r.user.username}`,
+        avatarInitials: r.user.avatarInitials || 'PL', avatarColor: r.user.avatarColor || '#9670E8',
+        timestamp: new Date(r.createdAt).toLocaleDateString(), mutualFriends: 0,
+      })));
     } catch (err) {
-      console.warn('Backend social load error:', err);
+      setFriends([]);
+      setRequests([]);
+      setSocialError(err instanceof Error ? err.message : 'Friends and requests could not be loaded.');
+    } finally {
+      setIsLoadingSocial(false);
     }
   };
 
@@ -134,12 +124,8 @@ export const FriendsPage: React.FC = () => {
       await api.friends.acceptRequest(req.id);
       addToast(`Connected with ${req.name}`, { type: 'success' });
       await loadSocialData();
-    } catch {
-      // Fallback to local adapter
-      mockSocialAdapter.acceptFriendRequest(req.id);
-      setRequests(mockSocialAdapter.getFriendRequests());
-      setFriends(mockSocialAdapter.getFriends());
-      addToast(`Connected with ${req.name}`, { type: 'success' });
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : 'Could not accept friend request.', { type: 'error' });
     }
   };
 
@@ -149,10 +135,8 @@ export const FriendsPage: React.FC = () => {
       await api.friends.rejectRequest(req.id);
       addToast(`Declined request from ${req.name}`, { type: 'info' });
       await loadSocialData();
-    } catch {
-      mockSocialAdapter.rejectFriendRequest(req.id);
-      setRequests(mockSocialAdapter.getFriendRequests());
-      addToast(`Declined request from ${req.name}`, { type: 'info' });
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : 'Could not decline friend request.', { type: 'error' });
     }
   };
 
@@ -163,10 +147,8 @@ export const FriendsPage: React.FC = () => {
       await api.friends.remove(friendToRemove.id);
       addToast(`Removed ${friendToRemove.name} from friends`, { type: 'info' });
       await loadSocialData();
-    } catch {
-      mockSocialAdapter.removeFriend(friendToRemove.id);
-      setFriends(mockSocialAdapter.getFriends());
-      addToast(`Removed ${friendToRemove.name} from friends`, { type: 'info' });
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : 'Could not remove friend.', { type: 'error' });
     } finally {
       setFriendToRemove(null);
       if (selectedFriend?.id === friendToRemove.id) {
@@ -181,10 +163,8 @@ export const FriendsPage: React.FC = () => {
       await api.blocks.block(friend.id);
       addToast(`Blocked ${friend.name}`, { type: 'info' });
       await loadSocialData();
-    } catch {
-      mockSocialAdapter.removeFriend(friend.id);
-      setFriends(mockSocialAdapter.getFriends());
-      addToast(`Blocked ${friend.name}`, { type: 'info' });
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : 'Could not block this player.', { type: 'error' });
     } finally {
       setSelectedFriend(null);
     }
@@ -192,39 +172,26 @@ export const FriendsPage: React.FC = () => {
 
   const handleInviteToRoom = async (friend: FriendItem) => {
     soundService.playClick();
-    if (currentRoom) {
-      addToast(`Invitation sent to ${friend.name} for Room #${currentRoom.code}`, { type: 'success' });
-      navigate(`/room/${currentRoom.code}`);
-    } else {
-      try {
-        const mode = friend.isMutualCouple ? 'couple' : 'friend';
-        const room = await createRoom({
-          name: `${friend.name}'s Showdown`,
-          mode,
-          selectedGameId: mode === 'couple' ? 'aloo-golf' : 'original-card-game',
-        });
-        addToast(`Created #${room.code} and invited ${friend.name}`, { type: 'success' });
-        navigate(`/room/${room.code}`);
-      } catch (err: any) {
-        addToast(err?.message || 'Failed to create room. Please check backend connection.', {
-          type: 'error',
-        });
+    setInvitingFriendId(friend.id);
+    try {
+      let roomCode = currentRoom?.code;
+      if (!roomCode) {
+        const created = await createRoom({ name: `${friend.name}'s Game Room`, mode: 'friend', selectedGameId: 'uno-style' });
+        roomCode = created.code;
       }
+      const room = await api.rooms.getByCode(roomCode);
+      if (room.isJoinPreview || !room.id) throw new Error('You must be an active room participant to invite a friend.');
+      await api.roomInvitations.send(room.id, friend.id);
+      addToast(`Room invitation sent to ${friend.name}.`, { type: 'success' });
+      navigate(`/room/${roomCode}`);
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : 'Could not send room invitation.', { type: 'error' });
+    } finally {
+      setInvitingFriendId(null);
     }
   };
 
-  const getStatusBadge = (status: FriendItem['status'], text: string) => {
-    switch (status) {
-      case 'online':
-        return <Badge variant="success" size="sm">● {text}</Badge>;
-      case 'in-game':
-        return <Badge variant="purple" size="sm">🎮 {text}</Badge>;
-      case 'in-lobby':
-        return <Badge variant="lavender" size="sm">⏳ {text}</Badge>;
-      case 'offline':
-        return <Badge variant="subtle" size="sm">○ {text}</Badge>;
-    }
-  };
+  const getStatusBadge = () => <Badge variant="subtle" size="sm">Friend</Badge>;
 
   return (
     <div className="min-h-screen flex flex-col bg-[#FCFAFF]">
@@ -285,7 +252,14 @@ export const FriendsPage: React.FC = () => {
             </div>
 
             {/* Friends Cards */}
-            {filteredFriends.length === 0 ? (
+            {isLoadingSocial ? (
+              <div className="bg-white rounded-3xl border border-[#EAE3F3] p-8 text-center text-sm text-[#756D82]">Loading your friends…</div>
+            ) : socialError ? (
+              <div className="bg-white rounded-3xl border border-[#F8D2D9] p-8 text-center">
+                <p className="text-sm text-[#A52E45]">{socialError}</p>
+                <Button variant="outline" size="sm" className="mt-3" onClick={() => void loadSocialData()}>Try again</Button>
+              </div>
+            ) : filteredFriends.length === 0 ? (
               <div className="bg-white rounded-3xl border border-[#EAE3F3] p-12 text-center">
                 <Users className="w-12 h-12 text-[#D5C7EE] mx-auto mb-3" />
                 <h3 className="font-extrabold text-base text-[#211A2D]">No friends found</h3>
@@ -320,7 +294,7 @@ export const FriendsPage: React.FC = () => {
                         initials={friend.avatarInitials}
                         size="md"
                         bgColor={friend.avatarColor}
-                        isOnline={friend.status !== 'offline'}
+                        
                       />
                       <div>
                         <div className="flex items-center gap-2">
@@ -335,7 +309,7 @@ export const FriendsPage: React.FC = () => {
                           <span className="text-xs text-[#756D82]">{friend.username}</span>
                         </div>
                         <div className="mt-1">
-                          {getStatusBadge(friend.status, friend.statusText)}
+                          {getStatusBadge()}
                         </div>
                       </div>
                     </div>
@@ -345,6 +319,8 @@ export const FriendsPage: React.FC = () => {
                       <Button
                         variant="primary"
                         size="sm"
+                        isLoading={invitingFriendId === friend.id}
+                        disabled={invitingFriendId !== null}
                         leftIcon={<Gamepad2 className="w-3.5 h-3.5" />}
                         onClick={() => handleInviteToRoom(friend)}
                       >
@@ -442,7 +418,7 @@ export const FriendsPage: React.FC = () => {
                 Quick Game Room
               </div>
               <p className="text-xs text-[#756D82] leading-relaxed mb-4">
-                Want to play immediately? Start a Couple or Friend lobby and copy your 5-letter room code.
+                Want to play immediately? Start a Couple or Friend lobby and share your 6-character room code.
               </p>
               <Button
                 variant="outline"
@@ -559,7 +535,7 @@ export const FriendsPage: React.FC = () => {
                 initials={selectedFriend.avatarInitials}
                 size="lg"
                 bgColor={selectedFriend.avatarColor}
-                isOnline={selectedFriend.status !== 'offline'}
+                
               />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
@@ -572,7 +548,7 @@ export const FriendsPage: React.FC = () => {
                 </div>
                 <p className="text-xs text-[#756D82]">{selectedFriend.username}</p>
                 <div className="mt-1.5">
-                  {getStatusBadge(selectedFriend.status, selectedFriend.statusText)}
+                  {getStatusBadge()}
                 </div>
               </div>
             </div>

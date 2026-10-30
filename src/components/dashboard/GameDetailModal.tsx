@@ -1,5 +1,5 @@
 import React from 'react';
-import { Users, Clock, Play, ShieldAlert } from 'lucide-react';
+import { Users, Clock, Play } from 'lucide-react';
 import { Modal } from '../ui/Modal';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
@@ -47,7 +47,7 @@ export const GameDetailModal: React.FC<GameDetailModalProps> = ({
             {game.estimatedMinutes}
           </Badge>
           <Badge variant="warning" size="sm">
-            Phase 2 Playable Engine
+            Game
           </Badge>
         </div>
 
@@ -59,7 +59,7 @@ export const GameDetailModal: React.FC<GameDetailModalProps> = ({
         {/* Rules Teaser */}
         <div>
           <h4 className="text-xs font-bold uppercase tracking-wider text-[#593B91] mb-2.5">
-            Rules & Game Mechanics Preview
+            Rules & Game Mechanics
           </h4>
           <div className="p-4 rounded-2xl bg-[#F8F4FF] border border-[#EAE3F3]">
             <ul className="flex flex-col gap-2.5 text-xs text-[#211A2D]">
@@ -75,14 +75,6 @@ export const GameDetailModal: React.FC<GameDetailModalProps> = ({
           </div>
         </div>
 
-        {/* Honest Architecture Notice */}
-        <div className="flex items-start gap-2.5 p-3 rounded-xl bg-[#FFFBEB] border border-[#FEF3C7] text-xs text-[#92400E]">
-          <ShieldAlert className="w-4 h-4 shrink-0 text-[#D97706] mt-0.5" />
-          <p>
-            <strong>Phase 1 Scope:</strong> The visual state, rule sets, and design tokens for {game.name} are ready. Real-time multiplayer sockets, turns, and lobby invites will be implemented in Phase 2.
-          </p>
-        </div>
-
         {/* Footer CTAs */}
         <div className="pt-2 border-t border-[#EAE3F3] flex flex-col sm:flex-row items-center justify-between gap-3">
           <Button variant="outline" size="sm" onClick={onClose} className="w-full sm:w-auto">
@@ -95,7 +87,7 @@ export const GameDetailModal: React.FC<GameDetailModalProps> = ({
             rightIcon={<Play className="w-3.5 h-3.5 fill-current" />}
             className="w-full sm:w-auto"
           >
-            Launch Match Preview
+            Create Room & Play
           </Button>
         </div>
       </div>

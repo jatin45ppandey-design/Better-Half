@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../../context/AuthContext';
 import { Link } from 'react-router-dom';
 import { ArrowRight, Users, Play } from 'lucide-react';
 import { GAMES_DATA, GAME_CATEGORIES } from '../../data/games';
@@ -12,6 +14,8 @@ export const CompactGameDiscovery: React.FC = () => {
   const [selectedCategory, setSelectedCategory] = useState<GameCategory>('All');
   const [selectedGameForRoom, setSelectedGameForRoom] = useState<GameItem | null>(null);
   const [createModalOpen, setCreateModalOpen] = useState(false);
+  const { isAuthenticated } = useAuth();
+  const navigate = useNavigate();
 
   const displayedGames =
     selectedCategory === 'All'
@@ -19,6 +23,10 @@ export const CompactGameDiscovery: React.FC = () => {
       : GAMES_DATA.filter((g) => g.category === selectedCategory).slice(0, 8);
 
   const handleLaunchGameRoom = (game: GameItem) => {
+    if (!isAuthenticated) {
+      navigate('/login');
+      return;
+    }
     setSelectedGameForRoom(game);
     setCreateModalOpen(true);
   };
@@ -30,7 +38,7 @@ export const CompactGameDiscovery: React.FC = () => {
         <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-8">
           <div>
             <Badge variant="subtle" size="sm" className="mb-2">
-              Game Catalog Preview
+              Explore the Games
             </Badge>
             <h2 className="text-2xl sm:text-3xl font-extrabold text-[#211A2D] tracking-tight">
               Featured Multiplayer Games

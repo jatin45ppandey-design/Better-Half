@@ -1,5 +1,5 @@
 import React from 'react';
-import { BookOpen, Keyboard, ShieldAlert } from 'lucide-react';
+import { BookOpen, Keyboard } from 'lucide-react';
 import { Modal } from '../ui/Modal';
 import { Button } from '../ui/Button';
 import type { GameItem } from '../../types/game';
@@ -56,14 +56,6 @@ export const GameInstructionsModal: React.FC<GameInstructionsModalProps> = ({
           </h4>
           <div className="p-3 rounded-xl bg-[#FCFAFF] border border-[#EAE3F3] text-xs text-[#756D82]">
             {game.instructions.controls}
-          </div>
-        </div>
-
-        {/* Prototype Rule Decisions Note */}
-        <div className="p-3 rounded-xl bg-[#FFFBEB] border border-[#FEF3C7] flex items-start gap-2 text-xs text-[#92400E]">
-          <ShieldAlert className="w-4 h-4 shrink-0 text-[#D97706] mt-0.5" />
-          <div>
-            <strong>Phase 2 Prototype Rule Assumptions:</strong> {game.instructions.prototypeNotes}
           </div>
         </div>
 
