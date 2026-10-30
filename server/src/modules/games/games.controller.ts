@@ -2,6 +2,7 @@ import type { Request, Response } from 'express';
 import { gameSessionService } from './core/gameSession.service.js';
 import { gameStateService } from './core/gameState.service.js';
 import { adminService } from '../admin/admin.service.js';
+import { AppError } from '../../utils/errors.js';
 
 export const gamesController = {
   async getCatalog(_req: Request, res: Response) {
@@ -49,8 +50,11 @@ export const gamesController = {
         publicState,
         privateState: userPrivateState,
       });
-    } catch (err: any) {
-      return res.status(400).json({ error: err.message || 'Failed to start game' });
+    } catch (err: unknown) {
+      if (err instanceof AppError) {
+        return res.status(err.statusCode).json({ error: err.message });
+      }
+      return res.status(500).json({ error: 'Unable to start the game session.' });
     }
   },
 
@@ -82,8 +86,8 @@ export const gamesController = {
         publicState,
         privateState,
       });
-    } catch (err: any) {
-      return res.status(500).json({ error: err.message || 'Internal server error' });
+    } catch {
+      return res.status(500).json({ error: 'Game session is temporarily unavailable.' });
     }
   },
 
@@ -136,8 +140,11 @@ export const gamesController = {
         publicState,
         privateState,
       });
-    } catch (err: any) {
-      return res.status(400).json({ error: err.message || 'Failed to initialize rematch' });
+    } catch (err: unknown) {
+      if (err instanceof AppError) {
+        return res.status(err.statusCode).json({ error: err.message });
+      }
+      return res.status(500).json({ error: 'Unable to initialize the rematch.' });
     }
   },
 };
