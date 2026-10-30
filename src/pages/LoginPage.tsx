@@ -14,13 +14,25 @@ export const LoginPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const from = (location.state as any)?.from?.pathname || '/dashboard';
+  const rawFrom = (location.state as any)?.from?.pathname;
+  const destination = rawFrom && rawFrom !== '/login' && rawFrom !== '/signup' ? rawFrom : '/dashboard';
+
+  useEffect(() => {
+    const searchParams = new URLSearchParams(window.location.search);
+    const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+    const errorDesc = searchParams.get('error_description') || hashParams.get('error_description');
+    const errorParam = searchParams.get('error') || hashParams.get('error');
+
+    if (errorDesc || errorParam) {
+      setErrorMessage(errorDesc || errorParam || 'Authentication failed. Please try again.');
+    }
+  }, []);
 
   useEffect(() => {
     if (isAuthenticated) {
-      navigate(from, { replace: true });
+      navigate(destination, { replace: true });
     }
-  }, [isAuthenticated, navigate, from]);
+  }, [isAuthenticated, navigate, destination]);
 
   const handleGoogleSignIn = async () => {
     setIsSubmitting(true);

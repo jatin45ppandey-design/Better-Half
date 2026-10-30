@@ -1,10 +1,12 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://lpdyurstagyfatpqcfxz.supabase.co';
-const supabasePublishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || 'sb_publishable_placeholder';
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabasePublishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
-if (!import.meta.env.VITE_SUPABASE_URL) {
-  console.warn('⚠️ VITE_SUPABASE_URL is not set in environment. Falling back to configured project URL.');
+if (!supabaseUrl || !supabasePublishableKey) {
+  throw new Error(
+    'Missing Supabase frontend configuration: VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY must be defined in your environment (.env.local).'
+  );
 }
 
 export const supabase = createClient(supabaseUrl, supabasePublishableKey, {
@@ -12,7 +14,6 @@ export const supabase = createClient(supabaseUrl, supabasePublishableKey, {
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: true,
-    storage: window.localStorage,
+    storage: typeof window !== 'undefined' ? window.localStorage : undefined,
   },
 });
-
