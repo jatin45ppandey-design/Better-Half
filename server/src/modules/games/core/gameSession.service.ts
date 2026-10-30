@@ -221,10 +221,10 @@ export class GameSessionService {
     actorUserId: string
   ): Promise<GameEngineContext> {
     const session = gameStateService.getSession(sessionId);
-    if (!session) throw new Error('Session not found');
+    if (!session) throw new NotFoundError('Session not found');
 
     const participant = session.participants.find((p) => p.userId === actorUserId);
-    if (!participant) throw new Error('Unauthorized');
+    if (!participant) throw new ForbiddenError('Not a participant of this game session');
 
     const nextVersion = session.version + 1;
 
@@ -265,7 +265,7 @@ export class GameSessionService {
       where: { gameId },
     });
     if (gameConfig && !gameConfig.isEnabled) {
-      throw new Error(`Game "${gameId}" is currently disabled by administrators.`);
+      throw new AppError(`Game "${gameId}" is currently disabled by administrators.`, 400);
     }
 
     // Enforce Couple-only restriction
