@@ -9,6 +9,7 @@ import { statsService } from '../src/modules/stats/stats.service.js';
 import { matchesService } from '../src/modules/matches/matches.service.js';
 import { rivalryService } from '../src/modules/rivalry/rivalry.service.js';
 import { adminService } from '../src/modules/admin/admin.service.js';
+import { gamesController } from '../src/modules/games/games.controller.js';
 import { auditService } from '../src/modules/admin/audit.service.js';
 import type { GameEngineContext } from '../src/modules/games/core/gameEngine.types.js';
 
@@ -585,6 +586,25 @@ describe('PlaySpace Phase 4 — Match History, Stats, Rivalry, RBAC & Admin Suit
           }),
         })
       );
+    });
+  });
+
+  describe('Wave 1 — Safe game catalog failure', () => {
+    it('does not return a successful empty catalog when the database service fails', async () => {
+      vi.spyOn(adminService, 'listGames').mockRejectedValueOnce(
+        new Error('database password must never reach the client')
+      );
+      const status = vi.fn().mockReturnThis();
+      const json = vi.fn();
+
+      await gamesController.getCatalog({} as any, { status, json } as any);
+
+      expect(status).toHaveBeenCalledWith(503);
+      expect(json).toHaveBeenCalledWith({
+        success: false,
+        error: 'Game catalog is temporarily unavailable.',
+      });
+      expect(JSON.stringify(json.mock.calls[0][0])).not.toContain('database password');
     });
   });
 

@@ -38,7 +38,8 @@ This matrix records the Express route guards and the service-level object/privac
 | `GET /invitations/rooms/received` | Auth | Query is scoped to authenticated receiver and returns only pending, unexpired invites for eligible active rooms | Read-only |
 | `POST /invitations/rooms/:id/accept`, `.../decline` | Auth | Only the intended receiver can accept or decline | Accept joins through RoomsService; decline updates invitation state |
 | `POST /invitations/rooms/:id/cancel` | Auth | Only original sender or room host may cancel | Cancels pending invite |
-| `GET /games/catalog`, `POST /games/rooms/:roomId/start` | Auth | Start path checks caller through room/host eligibility service | Server selects and starts game session |
+| `GET /games/catalog` | Auth | Reads server game configuration; a catalog/database failure returns a safe 503 error, never a successful empty list | Read-only |
+| `POST /games/rooms/:roomId/start` | Auth | Start path checks caller through room/host eligibility service | Server selects and starts game session |
 | `GET /games/sessions/:id`, `GET /games/sessions/:id/state` | Auth | Caller must be a session participant before any public projection is returned; private projection additionally resolves only that caller's private state | Non-participant receives 403; no general spectator API is exposed |
 | `POST /games/sessions/:id/rematch` | Auth | Rematch service enforces participant/room rules | Server creates rematch |
 | `GET /matches/history` | Auth | Query is scoped to caller's own history | Read-only |

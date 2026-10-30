@@ -53,7 +53,7 @@ REVOKE ALL PRIVILEGES ON TABLE
   public."GameConfiguration",
   public."QuestionEntry",
   public."AuditLog"
-FROM anon, authenticated;
+FROM PUBLIC, anon, authenticated;
 
 -- No broad "authenticated can do everything" policies are created. With RLS enabled
 -- and no policies, direct access remains denied unless a future narrowly scoped

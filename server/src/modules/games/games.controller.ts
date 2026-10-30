@@ -16,7 +16,10 @@ export const gamesController = {
       }));
       return res.json({ success: true, data: catalog });
     } catch {
-      return res.json({ success: true, data: [] });
+      return res.status(503).json({
+        success: false,
+        error: 'Game catalog is temporarily unavailable.',
+      });
     }
   },
   async startRoomGame(req: Request, res: Response) {
