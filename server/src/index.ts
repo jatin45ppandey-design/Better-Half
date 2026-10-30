@@ -7,6 +7,7 @@ import { createSocketServer } from './socket/index.js';
 const app = createApp();
 const httpServer = http.createServer(app);
 const io = createSocketServer(httpServer);
+app.set('io', io);
 
 const PORT = env.PORT;
 const HOST = '0.0.0.0';

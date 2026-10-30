@@ -1,5 +1,6 @@
 import type { Socket } from 'socket.io';
 import { supabase } from '../config/supabase.js';
+import { prisma } from '../config/prisma.js';
 
 export async function socketAuthMiddleware(
   socket: Socket,
@@ -21,6 +22,19 @@ export async function socketAuthMiddleware(
     const testUserId = token.replace('test-mock-token-', '');
     socket.data.userId = testUserId;
     socket.data.email = `${testUserId}@example.com`;
+
+    try {
+      const profile = await prisma.userProfile.findUnique({
+        where: { id: testUserId },
+        select: { accountStatus: true },
+      });
+      if (profile && profile.accountStatus === 'SUSPENDED') {
+        return next(new Error('Authentication failed: Account has been suspended'));
+      }
+    } catch {
+      // Continue in isolated tests
+    }
+
     return next();
   }
 
@@ -29,6 +43,19 @@ export async function socketAuthMiddleware(
 
     if (error || !data?.user) {
       return next(new Error('Authentication failed: Invalid, expired, or revoked token'));
+    }
+
+    // Verify account status
+    try {
+      const profile = await prisma.userProfile.findUnique({
+        where: { id: data.user.id },
+        select: { accountStatus: true },
+      });
+      if (profile && profile.accountStatus === 'SUSPENDED') {
+        return next(new Error('Authentication failed: Account has been suspended'));
+      }
+    } catch {
+      // Continue if DB unavailable
     }
 
     socket.data.userId = data.user.id;

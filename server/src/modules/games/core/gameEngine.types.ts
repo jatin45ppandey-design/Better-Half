@@ -19,6 +19,8 @@ export interface GameEngineContext<TState = any, TPrivateState = any> {
   scores: Record<string, number>;
   rngSeed?: string;
   currentTurnUserId?: string | null;
+  roomId?: string;
+  startedAt?: string | Date;
 }
 
 export interface ActionResult<TState = any, TPrivateState = any> {

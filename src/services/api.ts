@@ -307,6 +307,116 @@ export const api = {
       }>(`/games/sessions/${sessionId}/rematch`, {
         method: 'POST',
       }),
+    getCatalog: () =>
+      request<{ success: boolean; data: Array<{ gameId: string; isEnabled: boolean; coupleEnabled: boolean; friendEnabled: boolean; maintenanceMessage: string | null }> }>('/games/catalog'),
+  },
+
+  // Match History (Phase 4)
+  matches: {
+    getHistory: (params: { gameId?: string; mode?: string; cursor?: string; limit?: number } = {}) => {
+      const q = new URLSearchParams();
+      if (params.gameId && params.gameId !== 'all') q.set('gameId', params.gameId);
+      if (params.mode && params.mode !== 'all') q.set('mode', params.mode);
+      if (params.cursor) q.set('cursor', params.cursor);
+      if (params.limit) q.set('limit', params.limit.toString());
+      const queryStr = q.toString() ? `?${q.toString()}` : '';
+      return request<{ success: boolean; data: { matches: any[]; nextCursor: string | null; hasMore: boolean } }>(`/matches/history${queryStr}`);
+    },
+    getMatch: (matchId: string) =>
+      request<{ success: boolean; data: any }>(`/matches/${matchId}`),
+  },
+
+  // Player Stats (Phase 4)
+  stats: {
+    getMyStats: () => request<{ success: boolean; data: any }>('/stats/me'),
+    getMyGames: () => request<{ success: boolean; data: any[] }>('/stats/me/games'),
+    getMyRecent: () => request<{ success: boolean; data: any[] }>('/stats/me/recent'),
+    getUserStats: (userId: string) => request<{ success: boolean; data: any }>(`/stats/users/${userId}`),
+    getUserGames: (userId: string) => request<{ success: boolean; data: any[] }>(`/stats/users/${userId}/games`),
+  },
+
+  // Rivalry System (Phase 4)
+  rivalry: {
+    getRivalries: () => request<{ success: boolean; data: any[] }>('/rivalry'),
+    getRivalryWithUser: (rivalUserId: string) =>
+      request<{ success: boolean; data: any }>(`/rivalry/${rivalUserId}`),
+    getRivalryHistory: (rivalUserId: string, limit = 10) =>
+      request<{ success: boolean; data: any[] }>(`/rivalry/${rivalUserId}/history?limit=${limit}`),
+  },
+
+  // Admin Services (Phase 4)
+  admin: {
+    getOverview: () => request<{ success: boolean; data: any }>('/admin/overview'),
+    getUsers: (params: { search?: string; status?: string; role?: string; limit?: number; offset?: number } = {}) => {
+      const q = new URLSearchParams();
+      if (params.search) q.set('search', params.search);
+      if (params.status && params.status !== 'ALL') q.set('status', params.status);
+      if (params.role && params.role !== 'ALL') q.set('role', params.role);
+      if (params.limit) q.set('limit', params.limit.toString());
+      if (params.offset) q.set('offset', params.offset.toString());
+      const queryStr = q.toString() ? `?${q.toString()}` : '';
+      return request<{ success: boolean; data: { users: any[]; totalCount: number; limit: number; offset: number } }>(`/admin/users${queryStr}`);
+    },
+    getUser: (userId: string) => request<{ success: boolean; data: any }>(`/admin/users/${userId}`),
+    updateUserStatus: (userId: string, status: 'ACTIVE' | 'SUSPENDED', reason?: string) =>
+      request<{ success: boolean; data: any }>(`/admin/users/${userId}/status`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status, reason }),
+      }),
+    assignRole: (userId: string, role: 'ADMIN' | 'MODERATOR') =>
+      request<{ success: boolean; data: any }>(`/admin/users/${userId}/roles`, {
+        method: 'POST',
+        body: JSON.stringify({ role }),
+      }),
+    revokeRole: (userId: string, role: 'ADMIN' | 'MODERATOR') =>
+      request<{ success: boolean; data: any }>(`/admin/users/${userId}/roles/${role}`, {
+        method: 'DELETE',
+      }),
+    getGames: () => request<{ success: boolean; data: any[] }>('/admin/games'),
+    updateGame: (gameId: string, data: { isEnabled?: boolean; coupleEnabled?: boolean; friendEnabled?: boolean; maintenanceMessage?: string | null }) =>
+      request<{ success: boolean; data: any }>(`/admin/games/${gameId}`, {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      }),
+    getQuestions: (params: { gameId?: string; category?: string; intensity?: number; isActive?: boolean; cursor?: string; limit?: number } = {}) => {
+      const q = new URLSearchParams();
+      if (params.gameId && params.gameId !== 'all') q.set('gameId', params.gameId);
+      if (params.category && params.category !== 'all') q.set('category', params.category);
+      if (params.intensity) q.set('intensity', params.intensity.toString());
+      if (params.isActive !== undefined) q.set('isActive', params.isActive.toString());
+      if (params.cursor) q.set('cursor', params.cursor);
+      if (params.limit) q.set('limit', params.limit.toString());
+      const queryStr = q.toString() ? `?${q.toString()}` : '';
+      return request<{ success: boolean; data: { questions: any[]; totalCount: number; nextCursor: string | null; hasMore: boolean } }>(`/admin/questions${queryStr}`);
+    },
+    createQuestion: (data: any) =>
+      request<{ success: boolean; data: any }>('/admin/questions', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    updateQuestion: (questionId: string, data: any) =>
+      request<{ success: boolean; data: any }>(`/admin/questions/${questionId}`, {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      }),
+    deleteQuestion: (questionId: string) =>
+      request<{ success: boolean; data: any }>(`/admin/questions/${questionId}`, {
+        method: 'DELETE',
+      }),
+    getAuditLogs: (params: { action?: string; actorUserId?: string; targetType?: string; cursor?: string; limit?: number } = {}) => {
+      const q = new URLSearchParams();
+      if (params.action) q.set('action', params.action);
+      if (params.actorUserId) q.set('actorUserId', params.actorUserId);
+      if (params.targetType) q.set('targetType', params.targetType);
+      if (params.cursor) q.set('cursor', params.cursor);
+      if (params.limit) q.set('limit', params.limit.toString());
+      const queryStr = q.toString() ? `?${q.toString()}` : '';
+      return request<{ success: boolean; data: { logs: any[]; nextCursor: string | null; hasMore: boolean } }>(`/admin/audit-logs${queryStr}`);
+    },
+    reconcileStats: (userId: string) =>
+      request<{ success: boolean; data: any }>(`/admin/reconcile/${userId}`, {
+        method: 'POST',
+      }),
   },
 };
 

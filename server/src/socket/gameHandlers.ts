@@ -56,9 +56,9 @@ export function registerGameHandlers(
   });
 
   // 2. Submit Game Action
-  socket.on('game:action', (payload, callback) => {
+  socket.on('game:action', async (payload, callback) => {
     try {
-      const result = gameActionService.applyAction(payload, userId);
+      const result = await gameActionService.applyAction(payload, userId);
 
       if (!result.success) {
         socket.emit('game:action:rejected', {
@@ -120,6 +120,7 @@ export function registerGameHandlers(
           sessionId: payload.sessionId,
           winnerUserId: result.winnerUserId || null,
           scores: session.scores,
+          matchId: result.matchId || null,
         });
       }
     } catch (err: any) {

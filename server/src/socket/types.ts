@@ -64,7 +64,7 @@ export interface ServerToClientEvents {
   'game:event': (data: { type: string; payload: unknown }) => void;
   'game:paused': (data: { sessionId: string; pausedBy: string }) => void;
   'game:resumed': (data: { sessionId: string; resumedBy: string }) => void;
-  'game:completed': (data: { sessionId: string; winnerUserId: string | null; scores: Record<string, number> }) => void;
+  'game:completed': (data: { sessionId: string; winnerUserId: string | null; scores: Record<string, number>; matchId?: string | null }) => void;
   'game:session:reconnected': (data: { publicState: Record<string, unknown>; privateState: Record<string, unknown> | null }) => void;
   'game:error': (data: { code: string; message: string }) => void;
 }

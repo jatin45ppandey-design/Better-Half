@@ -100,6 +100,8 @@ export class GameSessionService {
       scores: initialState.scores || {},
       rngSeed,
       currentTurnUserId: initialState.currentTurnUserId || participants[0]?.userId || null,
+      roomId: room.id,
+      startedAt: new Date(),
     };
 
     // 6. Save in memory

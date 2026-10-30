@@ -10,6 +10,7 @@
     "build": "prisma generate && tsc",
     "start": "node dist/index.js",
     "test": "vitest run",
+    "admin:grant": "tsx src/scripts/grantAdmin.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy"

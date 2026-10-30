@@ -1,8 +1,24 @@
 import type { Request, Response } from 'express';
 import { gameSessionService } from './core/gameSession.service.js';
 import { gameStateService } from './core/gameState.service.js';
+import { adminService } from '../admin/admin.service.js';
 
 export const gamesController = {
+  async getCatalog(_req: Request, res: Response) {
+    try {
+      const configs = await adminService.listGames();
+      const catalog = configs.map((c) => ({
+        gameId: c.gameId,
+        isEnabled: c.isEnabled,
+        coupleEnabled: c.coupleEnabled,
+        friendEnabled: c.friendEnabled,
+        maintenanceMessage: c.maintenanceMessage,
+      }));
+      return res.json({ success: true, data: catalog });
+    } catch {
+      return res.json({ success: true, data: [] });
+    }
+  },
   async startRoomGame(req: Request, res: Response) {
     try {
       const roomId = req.params.roomId as string;
