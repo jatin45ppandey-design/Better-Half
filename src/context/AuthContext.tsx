@@ -278,7 +278,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setError(null);
     setIsLoading(true);
     try {
-      const redirectUrl = new URL('/dashboard', window.location.origin).toString();
+      const redirectUrl = new URL('/auth/callback', window.location.origin).toString();
       const { error: oauthError } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
