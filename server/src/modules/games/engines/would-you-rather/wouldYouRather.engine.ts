@@ -156,6 +156,8 @@ export class WouldYouRatherEngine
           newState: state,
           newPrivateStates: privateStates,
           scores,
+          isCompleted: state.totalAnswered >= 8,
+          winnerUserId: null,
           events: [
             {
               type: 'wyr:revealed',
