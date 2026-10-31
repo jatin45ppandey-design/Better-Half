@@ -70,11 +70,15 @@ export const BasketballRivalryGame: React.FC<BasketballProps> = ({
   const [serverBallState, setServerBallState] = useState({
     x: BALL_START_X, y: BALL_START_Y, vx: 0, vy: 0, inFlight: false,
   });
-  const localLastShotResult = useRef<any>(null);
+  const [localLastShotResult, setLocalLastShotResult] = useState<{
+    type: 'SWISH' | 'BANK' | 'MISS' | null;
+    points: number;
+    text: string;
+  }>({ type: null, points: 0, text: '' });
   const ballState = isMultiplayer ? serverBallState : localBallState;
   const lastShotResult = isMultiplayer
     ? sessionState.lastShotResult || { type: null, points: 0, text: '' }
-    : localLastShotResult.current?.local || { type: null, points: 0, text: '' };
+    : localLastShotResult;
 
   const activePlayer = players[currentTurnIdx % players.length];
   const activeShots = shotsTaken[activePlayer.id] || 0;
@@ -177,7 +181,7 @@ export const BasketballRivalryGame: React.FC<BasketballProps> = ({
     const bonus = isScore && activeStreak >= 2 ? 1 : 0; // On-fire bonus
     const totalPts = pts + bonus;
 
-    setLastShotResult({ type, points: totalPts, text: bonus ? `${text} +1 Fire Streak!` : text });
+    setLocalLastShotResult({ type, points: totalPts, text: bonus ? `${text} +1 Fire Streak!` : text });
 
     const newScore = (scores[activePlayer.id] || 0) + totalPts;
     const newShots = activeShots + 1;
