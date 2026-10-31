@@ -15,12 +15,20 @@ interface BlindRankingGameProps {
   players: { id: string; name: string; avatarInitials: string; avatarColor: string }[];
   onFinishMatch: (results: { winnerName?: string; playerScores: PlayerScoreSummary[] }) => void;
   onUpdateTurn?: (playerName: string, roundInfo: string) => void;
+  sessionState?: any;
+  sessionPrivateState?: any;
+  onSendAction?: (action: any) => Promise<{ success: boolean; error?: string }>;
+  currentUserId?: string;
 }
 
 export const BlindRankingGame: React.FC<BlindRankingGameProps> = ({
   players,
   onFinishMatch,
   onUpdateTurn,
+  sessionState,
+  sessionPrivateState,
+  onSendAction,
+  currentUserId,
 }) => {
   const activePlayers = players.length >= 2 ? players : [
     { id: 'p1', name: 'Alex', avatarInitials: 'AR', avatarColor: 'bg-[#9670E8]' },
@@ -28,28 +36,46 @@ export const BlindRankingGame: React.FC<BlindRankingGameProps> = ({
   ];
 
   const [categoryIndex, setCategoryIndex] = useState(0);
-  const [currentPlayerIndex, setCurrentPlayerIndex] = useState(0);
-  const [currentItemIndex, setCurrentItemIndex] = useState(0);
+  const [localCurrentPlayerIndex, setCurrentPlayerIndex] = useState(0);
+  const [localCurrentItemIndex, setCurrentItemIndex] = useState(0);
   const [playerRankings, setPlayerRankings] = useState<Record<string, (string | null)[]>>({});
   const [showPassScreen, setShowPassScreen] = useState(false);
-  const [revealedResults, setRevealedResults] = useState(false);
+  const [localRevealedResults, setRevealedResults] = useState(false);
+  const [localRound, setLocalRound] = useState(1);
 
-  const currentCategory = BLIND_RANKING_CATEGORIES[categoryIndex % BLIND_RANKING_CATEGORIES.length];
-  const activePlayer = activePlayers[currentPlayerIndex];
-  const activeBoard = playerRankings[activePlayer.id] || [null, null, null, null, null];
-  const currentItem = currentCategory.items[currentItemIndex];
+  const isMultiplayer = Boolean(sessionState && onSendAction);
+  const currentCategory = isMultiplayer
+    ? sessionState.category
+    : BLIND_RANKING_CATEGORIES[categoryIndex % BLIND_RANKING_CATEGORIES.length];
+  const currentItemIndex = isMultiplayer ? sessionState.currentItemIndex : localCurrentItemIndex;
+  const currentPlayerIndex = isMultiplayer
+    ? Math.max(0, activePlayers.findIndex((player) => player.id === currentUserId))
+    : localCurrentPlayerIndex;
+  const activePlayer = activePlayers[currentPlayerIndex] || activePlayers[0];
+  const activeBoard = isMultiplayer
+    ? sessionPrivateState?.board || [null, null, null, null, null]
+    : playerRankings[activePlayer.id] || [null, null, null, null, null];
+  const currentItem = isMultiplayer ? sessionState.currentItem : currentCategory.items[currentItemIndex];
+  const revealedResults = isMultiplayer ? sessionState.phase === 'REVEAL' : localRevealedResults;
+  const rankings = isMultiplayer ? sessionState.revealedBoards || {} : playerRankings;
+  const isMyTurn = !isMultiplayer || !sessionState.submittedCurrentItemUserIds?.includes(currentUserId);
+  const currentRound = isMultiplayer ? sessionState.round : localRound;
 
   useEffect(() => {
     if (onUpdateTurn) {
       onUpdateTurn(
-        revealedResults ? 'All Players' : activePlayer.name,
+        revealedResults ? 'All Players' : isMultiplayer ? (isMyTurn ? 'Your ranking' : 'Waiting for your submission') : activePlayer.name,
         `Blind Ranking • ${currentCategory.title}`
       );
     }
-  }, [activePlayer.name, currentCategory.title, revealedResults, onUpdateTurn]);
+  }, [activePlayer.name, currentCategory.title, revealedResults, onUpdateTurn, isMultiplayer, isMyTurn]);
 
   const handlePlaceRank = (slotIndex: number) => {
-    if (activeBoard[slotIndex] !== null) return; // slot occupied
+    if (activeBoard[slotIndex] !== null || !isMyTurn) return;
+    if (isMultiplayer) {
+      void onSendAction?.({ type: 'PLACE_ITEM', slotIndex });
+      return;
+    }
 
     const newBoard = [...activeBoard];
     newBoard[slotIndex] = currentItem;
@@ -78,9 +104,8 @@ export const BlindRankingGame: React.FC<BlindRankingGameProps> = ({
   };
 
   const calculateCompatibility = () => {
-    // Compare P1 and P2 rankings
-    const b1 = playerRankings[activePlayers[0].id] || [];
-    const b2 = playerRankings[activePlayers[1]?.id] || [];
+    const b1 = rankings[activePlayers[0].id] || [];
+    const b2 = rankings[activePlayers[1]?.id] || [];
     let exactMatches = 0;
     b1.forEach((item, idx) => {
       if (item && item === b2[idx]) exactMatches++;
@@ -89,6 +114,10 @@ export const BlindRankingGame: React.FC<BlindRankingGameProps> = ({
   };
 
   const handleCompleteMatch = () => {
+    if (isMultiplayer) {
+      void onSendAction?.({ type: 'NEXT_CATEGORY' });
+      return;
+    }
     const scores: PlayerScoreSummary[] = activePlayers.map((p) => ({
       ...p,
       score: 'Board Completed',
@@ -102,7 +131,7 @@ export const BlindRankingGame: React.FC<BlindRankingGameProps> = ({
     });
   };
 
-  if (showPassScreen) {
+  if (showPassScreen && !isMultiplayer) {
     const nextP = activePlayers[currentPlayerIndex];
     return (
       <PassDeviceScreen
@@ -133,7 +162,7 @@ export const BlindRankingGame: React.FC<BlindRankingGameProps> = ({
             <button
               key={cat.id}
               type="button"
-              disabled={currentItemIndex > 0 || currentPlayerIndex > 0}
+              disabled={isMultiplayer || currentItemIndex > 0 || currentPlayerIndex > 0}
               onClick={() => {
                 setCategoryIndex(idx);
                 setPlayerRankings({});
@@ -189,7 +218,7 @@ export const BlindRankingGame: React.FC<BlindRankingGameProps> = ({
                 <button
                   key={slotIdx}
                   type="button"
-                  disabled={isFilled}
+                  disabled={isFilled || (isMultiplayer && (!isMyTurn || revealedResults))}
                   onClick={() => handlePlaceRank(slotIdx)}
                   className={`p-3.5 rounded-2xl border-2 text-left flex items-center justify-between gap-3 transition-all cursor-pointer ${
                     isFilled
@@ -239,7 +268,7 @@ export const BlindRankingGame: React.FC<BlindRankingGameProps> = ({
           {/* Side by side player columns */}
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
             {activePlayers.map((player) => {
-              const board = playerRankings[player.id] || [];
+              const board = rankings[player.id] || [];
               return (
                 <div key={player.id} className="p-4 rounded-2xl bg-[#FCFAFF] border border-[#EAE3F3] flex flex-col gap-2">
                   <div className="flex items-center gap-2 pb-2 border-b border-[#EAE3F3]">
@@ -261,6 +290,7 @@ export const BlindRankingGame: React.FC<BlindRankingGameProps> = ({
             <Button
               variant="outline"
               size="sm"
+              disabled={isMultiplayer}
               onClick={() => {
                 setPlayerRankings({});
                 setCurrentPlayerIndex(0);
@@ -277,7 +307,9 @@ export const BlindRankingGame: React.FC<BlindRankingGameProps> = ({
               onClick={handleCompleteMatch}
               rightIcon={<ArrowRight className="w-4 h-4" />}
             >
-              Complete Match
+              {isMultiplayer
+                ? currentRound >= BLIND_RANKING_CATEGORIES.length ? 'Finish Match' : 'Next Category'
+                : 'Complete Match'}
             </Button>
           </div>
         </div>
