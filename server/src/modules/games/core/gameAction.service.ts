@@ -182,7 +182,6 @@ export class GameActionService {
     if (result.winnerUserId !== undefined) workingSession.winnerUserId = result.winnerUserId;
     if (result.isCompleted) workingSession.status = 'COMPLETED';
 
-    const publicProj = engine.getPublicProjection(workingSession.state, workingSession);
     const sanitized = sanitizeActionMetadata(action, workingSession.gameId);
 
     // 7. Execute single atomic transaction:
