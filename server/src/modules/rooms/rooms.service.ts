@@ -450,6 +450,13 @@ export class RoomsService {
     }
 
     const participantCount = room.participants.length;
+    const previousParticipation = await prisma.roomParticipant.findUnique({
+      where: {
+        roomId_userId: { roomId: room.id, userId },
+      },
+      select: { kickedAt: true },
+    });
+    const isKicked = Boolean(previousParticipation?.kickedAt);
     const isBlocked = await prisma.blockedUser.findFirst({
       where: { OR: [
         { blockerId: userId, blockedUserId: room.hostId },
@@ -460,7 +467,7 @@ export class RoomsService {
     const isInactive = room.status === ROOM_STATUS.CLOSED || room.status === ROOM_STATUS.EXPIRED;
     const isExpired = room.expiresAt <= new Date();
     const isFull = participantCount >= room.maxPlayers;
-    const canJoin = !isBlocked && !isInactive && !isExpired && !isFull;
+    const canJoin = !isKicked && !isBlocked && !isInactive && !isExpired && !isFull;
 
     return {
       isJoinPreview: true,
@@ -481,7 +488,8 @@ export class RoomsService {
         isReady: participant.isReady,
       })),
       canJoin,
-      joinUnavailableReason: isBlocked ? 'You are not allowed to join this room.'
+      joinUnavailableReason: isKicked ? 'You have been removed from this room by the host.'
+        : isBlocked ? 'You are not allowed to join this room.'
         : (isInactive || isExpired) ? 'This room is no longer active.'
         : isFull ? 'This room is full.' : null,
     };
