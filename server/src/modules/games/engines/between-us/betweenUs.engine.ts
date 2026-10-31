@@ -93,8 +93,11 @@ export class BetweenUsEngine
       if (context.state.submittedUserIds.includes(actorUserId)) {
         return { valid: false, error: 'You have already submitted an answer.' };
       }
-      if (!action.answer || action.answer.trim().length === 0) {
+      if (typeof action.answer !== 'string' || action.answer.trim().length === 0) {
         return { valid: false, error: 'Answer cannot be empty.' };
+      }
+      if (action.answer.trim().length > 1000) {
+        return { valid: false, error: 'Answer cannot exceed 1000 characters.' };
       }
       return { valid: true };
     }
@@ -104,6 +107,12 @@ export class BetweenUsEngine
     }
 
     if (action.type === 'SET_SETTINGS') {
+      if (action.category !== undefined && (typeof action.category !== 'string' || action.category.trim().length === 0 || action.category.length > 50)) {
+        return { valid: false, error: 'Category must be a non-empty value of at most 50 characters.' };
+      }
+      if (action.intensity !== undefined && ![1, 2, 3, 4, 5].includes(action.intensity)) {
+        return { valid: false, error: 'Intensity must be between 1 and 5.' };
+      }
       if (action.intensity === 5) {
         // Both participants must have consented!
         const consented = context.state.adultConsentUserIds;
