@@ -11,6 +11,7 @@ import {
   ROOM_PARTICIPANT_ROLES,
   MODE_CAPACITIES,
   isGamePermittedForMode,
+  normalizeGameId,
   generateRoomCode,
   type RoomMode,
   type RoomStatus,
@@ -237,7 +238,7 @@ export class RoomsService {
       mode: room.mode.toLowerCase() as 'couple' | 'friend',
       status: room.status,
       maxPlayers: room.maxPlayers,
-      selectedGameId: room.selectedGameId || (room.mode.toLowerCase() === 'couple' ? 'between-us' : 'uno-style'),
+      selectedGameId: normalizeGameId(room.selectedGameId || (room.mode.toLowerCase() === 'couple' ? 'between-us' : 'uno-style')),
       activeSessionId: room.gameSessions?.[0]?.id || null,
       activeSessionStatus: room.gameSessions?.[0]?.status || null,
       hostId: room.hostId,
@@ -281,8 +282,9 @@ export class RoomsService {
       throw new AppError("Mode must be either 'couple' or 'friend'", 400);
     }
 
-    const selectedGameId =
-      input.selectedGameId || (mode === 'couple' ? 'between-us' : 'uno-style');
+    const selectedGameId = normalizeGameId(
+      input.selectedGameId || (mode === 'couple' ? 'between-us' : 'uno-style')
+    );
 
     if (!isGamePermittedForMode(selectedGameId, mode)) {
       throw new AppError(`Selected game '${selectedGameId}' is not allowed in ${mode} mode`, 400);
@@ -495,7 +497,7 @@ export class RoomsService {
       mode: room.mode.toLowerCase() as 'couple' | 'friend',
       status: room.status,
       maxPlayers: room.maxPlayers,
-      selectedGameId: room.selectedGameId || (room.mode.toLowerCase() === 'couple' ? 'between-us' : 'uno-style'),
+      selectedGameId: normalizeGameId(room.selectedGameId || (room.mode.toLowerCase() === 'couple' ? 'between-us' : 'uno-style')),
       hostName: room.host?.displayName || 'Host',
       participantCount,
       participants: room.participants.map((participant) => ({
@@ -889,6 +891,7 @@ export class RoomsService {
    * Vote for a game (or change vote)
    */
   async voteGame(roomIdOrCode: string, userId: string, gameId: string) {
+    const canonicalGameId = normalizeGameId(gameId);
     const room = await prisma.room.findFirst({
       where: {
         OR: [{ id: roomIdOrCode }, { code: roomIdOrCode.toUpperCase() }],
@@ -907,7 +910,7 @@ export class RoomsService {
       throw new ForbiddenError('You are not an active participant in this room');
     }
 
-    if (!isGamePermittedForMode(gameId, room.mode)) {
+    if (!isGamePermittedForMode(canonicalGameId, room.mode)) {
       throw new AppError(`Game '${gameId}' is not permitted in ${room.mode.toLowerCase()} mode`, 400);
     }
 
@@ -934,8 +937,8 @@ export class RoomsService {
           where: {
             roomId_userId: { roomId: room.id, userId },
           },
-          create: { roomId: room.id, userId, gameId },
-          update: { gameId },
+          create: { roomId: room.id, userId, gameId: canonicalGameId },
+          update: { gameId: canonicalGameId },
         });
 
         const allVotes = await tx.gameVote.findMany({
@@ -947,7 +950,7 @@ export class RoomsService {
           counts[vote.gameId] = (counts[vote.gameId] || 0) + 1;
         }
 
-        let topGame = currentRoom.selectedGameId || gameId;
+        let topGame = currentRoom.selectedGameId || canonicalGameId;
         let maxVotes = 0;
         for (const [candidateGameId, count] of Object.entries(counts)) {
           if (count > maxVotes) {
@@ -977,6 +980,7 @@ export class RoomsService {
    * Directly select game (Host selection / override)
    */
   async selectGame(roomIdOrCode: string, userId: string, gameId: string) {
+    const canonicalGameId = normalizeGameId(gameId);
     const room = await prisma.room.findFirst({
       where: {
         OR: [{ id: roomIdOrCode }, { code: roomIdOrCode.toUpperCase() }],
@@ -985,7 +989,7 @@ export class RoomsService {
 
     if (!room) throw new NotFoundError('Room not found');
 
-    if (!isGamePermittedForMode(gameId, room.mode)) {
+    if (!isGamePermittedForMode(canonicalGameId, room.mode)) {
       throw new AppError(`Game '${gameId}' is not permitted in ${room.mode.toLowerCase()} mode`, 400);
     }
 
@@ -1004,21 +1008,21 @@ export class RoomsService {
         if (!['WAITING', 'READY_TO_START'].includes(currentRoom.status)) {
           throw new AppError('The game cannot be changed after the match has started.', 400);
         }
-        if (!isGamePermittedForMode(gameId, currentRoom.mode)) {
+        if (!isGamePermittedForMode(canonicalGameId, currentRoom.mode)) {
           throw new AppError(`Game '${gameId}' is not permitted in ${currentRoom.mode.toLowerCase()} mode`, 400);
         }
 
         await tx.room.update({
           where: { id: room.id },
-          data: { selectedGameId: gameId },
+          data: { selectedGameId: canonicalGameId },
         });
 
         await tx.gameVote.upsert({
           where: {
             roomId_userId: { roomId: room.id, userId },
           },
-          create: { roomId: room.id, userId, gameId },
-          update: { gameId },
+          create: { roomId: room.id, userId, gameId: canonicalGameId },
+          update: { gameId: canonicalGameId },
         });
       },
       {
