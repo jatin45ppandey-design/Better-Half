@@ -367,7 +367,9 @@ export const RoomProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setCurrentRoomCode(formatted.code);
 
         // Join socket channel
-        socketService.emit('room:join', { roomId: formatted.id, code: formatted.code });
+        socketService.emit('room:join', { roomId: formatted.id, code: formatted.code }, (response) => {
+          if (!response?.success) console.warn('Room socket join failed:', response?.error);
+        });
 
         return formatted;
       } catch (err: any) {
@@ -414,7 +416,9 @@ export const RoomProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setCurrentRoomCode(formatted.code);
 
         // Join socket channel
-        socketService.emit('room:join', { roomId: formatted.id, code: formatted.code });
+        socketService.emit('room:join', { roomId: formatted.id, code: formatted.code }, (response) => {
+          if (!response?.success) console.warn('Room socket join failed:', response?.error);
+        });
 
         return { success: true, room: formatted };
       } catch (err: any) {
@@ -434,15 +438,20 @@ export const RoomProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const leaveRoom = useCallback(async () => {
     if (currentRoomCode) {
       const code = currentRoomCode;
+      const roomId = currentRoom?.id || code;
       setCurrentRoomCode(null);
-      try {
-        socketService.emit('room:leave', { roomId: code });
-        await api.rooms.leave(code);
-      } catch (err) {
-        console.warn('Error notifying room leave to server:', err);
-      }
+
+      // Socket is the primary realtime write path. REST is used only if the
+      // socket cannot acknowledge the leave, never concurrently with it.
+      socketService.emit('room:leave', { roomId }, (response) => {
+        if (!response?.success) {
+          api.rooms.leave(code).catch((err) => {
+            console.warn('Could not persist room leave:', err);
+          });
+        }
+      });
     }
-  }, [currentRoomCode]);
+  }, [currentRoom, currentRoomCode]);
 
   const toggleReady = useCallback(
     async (participantId?: string) => {
@@ -469,17 +478,32 @@ export const RoomProvider: React.FC<{ children: React.ReactNode }> = ({ children
         };
       });
 
-      // Emit to socket & backend API
-      socketService.emit('room:ready:update', {
-        roomId: currentRoom.code,
-        isReady: nextReady,
-      });
+      // Socket is the single authoritative write path. The backend persists
+      // the value once and broadcasts the committed room snapshot to everyone.
+      socketService.emit(
+        'room:ready:update',
+        { roomId: currentRoom.id, isReady: nextReady },
+        (response) => {
+          if (response?.success) return;
 
-      try {
-        await api.rooms.toggleReady(currentRoom.code, nextReady);
-      } catch (err) {
-        console.warn('Failed to persist ready toggle:', err);
-      }
+          setAllRooms((prev) => {
+            const room = prev[currentRoom.code];
+            if (!room) return prev;
+            return {
+              ...prev,
+              [room.code]: {
+                ...room,
+                participants: room.participants.map((participant) =>
+                  participant.id === targetId
+                    ? { ...participant, isReady: Boolean(currentParticipant?.isReady) }
+                    : participant
+                ),
+              },
+            };
+          });
+          console.warn('Failed to update ready status:', response?.error);
+        }
+      );
     },
     [currentRoom, user]
   );
@@ -495,6 +519,7 @@ export const RoomProvider: React.FC<{ children: React.ReactNode }> = ({ children
         };
       }
 
+      const previousGameId = currentRoom.selectedGameId;
       setAllRooms((prev) => {
         const room = prev[currentRoom.code];
         if (!room) return prev;
@@ -508,14 +533,27 @@ export const RoomProvider: React.FC<{ children: React.ReactNode }> = ({ children
         };
       });
 
-      socketService.emit('room:game:select', { roomId: currentRoom.code, gameId });
+      return new Promise((resolve) => {
+        socketService.emit('room:game:select', { roomId: currentRoom.id, gameId }, (response) => {
+          if (response?.success) {
+            resolve({ success: true });
+            return;
+          }
 
-      try {
-        await api.rooms.selectGame(currentRoom.code, gameId);
-        return { success: true };
-      } catch (err: any) {
-        return { success: false, error: err?.message || 'Failed to select game on server' };
-      }
+          setAllRooms((prev) => {
+            const room = prev[currentRoom.code];
+            if (!room) return prev;
+            return {
+              ...prev,
+              [room.code]: { ...room, selectedGameId: previousGameId },
+            };
+          });
+          resolve({
+            success: false,
+            error: response?.error || 'Failed to select game on server',
+          });
+        });
+      });
     },
     [currentRoom]
   );
@@ -546,13 +584,22 @@ export const RoomProvider: React.FC<{ children: React.ReactNode }> = ({ children
         };
       });
 
-      socketService.emit('room:game:vote', { roomId: currentRoom.code, gameId });
+      socketService.emit('room:game:vote', { roomId: currentRoom.id, gameId }, (response) => {
+        if (response?.success) return;
 
-      try {
-        await api.rooms.voteGame(currentRoom.code, gameId);
-      } catch (err) {
-        console.warn('Failed to persist game vote:', err);
-      }
+        const previousVotes = Object.fromEntries(
+          Object.entries(currentRoom.gameVotes).map(([id, ids]) => [id, [...ids]])
+        );
+        setAllRooms((prev) => {
+          const room = prev[currentRoom.code];
+          if (!room) return prev;
+          return {
+            ...prev,
+            [room.code]: { ...room, gameVotes: previousVotes },
+          };
+        });
+        console.warn('Failed to persist game vote:', response?.error);
+      });
     },
     [currentRoom, user]
   );
@@ -562,7 +609,7 @@ export const RoomProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (!currentRoom || !text.trim()) return;
       const clean = text.trim();
 
-      socketService.emit('room:chat:send', { roomId: currentRoom.code, message: clean });
+      socketService.emit('room:chat:send', { roomId: currentRoom.id, message: clean });
     },
     [currentRoom]
   );
@@ -570,7 +617,7 @@ export const RoomProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const sendEmojiReaction = useCallback(
     (emoji: string) => {
       if (!currentRoom) return;
-      socketService.emit('room:reaction:send', { roomId: currentRoom.code, reaction: emoji });
+      socketService.emit('room:reaction:send', { roomId: currentRoom.id, reaction: emoji });
     },
     [currentRoom]
   );
