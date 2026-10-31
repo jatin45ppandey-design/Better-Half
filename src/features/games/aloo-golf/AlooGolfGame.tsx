@@ -677,7 +677,7 @@ export const AlooGolfGame: React.FC<AlooGolfProps> = ({
             <Button
               size="lg"
               onClick={handlePutt}
-              disabled={ball.inMotion || (isMultiplayer && (!isMyTurn || myServerBall?.sunk || sessionState.matchOver))}
+              disabled={ball.inMotion || (isMultiplayer && (!isMyTurn || activeServerBall?.sunk || sessionState.matchOver))}
               className="flex-1 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white font-black text-base shadow-lg shadow-green-600/30 flex items-center justify-center gap-2"
             >
               <Trophy className="w-5 h-5" />
