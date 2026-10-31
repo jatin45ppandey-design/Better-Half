@@ -119,6 +119,54 @@ export type RoomSnapshotSource = {
 
 export class RoomsService {
   /**
+   * Resolve either a database room ID or a public room code to the canonical
+   * database ID. Socket.IO room channels and presence keys must always use
+   * this value; public room codes are identifiers for lookup only.
+   */
+  async getCanonicalRoomId(roomIdOrCode: string): Promise<string> {
+    const identifier = roomIdOrCode.trim();
+    if (!identifier) {
+      throw new NotFoundError('Room not found');
+    }
+
+    const room = await prisma.room.findFirst({
+      where: {
+        OR: [
+          { id: identifier },
+          { code: identifier.toUpperCase() },
+        ],
+      },
+      select: { id: true },
+    });
+
+    if (!room) {
+      throw new NotFoundError('Room not found');
+    }
+
+    return room.id;
+  }
+
+  /**
+   * Resolve a room identifier and confirm the caller is still an active member.
+   * Used by realtime-only actions that do not otherwise write through a
+   * membership-checking service method (for example, emoji reactions).
+   */
+  async getActiveRoomIdForUser(roomIdOrCode: string, userId: string): Promise<string> {
+    const roomId = await this.getCanonicalRoomId(roomIdOrCode);
+    const participant = await prisma.roomParticipant.findUnique({
+      where: {
+        roomId_userId: { roomId, userId },
+      },
+      select: { leftAt: true },
+    });
+
+    if (!participant || participant.leftAt) {
+      throw new ForbiddenError('You are not an active participant in this room');
+    }
+
+    return roomId;
+  }
+  /**
    * Format database Room record into a consistent frontend-ready snapshot
    */
   public formatRoomSnapshot(room: RoomSnapshotSource | null): RoomSnapshot | null {
