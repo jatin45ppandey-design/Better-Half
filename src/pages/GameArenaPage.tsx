@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useRoom } from '../context/RoomContext';
 import { useAuth } from '../context/AuthContext';
@@ -60,11 +60,14 @@ const GameArenaContent: React.FC<GameArenaContentProps> = ({
   const isPaused = session ? session.isPaused : localPaused;
 
   // Both participants switch to the new authoritative session when the host
-  // successfully creates a rematch on the previous session channel.
+  // successfully creates a rematch on the previous session channel. The guard
+  // makes this transition idempotent even if a parent callback is recreated.
+  const handledReplacementSessionRef = useRef<string | null>(null);
   useEffect(() => {
-    if (session?.replacementSessionId) {
-      onReplaceSession(session.replacementSessionId);
-    }
+    const nextSessionId = session?.replacementSessionId;
+    if (!nextSessionId || handledReplacementSessionRef.current === nextSessionId) return;
+    handledReplacementSessionRef.current = nextSessionId;
+    onReplaceSession(nextSessionId);
   }, [session?.replacementSessionId, onReplaceSession]);
 
   // Authoritative completion listener
@@ -355,6 +358,24 @@ export const GameArenaPage: React.FC = () => {
     }
   };
 
+  const handleReplaceSession = useCallback((nextSessionId: string) => {
+    setActiveSessionId((current) => current === nextSessionId ? current : nextSessionId);
+    setSearchParams((previous) => {
+      if (
+        previous.get('session') === nextSessionId &&
+        previous.get('room') === (roomCode || '')
+      ) {
+        return previous;
+      }
+      const next = new URLSearchParams(previous);
+      if (roomCode) next.set('room', roomCode);
+      else next.delete('room');
+      next.set('session', nextSessionId);
+      return next;
+    });
+    setGameKey((key) => key + 1);
+  }, [roomCode, setSearchParams]);
+
   if (initializationError) {
     return (
       <div className="min-h-screen bg-[#FCFAFF] flex items-center justify-center p-4">
@@ -449,11 +470,7 @@ export const GameArenaPage: React.FC = () => {
           roomCode={roomCode}
           gameKey={gameKey}
           onRematchLocal={() => setGameKey((k) => k + 1)}
-          onReplaceSession={(nextSessionId) => {
-            setActiveSessionId(nextSessionId);
-            setSearchParams({ room: roomCode || '', session: nextSessionId });
-            setGameKey((key) => key + 1);
-          }}
+          onReplaceSession={handleReplaceSession}
           onReturnToLobby={handleReturnToLobby}
         />
       </GameSessionProvider>
