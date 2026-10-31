@@ -41,7 +41,6 @@ export const BetweenUsGame: React.FC<BetweenUsProps> = ({
   onFinishMatch,
   isPaused = false,
   sessionState,
-  sessionPrivateState,
   onSendAction,
   currentUserId,
 }) => {
