@@ -139,10 +139,18 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
     if (!payload) return;
 
     try {
-      const { roomId } = payload;
+      const { roomId: roomIdentifier } = payload;
+      const roomId = await roomsService.getCanonicalRoomId(roomIdentifier);
       const result = await roomsService.leaveRoom(roomId, userId);
 
       const roomChannel = `room:${roomId}`;
+      // Leaving a room removes every active tab/device for this user so no
+      // stale socket can continue receiving private room broadcasts.
+      const userSocketIds = presenceManager.getUserSockets(userId);
+      for (const socketId of userSocketIds) {
+        const userSocket = io.sockets.sockets.get(socketId);
+        if (userSocket) await userSocket.leave(roomChannel);
+      }
       await socket.leave(roomChannel);
       presenceManager.leaveRoom(roomId, userId);
 
@@ -177,7 +185,8 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
     if (!payload) return;
 
     try {
-      const { roomId, isReady } = payload;
+      const { roomId: roomIdentifier, isReady } = payload;
+      const roomId = await roomsService.getCanonicalRoomId(roomIdentifier);
       const updatedRoom = await roomsService.toggleReady(roomId, userId, isReady);
       if (!updatedRoom) {
         callback?.({ success: false, error: 'Room not found' });
@@ -216,7 +225,8 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
     if (!payload) return;
 
     try {
-      const { roomId, gameId } = payload;
+      const { roomId: roomIdentifier, gameId } = payload;
+      const roomId = await roomsService.getCanonicalRoomId(roomIdentifier);
       const updatedRoom = await roomsService.voteGame(roomId, userId, gameId);
       if (!updatedRoom) {
         callback?.({ success: false, error: 'Room not found' });
@@ -248,7 +258,8 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
     if (!payload) return;
 
     try {
-      const { roomId, gameId } = payload;
+      const { roomId: roomIdentifier, gameId } = payload;
+      const roomId = await roomsService.getCanonicalRoomId(roomIdentifier);
       const updatedRoom = await roomsService.selectGame(roomId, userId, gameId);
       if (!updatedRoom) {
         callback?.({ success: false, error: 'Room not found' });
@@ -278,7 +289,8 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
     if (!payload) return;
 
     try {
-      const { roomId } = payload;
+      const { roomId: roomIdentifier } = payload;
+      const roomId = await roomsService.getCanonicalRoomId(roomIdentifier);
       const check = await roomsService.canStartGame(roomId, userId);
 
       if (!check.canStart) {
@@ -338,7 +350,8 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
     if (!payload) return;
 
     try {
-      const { roomId, newHostId } = payload;
+      const { roomId: roomIdentifier, newHostId } = payload;
+      const roomId = await roomsService.getCanonicalRoomId(roomIdentifier);
       const updatedRoom = await roomsService.transferHost(roomId, userId, newHostId);
       if (!updatedRoom) {
         callback?.({ success: false, error: 'Room not found' });
@@ -369,7 +382,8 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
     if (!payload) return;
 
     try {
-      const { roomId, targetUserId } = payload;
+      const { roomId: roomIdentifier, targetUserId } = payload;
+      const roomId = await roomsService.getCanonicalRoomId(roomIdentifier);
       const result = await roomsService.kickParticipant(roomId, userId, targetUserId);
 
       const roomChannel = `room:${roomId}`;
@@ -410,7 +424,8 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
     if (!payload) return;
 
     try {
-      const { roomId, message } = payload;
+      const { roomId: roomIdentifier, message } = payload;
+      const roomId = await roomsService.getCanonicalRoomId(roomIdentifier);
       const createdMessage = await roomsService.postMessage(roomId, userId, message);
 
       const roomChannel = `room:${roomId}`;
@@ -425,22 +440,25 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
   /**
    * room:reaction:send
    */
-  socket.on('room:reaction:send', (rawPayload, callback) => {
+  socket.on('room:reaction:send', async (rawPayload, callback) => {
     if (checkSuspension(callback)) return;
 
     const payload = validateSocketPayload(roomReactionSendSchema, rawPayload, callback);
     if (!payload) return;
 
-    const { roomId, reaction } = payload;
+    const { roomId: roomIdentifier, reaction } = payload;
 
-    // Verify user is present in the room
-    const userRooms = presenceManager.getUserRooms(userId);
-    if (!userRooms.includes(roomId)) {
-      callback?.({ success: false, error: 'You are not present in this room' });
-      return;
-    }
+    try {
+      // Presence alone is not authorization: confirm active database membership
+      // and normalize the room code/ID before checking presence or broadcasting.
+      const roomId = await roomsService.getActiveRoomIdForUser(roomIdentifier, userId);
+      const userRooms = presenceManager.getUserRooms(userId);
+      if (!userRooms.includes(roomId)) {
+        callback?.({ success: false, error: 'You are not present in this room' });
+        return;
+      }
 
-    const now = Date.now();
+      const now = Date.now();
 
     // Check rate limit: 10 reactions per 3 seconds
     const limit = reactionRateLimits.get(userId) || { count: 0, resetAt: now + 3000 };
@@ -457,14 +475,17 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
       return;
     }
 
-    const roomChannel = `room:${roomId}`;
-    io.to(roomChannel).emit('room:reaction:new', {
-      senderId: userId,
-      reaction,
-      timestamp: new Date().toISOString(),
-    });
+      const roomChannel = `room:${roomId}`;
+      io.to(roomChannel).emit('room:reaction:new', {
+        senderId: userId,
+        reaction,
+        timestamp: new Date().toISOString(),
+      });
 
-    callback?.({ success: true });
+      callback?.({ success: true });
+    } catch (err: any) {
+      callback?.({ success: false, error: safeSocketError(err, 'Failed to send reaction') });
+    }
   });
 
   /**
