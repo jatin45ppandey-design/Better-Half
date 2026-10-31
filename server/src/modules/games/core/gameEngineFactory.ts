@@ -33,7 +33,8 @@ export class GameEngineFactory {
   }
 
   getEngine(gameId: string): IGameEngine {
-    const engine = this.engines.get(gameId);
+    const canonicalGameId = gameId === 'original-card-game' ? 'uno-style' : gameId;
+    const engine = this.engines.get(canonicalGameId);
     if (!engine) {
       throw new Error(`Unsupported game engine: ${gameId}`);
     }
@@ -41,7 +42,8 @@ export class GameEngineFactory {
   }
 
   hasEngine(gameId: string): boolean {
-    return this.engines.has(gameId);
+    const canonicalGameId = gameId === 'original-card-game' ? 'uno-style' : gameId;
+    return this.engines.has(canonicalGameId);
   }
 }
 
