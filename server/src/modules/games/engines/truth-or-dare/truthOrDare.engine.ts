@@ -165,6 +165,8 @@ export class TruthOrDareEngine
         success: true,
         newState: state,
         nextTurnUserId: nextUserId,
+        isCompleted: state.totalTurns >= 8,
+        winnerUserId: null,
       };
     }
 
@@ -199,6 +201,8 @@ export class TruthOrDareEngine
         newState: state,
         nextTurnUserId: nextUserId,
         scores,
+        isCompleted: state.totalTurns >= 8,
+        winnerUserId: null,
       };
     }
 
