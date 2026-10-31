@@ -215,10 +215,11 @@ export class RoomsService {
     // Group votes by gameId -> string[] userIds
     const gameVotes: Record<string, string[]> = {};
     for (const v of room.gameVotes || []) {
-      if (!gameVotes[v.gameId]) {
-        gameVotes[v.gameId] = [];
+      const canonicalGameId = normalizeGameId(v.gameId);
+      if (!gameVotes[canonicalGameId]) {
+        gameVotes[canonicalGameId] = [];
       }
-      gameVotes[v.gameId].push(v.userId);
+      gameVotes[canonicalGameId].push(v.userId);
     }
 
     const chatMessages: RoomMessageSnapshot[] = (room.messages || []).map((m) => ({
@@ -947,10 +948,11 @@ export class RoomsService {
 
         const counts: Record<string, number> = {};
         for (const vote of allVotes) {
-          counts[vote.gameId] = (counts[vote.gameId] || 0) + 1;
+          const candidateGameId = normalizeGameId(vote.gameId);
+          counts[candidateGameId] = (counts[candidateGameId] || 0) + 1;
         }
 
-        let topGame = currentRoom.selectedGameId || canonicalGameId;
+        let topGame = normalizeGameId(currentRoom.selectedGameId || canonicalGameId);
         let maxVotes = 0;
         for (const [candidateGameId, count] of Object.entries(counts)) {
           if (count > maxVotes) {
