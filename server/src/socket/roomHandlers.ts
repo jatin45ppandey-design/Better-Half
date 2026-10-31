@@ -97,6 +97,15 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
         roomSnapshot = targetRoom as RoomSnapshot;
       }
 
+      if (
+        roomSnapshot.status === 'CLOSED' ||
+        roomSnapshot.status === 'EXPIRED' ||
+        new Date(roomSnapshot.expiresAt).getTime() <= Date.now()
+      ) {
+        callback?.({ success: false, error: 'This room is closed or expired.' });
+        return;
+      }
+
       const roomChannel = `room:${roomSnapshot.id}`;
       await socket.join(roomChannel);
 
