@@ -36,6 +36,7 @@ export const GameSessionProvider: React.FC<GameSessionProviderProps> = ({
   const [scores, setScores] = useState<Record<string, number>>({});
   const [participants, setParticipants] = useState<GameParticipantInfo[]>([]);
   const [lastEvent, setLastEvent] = useState<{ type: string; payload: any } | null>(null);
+  const [replacementSessionId, setReplacementSessionId] = useState<string | null>(null);
 
   const versionRef = useRef(version);
   useEffect(() => {
@@ -165,6 +166,11 @@ export const GameSessionProvider: React.FC<GameSessionProviderProps> = ({
       if (data.scores) setScores(data.scores);
     });
 
+    const unsubReplacement = socketService.on('game:session:started', (data: any) => {
+      if (!mounted || !data?.sessionId || data.sessionId === sessionId) return;
+      setReplacementSessionId(data.sessionId);
+    });
+
     return () => {
       mounted = false;
       unsubState();
@@ -173,6 +179,7 @@ export const GameSessionProvider: React.FC<GameSessionProviderProps> = ({
       unsubPaused();
       unsubResumed();
       unsubCompleted();
+      unsubReplacement();
       socketService.emit('game:session:leave', { sessionId });
     };
   }, [sessionId]);
@@ -209,8 +216,20 @@ export const GameSessionProvider: React.FC<GameSessionProviderProps> = ({
     }
   }, [isPaused, sessionId]);
 
-  const requestRematch = useCallback(async () => {
-    socketService.emit('game:rematch:request', { sessionId });
+  const requestRematch = useCallback(async (): Promise<{ success: boolean; error?: string }> => {
+    return new Promise((resolve) => {
+      socketService.emit('game:rematch:request', { sessionId }, (response: any) => {
+        if (!response?.success || !response.newSessionId) {
+          resolve({
+            success: false,
+            error: response?.error || 'The server could not start a rematch.',
+          });
+          return;
+        }
+        setReplacementSessionId(response.newSessionId);
+        resolve({ success: true });
+      });
+    });
   }, [sessionId]);
 
   return (
@@ -232,6 +251,7 @@ export const GameSessionProvider: React.FC<GameSessionProviderProps> = ({
         sendAction,
         togglePause,
         requestRematch,
+        replacementSessionId,
         lastEvent,
       }}
     >
