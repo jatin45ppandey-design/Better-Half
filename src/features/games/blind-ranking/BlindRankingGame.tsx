@@ -4,7 +4,7 @@ import {
   ArrowRight,
   RotateCcw,
 } from 'lucide-react';
-import { BLIND_RANKING_CATEGORIES } from '../../../data/questions/blindRankingItems';
+import { BLIND_RANKING_CATEGORIES, type BlindRankingCategory } from '../../../data/questions/blindRankingItems';
 import { Button } from '../../../components/ui/Button';
 import { Badge } from '../../../components/ui/Badge';
 import { Avatar } from '../../../components/ui/Avatar';
@@ -41,23 +41,25 @@ export const BlindRankingGame: React.FC<BlindRankingGameProps> = ({
   const [playerRankings, setPlayerRankings] = useState<Record<string, (string | null)[]>>({});
   const [showPassScreen, setShowPassScreen] = useState(false);
   const [localRevealedResults, setRevealedResults] = useState(false);
-  const [localRound, setLocalRound] = useState(1);
+  const localRound = 1;
 
   const isMultiplayer = Boolean(sessionState && onSendAction);
-  const currentCategory = isMultiplayer
-    ? sessionState.category
+  const currentCategory: BlindRankingCategory = isMultiplayer
+    ? sessionState.category as BlindRankingCategory
     : BLIND_RANKING_CATEGORIES[categoryIndex % BLIND_RANKING_CATEGORIES.length];
   const currentItemIndex = isMultiplayer ? sessionState.currentItemIndex : localCurrentItemIndex;
   const currentPlayerIndex = isMultiplayer
     ? Math.max(0, activePlayers.findIndex((player) => player.id === currentUserId))
     : localCurrentPlayerIndex;
   const activePlayer = activePlayers[currentPlayerIndex] || activePlayers[0];
-  const activeBoard = isMultiplayer
-    ? sessionPrivateState?.board || [null, null, null, null, null]
+  const activeBoard: (string | null)[] = isMultiplayer
+    ? (sessionPrivateState?.board as (string | null)[] | undefined) || [null, null, null, null, null]
     : playerRankings[activePlayer.id] || [null, null, null, null, null];
   const currentItem = isMultiplayer ? sessionState.currentItem : currentCategory.items[currentItemIndex];
   const revealedResults = isMultiplayer ? sessionState.phase === 'REVEAL' : localRevealedResults;
-  const rankings = isMultiplayer ? sessionState.revealedBoards || {} : playerRankings;
+  const rankings: Record<string, (string | null)[]> = isMultiplayer
+    ? (sessionState.revealedBoards as Record<string, (string | null)[]> | undefined) || {}
+    : playerRankings;
   const isMyTurn = !isMultiplayer || !sessionState.submittedCurrentItemUserIds?.includes(currentUserId);
   const currentRound = isMultiplayer ? sessionState.round : localRound;
 
