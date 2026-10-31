@@ -87,7 +87,12 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
           callback?.({ success: false, error: targetRoom.joinUnavailableReason || 'This room cannot be joined.' });
           return;
         }
-        roomSnapshot = (await roomsService.joinRoom(userId, targetRoom.code)).room;
+        const joined = await roomsService.joinRoom(userId, targetRoom.code);
+        if (!joined.room) {
+          callback?.({ success: false, error: 'Failed to join room' });
+          return;
+        }
+        roomSnapshot = joined.room;
       } else {
         roomSnapshot = targetRoom as RoomSnapshot;
       }
@@ -149,7 +154,9 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
         });
 
         if (result.room) {
-          io.to(roomChannel).emit('room:state', result.room);
+          if (result.room) {
+        io.to(roomChannel).emit('room:state', result.room);
+      }
         }
 
         const onlineUserIds = presenceManager.getRoomOnlineUsers(roomId);
@@ -174,6 +181,10 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
     try {
       const { roomId, isReady } = payload;
       const updatedRoom = await roomsService.toggleReady(roomId, userId, isReady);
+      if (!updatedRoom) {
+        callback?.({ success: false, error: 'Room not found' });
+        return;
+      }
 
       const participant = updatedRoom.participants.find(
         (p: { userId: string }) => p.userId === userId
@@ -209,6 +220,10 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
     try {
       const { roomId, gameId } = payload;
       const updatedRoom = await roomsService.voteGame(roomId, userId, gameId);
+      if (!updatedRoom) {
+        callback?.({ success: false, error: 'Room not found' });
+        return;
+      }
 
       const roomChannel = `room:${roomId}`;
       io.to(roomChannel).emit('room:game:voted', {
@@ -237,6 +252,10 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
     try {
       const { roomId, gameId } = payload;
       const updatedRoom = await roomsService.selectGame(roomId, userId, gameId);
+      if (!updatedRoom) {
+        callback?.({ success: false, error: 'Room not found' });
+        return;
+      }
 
       const roomChannel = `room:${roomId}`;
       io.to(roomChannel).emit('room:game:selected', {
@@ -270,6 +289,10 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
       }
 
       const room = await roomsService.getRoomById(roomId, userId);
+      if (!room) {
+        callback?.({ success: false, error: 'Room not found' });
+        return;
+      }
       if (!room.selectedGameId) {
         callback?.({ success: false, error: 'No game selected' });
         return;
@@ -319,6 +342,10 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
     try {
       const { roomId, newHostId } = payload;
       const updatedRoom = await roomsService.transferHost(roomId, userId, newHostId);
+      if (!updatedRoom) {
+        callback?.({ success: false, error: 'Room not found' });
+        return;
+      }
 
       const roomChannel = `room:${roomId}`;
       io.to(roomChannel).emit('room:host:changed', {
@@ -355,12 +382,14 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
         const s = io.sockets.sockets.get(sId);
         if (s) {
           s.leave(roomChannel);
-          s.emit('room:player:kicked', { targetUserId, roomId });
+          s.emit('room:player:kicked', { targetUserId });
         }
       }
 
       io.to(roomChannel).emit('room:player:kicked', { targetUserId });
-      io.to(roomChannel).emit('room:state', result.room);
+      if (result.room) {
+        io.to(roomChannel).emit('room:state', result.room);
+      }
 
       // Remove target user's presence
       presenceManager.leaveRoom(roomId, targetUserId);
@@ -483,11 +512,13 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
                 candidate.userId
               );
 
-              io.to(roomChannel).emit('room:host:changed', {
+              if (updatedRoom) {
+                io.to(roomChannel).emit('room:host:changed', {
                 hostId: candidate.userId,
                 hostName: updatedRoom.hostName,
               });
-              io.to(roomChannel).emit('room:state', updatedRoom);
+                io.to(roomChannel).emit('room:state', updatedRoom);
+              }
             }
           }
         } catch (err) {

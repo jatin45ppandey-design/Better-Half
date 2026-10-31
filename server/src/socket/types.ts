@@ -67,6 +67,7 @@ export interface ServerToClientEvents {
   'game:completed': (data: { sessionId: string; winnerUserId: string | null; scores: Record<string, number>; matchId?: string | null }) => void;
   'game:session:reconnected': (data: { publicState: Record<string, unknown>; privateState: Record<string, unknown> | null }) => void;
   'game:error': (data: { code: string; message: string }) => void;
+  'server_shutdown'?: (data: { reason: string }) => void;
 }
 
 export interface ClientToServerEvents {

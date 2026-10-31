@@ -9,7 +9,7 @@ export interface ShutdownLogger {
 export interface ShutdownDependencies {
   httpServer?: http.Server;
   io?: {
-    emit: (event: string, ...args: any[]) => void;
+    emit?: (...args: any[]) => any;
     close: (callback?: (err?: any) => void) => void;
   };
   prisma?: {
@@ -77,7 +77,9 @@ export function createShutdownHandler(deps: ShutdownDependencies): ShutdownHandl
       // 2. Notify connected Socket.IO clients and close WebSocket server
       if (io) {
         try {
-          io.emit('server_shutdown', { reason: 'server_restarting' });
+          if (typeof io.emit === 'function') {
+            io.emit('server_shutdown', { reason: 'server_restarting' });
+          }
         } catch (err) {
           logger.warn('Failed to emit shutdown message to sockets:', err);
         }

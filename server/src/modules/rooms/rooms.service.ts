@@ -779,7 +779,7 @@ export class RoomsService {
       return { canStart: false, reason: 'Only the room host can launch the game.' };
     }
 
-    const activeParticipants = room.participants.filter((p) => !p.leftAt);
+    const activeParticipants = (room.participants as any[]).filter((p: any) => !p.leftAt);
     const mode = room.mode.toLowerCase() as RoomMode;
 
     if (!room.selectedGameId || !isGamePermittedForMode(room.selectedGameId, mode)) {
@@ -800,11 +800,11 @@ export class RoomsService {
       };
     }
 
-    const unready = activeParticipants.filter((p) => !p.isReady);
+    const unready = activeParticipants.filter((p: any) => !p.isReady);
     if (unready.length > 0) {
       return {
         canStart: false,
-        reason: `Waiting for all players to toggle Ready (${unready.map((p) => p.user.displayName).join(', ')} not ready).`,
+        reason: `Waiting for all players to toggle Ready (${unready.map((p: any) => p.user.displayName).join(', ')} not ready).`,
       };
     }
 
@@ -1039,7 +1039,7 @@ export class RoomsService {
       queryArgs.skip = 1;
     }
 
-    const messages = await prisma.roomMessage.findMany(queryArgs);
+    const messages: Array<{ id: string; senderId: string; message: string; createdAt: Date; sender: { id: string; displayName: string; username: string } | null }> = (await prisma.roomMessage.findMany(queryArgs)) as any;
     const hasMore = messages.length > take;
     const paginatedMessages = hasMore ? messages.slice(0, take) : messages;
     const nextCursor = hasMore ? paginatedMessages[paginatedMessages.length - 1].id : null;
