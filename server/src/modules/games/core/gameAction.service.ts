@@ -1,4 +1,5 @@
 import type { GameActionEnvelope, ActionResult, GameEngineContext } from './gameEngine.types.js';
+import { Prisma } from '@prisma/client';
 import { gameSessionService } from './gameSession.service.js';
 import { gameStateService } from './gameState.service.js';
 import { gameEngineFactory } from './gameEngineFactory.js';
@@ -223,11 +224,9 @@ export class GameActionService {
 
         // C. Update participant scores and permitted private state
         for (const p of workingSession.participants) {
-          // Never persist BETWEEN US personal answers or pending Would You Rather choices
-          const safePrivateState =
-            workingSession.gameId === 'between-us' || workingSession.gameId === 'would-you-rather'
-              ? undefined
-              : (workingSession.privateStates[p.userId] as any);
+          // Durable private state lives in the per-participant column; it is
+          // never exposed through the public session projection.
+          const privateState = workingSession.privateStates[p.userId];
 
           await tx.gameSessionParticipant.updateMany({
             where: {
@@ -236,7 +235,7 @@ export class GameActionService {
             },
             data: {
               score: workingSession.scores[p.userId] || 0,
-              privateState: safePrivateState,
+              privateState: privateState == null ? Prisma.DbNull : (privateState as any),
             },
           });
         }
