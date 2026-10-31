@@ -14,6 +14,9 @@ interface AlooGolfProps {
   players: { id: string; name: string; avatarInitials: string; avatarColor: string }[];
   onFinishMatch: (results: { winnerName?: string; playerScores: PlayerScoreSummary[] }) => void;
   isPaused?: boolean;
+  sessionState?: any;
+  onSendAction?: (action: any) => Promise<{ success: boolean; error?: string }>;
+  currentUserId?: string;
 }
 
 interface HoleConfig {
@@ -84,23 +87,32 @@ export const AlooGolfGame: React.FC<AlooGolfProps> = ({
   players,
   onFinishMatch,
   isPaused = false,
+  sessionState,
+  onSendAction,
+  currentUserId,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  const [currentHoleIdx, setCurrentHoleIdx] = useState(0);
-  const currentHole = HOLES[currentHoleIdx];
+  const [localCurrentHoleIdx, setCurrentHoleIdx] = useState(0);
+  const isMultiplayer = Boolean(sessionState && onSendAction);
+  const currentHoleIdx = isMultiplayer ? sessionState.currentHoleIdx : localCurrentHoleIdx;
+  const currentHole: HoleConfig = isMultiplayer ? sessionState.hole : HOLES[currentHoleIdx];
 
   // Strokes per player per hole: strokes[holeIdx][playerId]
-  const [holeStrokes, setHoleStrokes] = useState<{ [hole: number]: { [pId: string]: number } }>({
+  const [localHoleStrokes, setHoleStrokes] = useState<{ [hole: number]: { [pId: string]: number } }>({
     0: {},
     1: {},
     2: {},
   });
 
-  const [currentTurnIdx, setCurrentTurnIdx] = useState(0);
+  const [localCurrentTurnIdx, setCurrentTurnIdx] = useState(0);
+  const currentTurnIdx = isMultiplayer
+    ? Math.max(0, players.findIndex((player) => player.id === sessionState.currentTurnUserId))
+    : localCurrentTurnIdx;
+  const holeStrokes = isMultiplayer ? sessionState.holeStrokes || {} : localHoleStrokes;
   const [completedPlayersThisHole, setCompletedPlayersThisHole] = useState<string[]>([]);
 
-  const [ball, setBall] = useState<{
+  const [localBall, setBall] = useState<{
     x: number;
     y: number;
     vx: number;
@@ -119,12 +131,25 @@ export const AlooGolfGame: React.FC<AlooGolfProps> = ({
   const [aimAngle, setAimAngle] = useState(0); // degrees
   const [shotPower, setShotPower] = useState(60);
   const [holeToast, setHoleToast] = useState<string | null>(null);
-
+  const [serverBall, setServerBall] = useState<any>(null);
   const activePlayer = players[currentTurnIdx % players.length];
+  const isMyTurn = !isMultiplayer || sessionState.currentTurnUserId === currentUserId;
+  const myServerBall = isMultiplayer ? sessionState.balls?.[currentUserId] : null;
+  const ball = isMultiplayer
+    ? serverBall || {
+        x: myServerBall?.x ?? currentHole.startX,
+        y: myServerBall?.y ?? currentHole.startY,
+        vx: 0,
+        vy: 0,
+        inMotion: false,
+        rotation: 0,
+      }
+    : localBall;
   const activeStrokes = holeStrokes[currentHoleIdx]?.[activePlayer.id] || 0;
 
   // Total strokes across all played holes
   const getTotalStrokes = (pId: string) => {
+    if (isMultiplayer) return sessionState.totalStrokes?.[pId] || 0;
     let sum = 0;
     for (let h = 0; h < HOLES.length; h++) {
       sum += holeStrokes[h]?.[pId] || 0;
@@ -132,9 +157,10 @@ export const AlooGolfGame: React.FC<AlooGolfProps> = ({
     return sum;
   };
 
-  // Ball Movement & Rolling Simulation Loop
+  // Ball Movement & Rolling Simulation Loop. In a room, only the server
+  // simulates collision physics; this component animates the returned path.
   useEffect(() => {
-    if (!ball.inMotion || isPaused) return;
+    if (isMultiplayer || !ball.inMotion || isPaused) return;
 
     let animId: number;
 
@@ -228,7 +254,7 @@ export const AlooGolfGame: React.FC<AlooGolfProps> = ({
 
     animId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(animId);
-  }, [ball.inMotion, isPaused, currentHole]);
+  }, [ball.inMotion, isPaused, currentHole, isMultiplayer]);
 
   const handleBallSunk = useCallback((_sunkX: number, _sunkY: number) => {
     const finalStrokes = activeStrokes + 1;
@@ -327,7 +353,11 @@ export const AlooGolfGame: React.FC<AlooGolfProps> = ({
   }, [activePlayer, currentHole, currentHoleIdx, holeStrokes, completedPlayersThisHole, players, onFinishMatch, activeStrokes]);
 
   const handlePutt = () => {
-    if (ball.inMotion || isPaused) return;
+    if (ball.inMotion || isPaused || !isMyTurn || (isMultiplayer && (myServerBall?.sunk || sessionState.matchOver))) return;
+    if (isMultiplayer) {
+      void onSendAction?.({ type: 'STROKE', angle: aimAngle, power: shotPower });
+      return;
+    }
 
     // Increment stroke counter
     setHoleStrokes((prev) => ({
@@ -348,6 +378,50 @@ export const AlooGolfGame: React.FC<AlooGolfProps> = ({
       inMotion: true,
     }));
   };
+
+  useEffect(() => {
+    if (!isMultiplayer) {
+      setServerBall(null);
+      return;
+    }
+
+    const trajectory = sessionState.lastTrajectory;
+    if (!Array.isArray(trajectory) || trajectory.length === 0) return;
+
+    let index = 0;
+    let frameId = 0;
+    const renderFrame = () => {
+      const point = trajectory[index];
+      if (point) {
+        setServerBall({
+          x: point.x,
+          y: point.y,
+          vx: 0,
+          vy: 0,
+          inMotion: index < trajectory.length - 1,
+          rotation: index * 0.12,
+        });
+        index += 1;
+      }
+
+      if (index < trajectory.length) {
+        frameId = requestAnimationFrame(renderFrame);
+      } else {
+        const latestBall = sessionState.balls?.[currentUserId];
+        setServerBall({
+          x: latestBall?.x ?? currentHole.startX,
+          y: latestBall?.y ?? currentHole.startY,
+          vx: 0,
+          vy: 0,
+          inMotion: false,
+          rotation: 0,
+        });
+      }
+    };
+
+    frameId = requestAnimationFrame(renderFrame);
+    return () => cancelAnimationFrame(frameId);
+  }, [isMultiplayer, sessionState?.version, sessionState?.lastTrajectory, sessionState?.balls, currentUserId, currentHole.startX, currentHole.startY]);
 
   // Canvas render mini golf course
   useEffect(() => {
@@ -488,6 +562,7 @@ export const AlooGolfGame: React.FC<AlooGolfProps> = ({
             <h3 className="font-bold text-gray-900 text-lg">Aloo Golf: Mini-Course Tour</h3>
             <p className="text-xs text-gray-700">
               Hole {currentHole.number} of {HOLES.length}: "{currentHole.name}" • Par {currentHole.par}
+              {isMultiplayer ? ' • Server-synchronized' : ''}
             </p>
           </div>
         </div>
@@ -559,7 +634,7 @@ export const AlooGolfGame: React.FC<AlooGolfProps> = ({
                 min="-180"
                 max="180"
                 value={aimAngle}
-                disabled={ball.inMotion}
+                disabled={ball.inMotion || (isMultiplayer && !isMyTurn)}
                 onChange={(e) => setAimAngle(Number(e.target.value))}
                 className="w-full accent-primary-600 cursor-pointer"
               />
@@ -578,7 +653,7 @@ export const AlooGolfGame: React.FC<AlooGolfProps> = ({
                 min="20"
                 max="100"
                 value={shotPower}
-                disabled={ball.inMotion}
+                disabled={ball.inMotion || (isMultiplayer && !isMyTurn)}
                 onChange={(e) => setShotPower(Number(e.target.value))}
                 className="w-full accent-green-600 cursor-pointer"
               />
@@ -591,7 +666,7 @@ export const AlooGolfGame: React.FC<AlooGolfProps> = ({
               variant="outline"
               size="sm"
               onClick={() => setAimAngle((prev) => (prev + 180 > 180 ? prev - 180 : prev + 180))}
-              disabled={ball.inMotion}
+              disabled={ball.inMotion || (isMultiplayer && !isMyTurn)}
               className="text-xs text-gray-700 flex items-center gap-1.5"
             >
               <RotateCcw className="w-3.5 h-3.5" />
@@ -601,7 +676,7 @@ export const AlooGolfGame: React.FC<AlooGolfProps> = ({
             <Button
               size="lg"
               onClick={handlePutt}
-              disabled={ball.inMotion}
+              disabled={ball.inMotion || (isMultiplayer && (!isMyTurn || myServerBall?.sunk || sessionState.matchOver))}
               className="flex-1 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white font-black text-base shadow-lg shadow-green-600/30 flex items-center justify-center gap-2"
             >
               <Trophy className="w-5 h-5" />
