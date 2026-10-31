@@ -17,20 +17,28 @@ interface WouldYouRatherGameProps {
   players: { id: string; name: string; avatarInitials: string; avatarColor: string }[];
   onFinishMatch: (results: { winnerName?: string; playerScores: PlayerScoreSummary[] }) => void;
   onUpdateTurn?: (playerName: string, roundInfo: string) => void;
+  sessionState?: any;
+  sessionPrivateState?: any;
+  onSendAction?: (action: any) => Promise<{ success: boolean; error?: string }>;
+  currentUserId?: string;
 }
 
 export const WouldYouRatherGame: React.FC<WouldYouRatherGameProps> = ({
   players,
   onFinishMatch,
   onUpdateTurn,
+  sessionState,
+  sessionPrivateState,
+  onSendAction,
+  currentUserId,
 }) => {
   const p1 = players[0] || { id: 'p1', name: 'Alex', avatarInitials: 'AR', avatarColor: 'bg-[#9670E8]' };
   const p2 = players[1] || { id: 'p2', name: 'Sam', avatarInitials: 'SP', avatarColor: 'bg-[#D94C65]' };
 
   const [questionIndex, setQuestionIndex] = useState(0);
-  const [phase, setPhase] = useState<'p1-answering' | 'pass-to-p2' | 'p2-answering' | 'reveal'>('p1-answering');
-  const [p1Choice, setP1Choice] = useState<'A' | 'B' | null>(null);
-  const [p2Choice, setP2Choice] = useState<'A' | 'B' | null>(null);
+  const [localPhase, setPhase] = useState<'p1-answering' | 'pass-to-p2' | 'p2-answering' | 'reveal'>('p1-answering');
+  const [localP1Choice, setP1Choice] = useState<'A' | 'B' | null>(null);
+  const [localP2Choice, setP2Choice] = useState<'A' | 'B' | null>(null);
   const [matchCount, setMatchCount] = useState(0);
   const [history, setHistory] = useState<{ dilemma: string; p1: string; p2: string; agreed: boolean }[]>([]);
   const [customQuestions, setCustomQuestions] = useState<WouldYouRatherItem[]>([]);
@@ -38,27 +46,56 @@ export const WouldYouRatherGame: React.FC<WouldYouRatherGameProps> = ({
   const [customOptA, setCustomOptA] = useState('');
   const [customOptB, setCustomOptB] = useState('');
 
+  const isMultiplayer = Boolean(sessionState && onSendAction);
   const allQuestions = [...WOULD_YOU_RATHER_ITEMS, ...customQuestions];
-  const currentQ = allQuestions[questionIndex % allQuestions.length];
+  const currentQ = isMultiplayer
+    ? sessionState.currentQuestion
+    : allQuestions[questionIndex % allQuestions.length];
+  const hasSubmitted = Boolean(isMultiplayer && sessionState.submittedUserIds?.includes(currentUserId));
+  const revealedChoices = isMultiplayer ? sessionState.revealedChoices : null;
+  const phase = isMultiplayer
+    ? sessionState.phase === 'REVEAL'
+      ? 'reveal'
+      : hasSubmitted
+      ? 'submitted-waiting'
+      : 'online-answering'
+    : localPhase;
+  const p1Choice: 'A' | 'B' | null = isMultiplayer
+    ? revealedChoices?.[p1.id] ?? null
+    : localP1Choice;
+  const p2Choice: 'A' | 'B' | null = isMultiplayer
+    ? revealedChoices?.[p2.id] ?? null
+    : localP2Choice;
+  const displayQuestionIndex = isMultiplayer ? sessionState.questionIndex : questionIndex;
+  const displayMatchCount = isMultiplayer ? sessionState.matchCount : matchCount;
+  const displayHistory = isMultiplayer ? sessionState.history || [] : history;
 
   useEffect(() => {
     if (onUpdateTurn) {
       if (phase === 'p1-answering') {
-        onUpdateTurn(p1.name, `Question ${questionIndex + 1} • Would You Rather`);
+        onUpdateTurn(isMultiplayer ? (hasSubmitted ? 'Waiting for the other player' : 'Your choice') : p1.name, `Question ${displayQuestionIndex + 1} • Would You Rather`);
       } else if (phase === 'p2-answering') {
-        onUpdateTurn(p2.name, `Question ${questionIndex + 1} • Would You Rather`);
+        onUpdateTurn(p2.name, `Question ${displayQuestionIndex + 1} • Would You Rather`);
       } else {
-        onUpdateTurn('Both Players', `Question ${questionIndex + 1} • Dilemma Reveal`);
+        onUpdateTurn('Both Players', `Question ${displayQuestionIndex + 1} • Dilemma Reveal`);
       }
     }
-  }, [phase, questionIndex, p1.name, p2.name, onUpdateTurn]);
+  }, [phase, displayQuestionIndex, p1.name, p2.name, onUpdateTurn, isMultiplayer, hasSubmitted]);
 
   const handleP1Select = (choice: 'A' | 'B') => {
+    if (isMultiplayer) {
+      if (!hasSubmitted) void onSendAction?.({ type: 'SUBMIT_CHOICE', choice });
+      return;
+    }
     setP1Choice(choice);
     setPhase('pass-to-p2');
   };
 
   const handleP2Select = (choice: 'A' | 'B') => {
+    if (isMultiplayer) {
+      if (!hasSubmitted) void onSendAction?.({ type: 'SUBMIT_CHOICE', choice });
+      return;
+    }
     setP2Choice(choice);
     const agreed = p1Choice === choice;
     if (agreed) {
@@ -79,6 +116,11 @@ export const WouldYouRatherGame: React.FC<WouldYouRatherGameProps> = ({
   };
 
   const handleNextQuestion = () => {
+    if (isMultiplayer) {
+      if (sessionState.totalAnswered < 8) void onSendAction?.({ type: 'NEXT_QUESTION' });
+      return;
+    }
+
     if (questionIndex >= 7) {
       // Complete match after 8 questions
       const percent = Math.round((matchCount / (questionIndex + 1)) * 100);
@@ -100,6 +142,7 @@ export const WouldYouRatherGame: React.FC<WouldYouRatherGameProps> = ({
 
   const handleAddCustom = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isMultiplayer) return;
     if (!customOptA.trim() || !customOptB.trim()) return;
 
     setCustomQuestions((prev) => [
@@ -116,7 +159,7 @@ export const WouldYouRatherGame: React.FC<WouldYouRatherGameProps> = ({
     setShowCustomModal(false);
   };
 
-  if (phase === 'pass-to-p2') {
+  if (phase === 'pass-to-p2' && !isMultiplayer) {
     return (
       <PassDeviceScreen
         targetPlayerName={p2.name}
@@ -134,7 +177,7 @@ export const WouldYouRatherGame: React.FC<WouldYouRatherGameProps> = ({
       <div className="p-4 rounded-2xl bg-white border border-[#EAE3F3] shadow-xs flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Badge variant="purple" size="sm">
-            Dilemma {questionIndex + 1} of {allQuestions.length}
+            Dilemma {displayQuestionIndex + 1} of {isMultiplayer ? 8 : allQuestions.length}
           </Badge>
           <Badge variant="subtle" size="sm">
             {currentQ.category}
@@ -146,13 +189,14 @@ export const WouldYouRatherGame: React.FC<WouldYouRatherGameProps> = ({
             variant="ghost"
             size="sm"
             onClick={() => setShowCustomModal(true)}
+            disabled={isMultiplayer}
             leftIcon={<Plus className="w-3.5 h-3.5" />}
             className="text-xs"
           >
             Custom
           </Button>
           <span className="text-xs text-[#756D82] font-semibold">
-            Matches: <strong className="text-[#593B91]">{matchCount}</strong>
+            Matches: <strong className="text-[#593B91]">{displayMatchCount}</strong>
           </span>
         </div>
       </div>
@@ -166,6 +210,10 @@ export const WouldYouRatherGame: React.FC<WouldYouRatherGameProps> = ({
           <h2 className="text-xl sm:text-2xl font-extrabold text-[#211A2D]">
             {phase === 'reveal'
               ? 'Answers Revealed!'
+              : phase === 'submitted-waiting'
+              ? 'Your choice is locked. Waiting for the other player.'
+              : isMultiplayer
+              ? 'Choose your answer privately:'
               : phase === 'p1-answering'
               ? `${p1.name}, choose secretly:`
               : `${p2.name}, choose secretly:`}
@@ -177,9 +225,10 @@ export const WouldYouRatherGame: React.FC<WouldYouRatherGameProps> = ({
           {/* Option A */}
           <button
             type="button"
-            disabled={phase === 'reveal'}
+            disabled={phase === 'reveal' || (isMultiplayer && hasSubmitted)}
             onClick={() => {
-              if (phase === 'p1-answering') handleP1Select('A');
+              if (isMultiplayer) handleP1Select('A');
+              else if (phase === 'p1-answering') handleP1Select('A');
               else if (phase === 'p2-answering') handleP2Select('A');
             }}
             className={`p-6 rounded-3xl border-2 text-left flex flex-col justify-between transition-all duration-200 cursor-pointer ${
@@ -219,9 +268,10 @@ export const WouldYouRatherGame: React.FC<WouldYouRatherGameProps> = ({
           {/* Option B */}
           <button
             type="button"
-            disabled={phase === 'reveal'}
+            disabled={phase === 'reveal' || (isMultiplayer && hasSubmitted)}
             onClick={() => {
-              if (phase === 'p1-answering') handleP1Select('B');
+              if (isMultiplayer) handleP2Select('B');
+              else if (phase === 'p1-answering') handleP1Select('B');
               else if (phase === 'p2-answering') handleP2Select('B');
             }}
             className={`p-6 rounded-3xl border-2 text-left flex flex-col justify-between transition-all duration-200 cursor-pointer ${
@@ -280,6 +330,7 @@ export const WouldYouRatherGame: React.FC<WouldYouRatherGameProps> = ({
               variant="primary"
               size="md"
               onClick={handleNextQuestion}
+              disabled={isMultiplayer && sessionState.totalAnswered >= 8}
               rightIcon={<ArrowRight className="w-4 h-4" />}
               className="font-bold shrink-0"
             >
@@ -290,13 +341,13 @@ export const WouldYouRatherGame: React.FC<WouldYouRatherGameProps> = ({
       </div>
 
       {/* History log */}
-      {history.length > 0 && (
+      {displayHistory.length > 0 && (
         <div className="p-4 rounded-2xl bg-white border border-[#EAE3F3]">
           <span className="text-[10px] font-bold uppercase tracking-wider text-[#756D82] block mb-2">
             Comparison Log
           </span>
           <div className="flex flex-col gap-2 max-h-36 overflow-y-auto pr-1">
-            {history.map((h, i) => (
+            {displayHistory.map((h: any, i: number) => (
               <div key={i} className="text-xs p-2.5 rounded-xl bg-[#FCFAFF] border border-[#EAE3F3] flex items-center justify-between gap-2">
                 <span className="text-[#211A2D] font-medium truncate flex-1">{h.dilemma}</span>
                 <Badge variant={h.agreed ? 'success' : 'subtle'} size="sm">
