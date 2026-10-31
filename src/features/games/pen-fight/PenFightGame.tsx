@@ -236,7 +236,7 @@ export const PenFightGame: React.FC<PenFightProps> = ({
         return;
       }
 
-      if (isSimulating) {
+      if (isSimulating && !isMultiplayer) {
         let anyMoving = false;
         const updated = pensRef.current.map((pen) => ({ ...pen }));
 
