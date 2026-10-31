@@ -79,6 +79,35 @@ const GameArenaContent: React.FC<GameArenaContentProps> = ({
 
   if (!game) return null;
 
+  // A room-backed arena must never silently fall back to the local pass-and-play
+  // implementation while its authoritative session is loading or unavailable.
+  if (session?.isLoading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6">
+        <Loader2 className="w-10 h-10 text-[#9670E8] animate-spin mb-4" />
+        <h2 className="text-lg font-bold text-[#211A2D]">Connecting to Multiplayer Session</h2>
+        <p className="text-xs text-[#756D82] mt-1">Loading the latest server-authoritative game state</p>
+      </div>
+    );
+  }
+
+  if (session?.error || (!session && roomCode)) {
+    return (
+      <div className="min-h-screen bg-[#FCFAFF] flex items-center justify-center p-4">
+        <div className="max-w-md rounded-3xl border border-[#EAE3F3] bg-white p-8 text-center shadow-xl">
+          <AlertCircle className="mx-auto h-10 w-10 text-amber-500" />
+          <h2 className="mt-4 text-xl font-bold text-[#211A2D]">Multiplayer Session Unavailable</h2>
+          <p className="mt-2 text-sm text-[#756D82]">
+            {session?.error || 'This room does not have an active game session connected to this arena.'}
+          </p>
+          <Button variant="primary" onClick={onReturnToLobby} className="mt-5">
+            Return to Room Lobby
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   // Resolve participants from session or current room
   const participants =
     session && session.participants.length > 0
