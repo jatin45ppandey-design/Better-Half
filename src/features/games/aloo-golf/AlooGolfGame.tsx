@@ -355,7 +355,8 @@ export const AlooGolfGame: React.FC<AlooGolfProps> = ({
   const handlePutt = () => {
     if (ball.inMotion || isPaused || !isMyTurn || (isMultiplayer && (activeServerBall?.sunk || sessionState.matchOver))) return;
     if (isMultiplayer) {
-      void onSendAction?.({ type: 'STROKE', angle: aimAngle, power: shotPower });
+      const serverAngle = ((aimAngle % 360) + 360) % 360;
+      void onSendAction?.({ type: 'STROKE', angle: serverAngle, power: shotPower });
       return;
     }
 
