@@ -21,8 +21,8 @@ export interface ActionExecutionResult {
 function sanitizeActionMetadata(action: any, gameId: string): any {
   if (!action || typeof action !== 'object') return null;
 
-  // Strict privacy: never persist BETWEEN US answers or sensitive text answers
-  if (gameId === 'between-us' || action.type === 'SUBMIT_ANSWER') {
+  // Strict privacy: never persist submitted private answer text in action history.
+  if (gameId === 'between-us' && action.type === 'SUBMIT_ANSWER') {
     return { type: action.type, hasSubmitted: true };
   }
 
@@ -201,7 +201,9 @@ export class GameActionService {
             stateVersion: newVersion,
             currentTurnUserId: workingSession.currentTurnUserId,
             status: workingSession.status,
-            publicState: publicProj as any,
+            // Persist the complete internal engine snapshot for safe restart
+            // recovery. Clients only receive engine.getPublicProjection().
+            publicState: workingSession.state as any,
             completedAt: workingSession.status === 'COMPLETED' ? new Date() : undefined,
           },
         });
@@ -248,6 +250,9 @@ export class GameActionService {
           }
           finalizedMatchId = finalized.matchId;
         }
+      }, {
+        maxWait: 5000,
+        timeout: 15000,
       });
     } catch (err: any) {
       logger.error(`Action transaction failed: ${err?.message || err}`);
