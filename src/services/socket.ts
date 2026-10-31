@@ -49,7 +49,17 @@ class SocketService {
       }
 
       this.socket = io(SOCKET_URL, {
-        auth: { token },
+        // Resolve a fresh Supabase access token for the initial connection and
+        // every Socket.IO reconnect instead of reusing an expired JWT.
+        auth: (callback: (credentials: { token: string }) => void) => {
+          void supabase.auth.getSession()
+            .then(({ data: freshData, error: freshError }) => {
+              callback({
+                token: freshError ? '' : freshData.session?.access_token || '',
+              });
+            })
+            .catch(() => callback({ token: '' }));
+        },
         transports: ['websocket', 'polling'],
         reconnection: true,
         reconnectionAttempts: 10,
@@ -81,16 +91,18 @@ class SocketService {
 
       const onConnect = () => finish(socket);
       const onConnectError = (error: Error) => {
-        console.warn('[Socket] Connection error:', error.message);
-        finish(null);
+        // A connect_error does not necessarily end Socket.IO's reconnect
+        // cycle. Keep waiting for a successful reconnect until the bounded
+        // connection deadline is reached.
+        console.warn('[Socket] Connection attempt failed; retrying:', error.message);
       };
 
       const timeout = setTimeout(() => {
         finish(null);
-      }, ACK_TIMEOUT_MS + 1000);
+      }, ACK_TIMEOUT_MS * 3);
 
       socket.once('connect', onConnect);
-      socket.once('connect_error', onConnectError);
+      socket.on('connect_error', onConnectError);
 
       if (!socket.connected) socket.connect();
       else finish(socket);
