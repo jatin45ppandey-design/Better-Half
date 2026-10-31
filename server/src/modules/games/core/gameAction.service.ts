@@ -56,22 +56,6 @@ export class GameActionService {
       return { success: false, error: 'Session not found.', version: 0 };
     }
 
-    if (session.status !== 'ACTIVE') {
-      return {
-        success: false,
-        error: `Cannot apply action. Session is ${session.status.toLowerCase()}.`,
-        version: session.version,
-      };
-    }
-
-    if (session.isPaused) {
-      return {
-        success: false,
-        error: 'Game is currently paused.',
-        version: session.version,
-      };
-    }
-
     // 1. Enforce Action ID idempotency across process restarts
     if (gameStateService.isActionProcessed(sessionId, actionId)) {
       const publicState = gameStateService.getPublicProjection(sessionId) || {};
@@ -100,6 +84,25 @@ export class GameActionService {
       return {
         success: false,
         error: 'Database unavailable for idempotency verification.',
+        version: session.version,
+      };
+    }
+
+    // A retry for an already-committed action is acknowledged before the
+    // session status gate. The original action may itself have completed or
+    // paused the session before its ACK reached the client.
+    if (session.status !== 'ACTIVE') {
+      return {
+        success: false,
+        error: `Cannot apply action. Session is ${session.status.toLowerCase()}.`,
+        version: session.version,
+      };
+    }
+
+    if (session.isPaused) {
+      return {
+        success: false,
+        error: 'Game is currently paused.',
         version: session.version,
       };
     }
