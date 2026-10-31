@@ -172,7 +172,6 @@ const GameArenaContent: React.FC<GameArenaContentProps> = ({
       sessionPrivateState: session?.privateState,
       onSendAction: session?.sendAction,
       currentUserId: user?.id,
-      isHost: Boolean(currentRoom?.hostId && currentRoom.hostId === user?.id),
     };
 
     switch (game.id) {
