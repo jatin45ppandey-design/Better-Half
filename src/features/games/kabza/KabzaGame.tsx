@@ -15,6 +15,9 @@ interface KabzaProps {
   players: { id: string; name: string; avatarInitials: string; avatarColor: string }[];
   onFinishMatch: (results: { winnerName?: string; playerScores: PlayerScoreSummary[] }) => void;
   isPaused?: boolean;
+  sessionState?: any;
+  onSendAction?: (action: any) => Promise<{ success: boolean; error?: string }>;
+  currentUserId?: string;
 }
 
 const GRID_SIZE = 6; // 6x6 = 36 territory cells
@@ -38,10 +41,13 @@ export const KabzaGame: React.FC<KabzaProps> = ({
   players,
   onFinishMatch,
   isPaused = false,
+  sessionState,
+  onSendAction,
+  currentUserId,
 }) => {
   const [round, setRound] = useState(1);
   const [turnIndex, setTurnIndex] = useState(0);
-  const [board, setBoard] = useState<Cell[]>(() => {
+  const [localBoard, setBoard] = useState<Cell[]>(() => {
     const cells: Cell[] = [];
     for (let r = 0; r < GRID_SIZE; r++) {
       for (let c = 0; c < GRID_SIZE; c++) {
@@ -50,23 +56,37 @@ export const KabzaGame: React.FC<KabzaProps> = ({
     }
     return cells;
   });
-  const [lastCaptureCount, setLastCaptureCount] = useState<number>(0);
-  const [roundOver, setRoundOver] = useState(false);
+  const [localLastCaptureCount, setLastCaptureCount] = useState<number>(0);
+  const [localRoundOver, setRoundOver] = useState(false);
 
-  const activePlayer = players[turnIndex % players.length];
-  const activeColor = PLAYER_PALETTE[turnIndex % PLAYER_PALETTE.length];
+  const isMultiplayer = Boolean(sessionState && onSendAction);
+  const board: Cell[] = isMultiplayer ? sessionState.board : localBoard;
+  const lastCaptureCount = isMultiplayer ? sessionState.lastCaptureCount : localLastCaptureCount;
+  const roundOver = isMultiplayer ? sessionState.roundOver : localRoundOver;
+  const activePlayerIndex = isMultiplayer
+    ? Math.max(0, players.findIndex((player) => player.id === sessionState.currentTurnUserId))
+    : turnIndex % players.length;
+  const activePlayer = players[activePlayerIndex];
+  const activeColor = PLAYER_PALETTE[activePlayerIndex % PLAYER_PALETTE.length];
+  const isMyTurn = !isMultiplayer || sessionState.currentTurnUserId === currentUserId;
 
-  // Calculate territory counts
-  const territoryCounts: { [id: string]: number } = {};
-  players.forEach((p) => {
-    territoryCounts[p.id] = board.filter((c) => c.ownerId === p.id).length;
-  });
+  // Server-maintained counts are preferred during online matches.
+  const territoryCounts: { [id: string]: number } = isMultiplayer
+    ? sessionState.territoryCounts || {}
+    : Object.fromEntries(players.map((player) => [
+        player.id,
+        board.filter((cell) => cell.ownerId === player.id).length,
+      ]));
 
   const getCellIndex = (r: number, c: number) => r * GRID_SIZE + c;
 
   // Handle cell claim & capture logic
   const handleCellClick = (r: number, c: number) => {
-    if (isPaused || roundOver) return;
+    if (isPaused || roundOver || !isMyTurn) return;
+    if (isMultiplayer) {
+      void onSendAction?.({ type: 'CLAIM_CELL', row: r, col: c });
+      return;
+    }
 
     const idx = getCellIndex(r, c);
     if (board[idx].ownerId !== null) return; // already claimed
@@ -166,6 +186,7 @@ export const KabzaGame: React.FC<KabzaProps> = ({
   };
 
   const handleResetBoard = () => {
+    if (isMultiplayer) return;
     const cells: Cell[] = [];
     for (let r = 0; r < GRID_SIZE; r++) {
       for (let c = 0; c < GRID_SIZE; c++) {
@@ -189,7 +210,7 @@ export const KabzaGame: React.FC<KabzaProps> = ({
           <div>
             <h3 className="font-bold text-gray-900 text-lg">Kabza: Territory Conquest</h3>
             <p className="text-xs text-gray-700">
-              Round {round} • Flank enemy cells on 2 sides to conquer them!
+              {isMultiplayer ? 'Live server-synchronized match' : `Round ${round}`} • Flank enemy cells on 2 sides to conquer them!
             </p>
           </div>
         </div>
@@ -198,6 +219,7 @@ export const KabzaGame: React.FC<KabzaProps> = ({
           variant="ghost"
           size="sm"
           onClick={handleResetBoard}
+          disabled={isMultiplayer}
           className="text-xs text-gray-700 flex items-center gap-1.5"
         >
           <RotateCcw className="w-3.5 h-3.5" />
@@ -269,7 +291,7 @@ export const KabzaGame: React.FC<KabzaProps> = ({
                 <button
                   key={idx}
                   onClick={() => handleCellClick(cell.row, cell.col)}
-                  disabled={Boolean(cell.ownerId || roundOver || isPaused)}
+                  disabled={Boolean(cell.ownerId || roundOver || isPaused || !isMyTurn)}
                   aria-label={`Sector Row ${cell.row + 1} Col ${cell.col + 1}`}
                   className={`aspect-square rounded-xl flex items-center justify-center transition-all duration-200 relative group select-none shadow-sm
                     ${
@@ -311,6 +333,7 @@ export const KabzaGame: React.FC<KabzaProps> = ({
               <Button
                 size="md"
                 onClick={handleResetBoard}
+                disabled={isMultiplayer}
                 className="mt-2 bg-violet-600 hover:bg-violet-700 text-white font-bold flex items-center gap-2"
               >
                 Start New Campaign <ChevronRight className="w-4 h-4" />
