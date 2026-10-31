@@ -176,8 +176,11 @@ export class OriginalCardGameEngine
         return { valid: false, error: `Cannot play ${card.label}. Match color (${activeColor}) or value (${top.value}).` };
       }
 
-      if (isWild && !action.chosenColor) {
-        return { valid: false, error: 'Must specify chosen color when playing Wild.' };
+      if (
+        isWild &&
+        !['purple', 'lavender', 'amber', 'emerald'].includes(action.chosenColor || '')
+      ) {
+        return { valid: false, error: 'A Wild card requires a valid selected color.' };
       }
       return { valid: true };
     }
