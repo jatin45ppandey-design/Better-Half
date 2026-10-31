@@ -3,6 +3,7 @@ import { roomsService } from '../modules/rooms/rooms.service.js';
 import { normalizeGameId } from '../modules/rooms/rooms.constants.js';
 import { gameSessionService } from '../modules/games/core/gameSession.service.js';
 import { presenceManager } from './presence.js';
+import { revokeRoomMembership } from './roomMembership.js';
 import { prisma } from '../config/prisma.js';
 import { safeSocketError } from './safeError.js';
 import {
@@ -154,18 +155,7 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
       const result = await roomsService.leaveRoom(roomId, userId);
 
       const roomChannel = `room:${roomId}`;
-      // Leaving a room removes every active tab/device for this user so no
-      // stale socket can continue receiving private room broadcasts.
-      const userSocketIds = presenceManager.getUserSockets(userId);
-      for (const socketId of userSocketIds) {
-        const userSocket = io.sockets.sockets.get(socketId);
-        if (userSocket) {
-          userSocket.emit('room:membership:revoked', { roomId, userId, reason: 'LEFT' });
-          await userSocket.leave(roomChannel);
-        }
-      }
-      await socket.leave(roomChannel);
-      presenceManager.leaveRoom(roomId, userId);
+      const onlineUserIds = await revokeRoomMembership(io, roomId, userId, 'LEFT');
 
       if (result) {
         io.to(roomChannel).emit('room:player:left', {
@@ -178,7 +168,6 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
           io.to(roomChannel).emit('room:state', result.room);
         }
 
-        const onlineUserIds = presenceManager.getRoomOnlineUsers(roomId);
         io.to(roomChannel).emit('room:presence:update', { onlineUserIds });
       }
 
@@ -402,30 +391,12 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
       const result = await roomsService.kickParticipant(roomId, userId, targetUserId);
 
       const roomChannel = `room:${roomId}`;
-
-      // Evict target user's active sockets from room channel and notify them
-      const targetSockets = presenceManager.getUserSockets(targetUserId);
-      for (const sId of targetSockets) {
-        const s = io.sockets.sockets.get(sId);
-        if (s) {
-          s.emit('room:membership:revoked', {
-            roomId,
-            userId: targetUserId,
-            reason: 'KICKED',
-          });
-          s.leave(roomChannel);
-          s.emit('room:player:kicked', { targetUserId, roomId });
-        }
-      }
+      const onlineUserIds = await revokeRoomMembership(io, roomId, targetUserId, 'KICKED');
 
       io.to(roomChannel).emit('room:player:kicked', { targetUserId, roomId });
       if (result.room) {
         io.to(roomChannel).emit('room:state', result.room);
       }
-
-      // Remove target user's presence
-      presenceManager.leaveRoom(roomId, targetUserId);
-      const onlineUserIds = presenceManager.getRoomOnlineUsers(roomId);
       io.to(roomChannel).emit('room:presence:update', { onlineUserIds });
 
       callback?.({ success: true });
