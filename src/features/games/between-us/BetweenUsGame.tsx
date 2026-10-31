@@ -69,6 +69,7 @@ export const BetweenUsGame: React.FC<BetweenUsProps> = ({
   const [localP1Answer, setP1Answer] = useState('');
   const [localP2Answer, setP2Answer] = useState('');
   const [draftAnswer, setDraftAnswer] = useState('');
+  const [localQuestionsAnsweredCount, setQuestionsAnsweredCount] = useState(0);
 
   const isMultiplayer = Boolean(sessionState && onSendAction);
   const selectedCategory = isMultiplayer ? sessionState.category : localSelectedCategory;
@@ -94,7 +95,6 @@ export const BetweenUsGame: React.FC<BetweenUsProps> = ({
     : localQuestionsAnsweredCount;
   const [showFollowUp, setShowFollowUp] = useState(false);
   const [showSurpriseCard, setShowSurpriseCard] = useState(false);
-  const [localQuestionsAnsweredCount, setQuestionsAnsweredCount] = useState(0);
   const [_sessionLog, setSessionLog] = useState<Array<{ prompt: string; category: string }>>([]);
 
   const handleIntensityClick = (level: 1 | 2 | 3 | 4 | 5) => {
