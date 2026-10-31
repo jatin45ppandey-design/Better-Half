@@ -1,5 +1,6 @@
 import type { Server, Socket } from 'socket.io';
 import { roomsService } from '../modules/rooms/rooms.service.js';
+import { normalizeGameId } from '../modules/rooms/rooms.constants.js';
 import { gameSessionService } from '../modules/games/core/gameSession.service.js';
 import { presenceManager } from './presence.js';
 import { prisma } from '../config/prisma.js';
@@ -245,7 +246,7 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
       const roomChannel = `room:${roomId}`;
       io.to(roomChannel).emit('room:game:voted', {
         userId,
-        gameId,
+        gameId: normalizeGameId(gameId),
         votes: updatedRoom.gameVotes,
       });
 
@@ -277,7 +278,7 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
 
       const roomChannel = `room:${roomId}`;
       io.to(roomChannel).emit('room:game:selected', {
-        selectedGameId: gameId,
+        selectedGameId: updatedRoom.selectedGameId,
       });
 
       io.to(roomChannel).emit('room:state', updatedRoom);
