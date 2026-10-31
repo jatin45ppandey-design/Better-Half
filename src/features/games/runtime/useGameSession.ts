@@ -15,6 +15,7 @@ export interface GameSessionContextType {
   privateState: any;
   version: number;
   isPaused: boolean;
+  sessionStatus: 'ACTIVE' | 'PAUSED' | 'COMPLETED' | 'ABANDONED';
   isLoading: boolean;
   error: string | null;
   winnerUserId: string | null;
