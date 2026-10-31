@@ -12,6 +12,10 @@ interface SnatchTheFriesProps {
   players: { id: string; name: string; avatarInitials: string; avatarColor: string }[];
   onFinishMatch: (results: { winnerName?: string; playerScores: PlayerScoreSummary[] }) => void;
   isPaused?: boolean;
+  sessionState?: any;
+  onSendAction?: (action: any) => Promise<{ success: boolean; error?: string }>;
+  currentUserId?: string;
+  isHost?: boolean;
 }
 
 interface FryItem {
@@ -36,21 +40,42 @@ export const SnatchTheFriesGame: React.FC<SnatchTheFriesProps> = ({
   players,
   onFinishMatch,
   isPaused = false,
+  sessionState,
+  onSendAction,
+  currentUserId,
+  isHost = false,
 }) => {
-  const [dropRound, setDropRound] = useState(1);
-  const [scores, setScores] = useState<{ [id: string]: number }>({});
-  const [reactionTimes, setReactionTimes] = useState<{ [id: string]: number[] }>({});
-  const [currentFry, setCurrentFry] = useState<FryItem | null>(null);
-  const [dropState, setDropState] = useState<'WAITING' | 'DROPPED' | 'SNATCHED' | 'FALSE_START'>('WAITING');
-  const [dropTimestamp, setDropTimestamp] = useState<number>(0);
+  const [localDropRound, setDropRound] = useState(1);
+  const [localScores, setScores] = useState<{ [id: string]: number }>({});
+  const [localReactionTimes, setReactionTimes] = useState<{ [id: string]: number[] }>({});
+  const [localCurrentFry, setCurrentFry] = useState<FryItem | null>(null);
+  const [localDropState, setDropState] = useState<'WAITING' | 'DROPPED' | 'SNATCHED' | 'FALSE_START'>('WAITING');
+  const [localDropTimestamp, setDropTimestamp] = useState<number>(0);
   const [snatchMessage, setSnatchMessage] = useState<string | null>(null);
 
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const matchFinishedRef = useRef(false);
 
-  // Trigger random fry drop
+  const isMultiplayer = Boolean(sessionState && onSendAction);
+  const dropRound = isMultiplayer ? sessionState.dropRound : localDropRound;
+  const scores = isMultiplayer ? sessionState.scores || {} : localScores;
+  const reactionTimes = isMultiplayer ? sessionState.reactionTimes || {} : localReactionTimes;
+  const currentFry: FryItem | null = isMultiplayer
+    ? sessionState.currentDrop
+      ? {
+          ...sessionState.currentDrop,
+          color: FRY_TYPES.find((fry) => fry.type === sessionState.currentDrop.type)?.color || 'from-amber-400 to-yellow-500',
+        }
+      : null
+    : localCurrentFry;
+  const dropState = isMultiplayer ? sessionState.dropState : localDropState;
+  const dropTimestamp = isMultiplayer ? sessionState.dropTimestamp : localDropTimestamp;
+  const myPlayerIndex = players.findIndex((player) => player.id === currentUserId);
+  const matchFinished = isMultiplayer ? Boolean(sessionState.matchOver) : matchFinishedRef.current;
+
+  // Trigger random fry drop in local mode only.
   const scheduleNextDrop = useCallback(() => {
-    if (dropRound > TOTAL_DROPS) return;
+    if (isMultiplayer || dropRound > TOTAL_DROPS) return;
 
     setDropState('WAITING');
     setCurrentFry(null);
@@ -70,20 +95,50 @@ export const SnatchTheFriesGame: React.FC<SnatchTheFriesProps> = ({
       setDropTimestamp(Date.now());
       setDropState('DROPPED');
     }, randomDelay);
-  }, [dropRound]);
+  }, [dropRound, isMultiplayer]);
 
   useEffect(() => {
+    if (isMultiplayer) return;
     if (!isPaused && dropRound <= TOTAL_DROPS && dropState === 'WAITING' && !currentFry) {
       scheduleNextDrop();
     }
     return () => {
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
     };
-  }, [dropRound, dropState, isPaused, currentFry, scheduleNextDrop]);
+  }, [dropRound, dropState, isPaused, currentFry, scheduleNextDrop, isMultiplayer]);
+
+  // The room host schedules drops; all scoring, drop timing and reaction times
+  // are committed by the server engine.
+  useEffect(() => {
+    if (!isMultiplayer || !isHost || isPaused || sessionState.matchOver) return;
+    if (sessionState.dropState === 'DROPPED') return;
+
+    const delay = sessionState.dropState === 'SNATCHED'
+      ? 1400
+      : sessionState.dropState === 'FALSE_START'
+      ? 1500
+      : Math.floor(Math.random() * 2600) + 1400;
+
+    const timer = setTimeout(() => {
+      void onSendAction?.({ type: 'SPAWN_DROP' });
+    }, delay);
+
+    return () => clearTimeout(timer);
+  }, [isMultiplayer, isHost, isPaused, sessionState?.dropState, sessionState?.dropRound, sessionState?.matchOver, onSendAction]);
 
   // Snatch Action
   const handlePlayerSnatch = useCallback((playerIndex: number) => {
-    if (isPaused || matchFinishedRef.current) return;
+    if (isPaused || matchFinished) return;
+    if (isMultiplayer) {
+      if (playerIndex !== myPlayerIndex || myPlayerIndex < 0) return;
+      if (dropState === 'SNATCHED' || matchFinished) return;
+      void onSendAction?.({
+        type: 'SNATCH',
+        dropId: sessionState.currentDrop?.id || 'no-drop',
+      });
+      return;
+    }
+
     const player = players[playerIndex];
     if (!player) return;
 
@@ -176,7 +231,7 @@ export const SnatchTheFriesGame: React.FC<SnatchTheFriesProps> = ({
         }
       }, 1400);
     }
-  }, [isPaused, dropState, currentFry, dropTimestamp, dropRound, onFinishMatch, players, reactionTimes, scheduleNextDrop]);
+  }, [isPaused, dropState, currentFry, dropTimestamp, dropRound, onFinishMatch, players, reactionTimes, scheduleNextDrop, isMultiplayer, myPlayerIndex, matchFinished, onSendAction, sessionState?.currentDrop?.id]);
 
   // Keyboard shortcut listener (Q, P, Z, M)
   useEffect(() => {
@@ -203,7 +258,7 @@ export const SnatchTheFriesGame: React.FC<SnatchTheFriesProps> = ({
           <div>
             <h3 className="font-bold text-gray-900 text-lg">Snatch The Fries</h3>
             <p className="text-xs text-gray-700">
-              Round {Math.min(dropRound, TOTAL_DROPS)} of {TOTAL_DROPS} • Snatch fastest when fry drops! Beware false starts (-50)
+              Round {Math.min(dropRound, TOTAL_DROPS)} of {TOTAL_DROPS} • {isMultiplayer ? 'Live synchronized reaction match' : 'Snatch fastest when fry drops! Beware false starts (-50)'}
             </p>
           </div>
         </div>
@@ -290,6 +345,7 @@ export const SnatchTheFriesGame: React.FC<SnatchTheFriesProps> = ({
           <button
             key={p.id}
             onClick={() => handlePlayerSnatch(idx)}
+            disabled={isMultiplayer && (idx !== myPlayerIndex || matchFinished)}
             className="group relative p-4 rounded-2xl bg-gradient-to-b from-white to-gray-50 border-2 border-primary-200 hover:border-amber-400 hover:shadow-xl active:scale-95 transition-all flex flex-col items-center gap-2 cursor-pointer"
           >
             <div className={`w-12 h-12 rounded-2xl ${p.avatarColor} text-white font-bold flex items-center justify-center text-lg shadow-md group-hover:scale-105 transition-transform`}>
@@ -319,7 +375,7 @@ export const SnatchTheFriesGame: React.FC<SnatchTheFriesProps> = ({
           <Info className="w-3.5 h-3.5 text-primary-500" />
           Players can press their hotkey or click their personal Snatch button!
         </span>
-        <span>Local Reaction Prototype</span>
+        <span>{isMultiplayer ? 'Server-timed multiplayer' : 'Local Reaction Prototype'}</span>
       </div>
     </div>
   );
