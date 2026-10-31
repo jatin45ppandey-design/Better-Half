@@ -118,6 +118,11 @@ export type RoomSnapshotSource = {
 };
 
 export class RoomsService {
+  private async lockRoomRow(tx: Prisma.TransactionClient, roomId: string): Promise<void> {
+    const rows = await tx.$queryRaw<Array<{ id: string }>>`SELECT "id" FROM "Room" WHERE "id" = ${roomId} FOR UPDATE`;
+    if (rows.length === 0) throw new NotFoundError('Room not found');
+  }
+
   /**
    * Resolve either a database room ID or a public room code to the canonical
    * database ID. Socket.IO room channels and presence keys must always use
@@ -574,7 +579,7 @@ export class RoomsService {
     // joins serialize instead of both observing the same available slot.
     const transactionResult = await prisma.$transaction(
       async (tx) => {
-        await tx.$queryRaw<Array<{ id: string }>>`SELECT "id" FROM "Room" WHERE "id" = ${existingRoom.id} FOR UPDATE`;
+        await this.lockRoomRow(tx, existingRoom.id);
 
         const currentRoom = await tx.room.findUnique({
           where: { id: existingRoom.id },
@@ -701,6 +706,13 @@ export class RoomsService {
 
     const transactionResult = await prisma.$transaction(
       async (tx) => {
+        await this.lockRoomRow(tx, room.id);
+        const currentRoom = await tx.room.findUnique({
+          where: { id: room.id },
+          select: { hostId: true, status: true },
+        });
+        if (!currentRoom) throw new NotFoundError('Room not found');
+
         const leaveUpdate = await tx.roomParticipant.updateMany({
           where: { id: participant.id, leftAt: null },
           data: { leftAt: new Date(), isReady: false },
@@ -736,7 +748,7 @@ export class RoomsService {
             data: { status: ROOM_STATUS.CLOSED },
           });
           roomClosed = true;
-        } else if (room.hostId === userId) {
+        } else if (currentRoom.hostId === userId) {
           const nextHost = remaining[0];
           newHostId = nextHost.userId;
           hostChanged = true;
@@ -814,6 +826,7 @@ export class RoomsService {
 
     await prisma.$transaction(
       async (tx) => {
+        await this.lockRoomRow(tx, room.id);
         const updated = await tx.roomParticipant.updateMany({
           where: { id: participant.id, leftAt: null },
           data: { isReady: nextReadyState },
@@ -864,6 +877,23 @@ export class RoomsService {
 
     await prisma.$transaction(
       async (tx) => {
+        await this.lockRoomRow(tx, room.id);
+        const currentRoom = await tx.room.findUnique({
+          where: { id: room.id },
+          select: { mode: true, status: true, selectedGameId: true },
+        });
+        if (!currentRoom) throw new NotFoundError('Room not found');
+        if (!['WAITING', 'READY_TO_START'].includes(currentRoom.status)) {
+          throw new AppError('Game voting is only available in the room lobby.', 400);
+        }
+        const activeParticipant = await tx.roomParticipant.findUnique({
+          where: { roomId_userId: { roomId: room.id, userId } },
+          select: { leftAt: true },
+        });
+        if (!activeParticipant || activeParticipant.leftAt) {
+          throw new ForbiddenError('You are not an active participant in this room');
+        }
+
         await tx.gameVote.upsert({
           where: {
             roomId_userId: { roomId: room.id, userId },
@@ -881,7 +911,7 @@ export class RoomsService {
           counts[vote.gameId] = (counts[vote.gameId] || 0) + 1;
         }
 
-        let topGame = room.selectedGameId || gameId;
+        let topGame = currentRoom.selectedGameId || gameId;
         let maxVotes = 0;
         for (const [candidateGameId, count] of Object.entries(counts)) {
           if (count > maxVotes) {
@@ -1032,6 +1062,19 @@ export class RoomsService {
 
     await prisma.$transaction(
       async (tx) => {
+        await this.lockRoomRow(tx, room.id);
+        const currentRoom = await tx.room.findUnique({
+          where: { id: room.id },
+          select: { hostId: true, status: true },
+        });
+        if (!currentRoom) throw new NotFoundError('Room not found');
+        if (currentRoom.hostId !== currentHostId) {
+          throw new ForbiddenError('Only the current host can transfer host ownership');
+        }
+        if (!['WAITING', 'READY_TO_START'].includes(currentRoom.status)) {
+          throw new AppError('Host transfer is only available in the room lobby.', 400);
+        }
+
         await tx.roomParticipant.updateMany({
           where: { roomId: room.id, userId: currentHostId },
           data: { role: ROOM_PARTICIPANT_ROLES.PLAYER },
@@ -1092,6 +1135,19 @@ export class RoomsService {
 
     await prisma.$transaction(
       async (tx) => {
+        await this.lockRoomRow(tx, room.id);
+        const currentRoom = await tx.room.findUnique({
+          where: { id: room.id },
+          select: { hostId: true, status: true },
+        });
+        if (!currentRoom) throw new NotFoundError('Room not found');
+        if (currentRoom.hostId !== hostId) {
+          throw new ForbiddenError('Only the host can kick players');
+        }
+        if (!['WAITING', 'READY_TO_START'].includes(currentRoom.status)) {
+          throw new AppError('Players cannot be kicked while a game is in progress.', 400);
+        }
+
         const kickedAt = new Date();
         const removed = await tx.roomParticipant.updateMany({
           where: { id: targetParticipant.id, leftAt: null },
