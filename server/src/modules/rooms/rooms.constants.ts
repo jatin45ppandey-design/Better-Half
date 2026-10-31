@@ -53,9 +53,14 @@ export const GAME_MODE_ALLOWLIST: Record<string, RoomMode[]> = {
   'aloo-golf': ['couple', 'friend'],
 };
 
+export function normalizeGameId(gameId: string): string {
+  const normalized = gameId.trim().toLowerCase();
+  return normalized === 'original-card-game' ? 'uno-style' : normalized;
+}
+
 export function isGamePermittedForMode(gameId: string, mode: RoomMode | string): boolean {
   const normalizedMode = mode.toLowerCase() as RoomMode;
-  const normalizedGameId = gameId.toLowerCase();
+  const normalizedGameId = normalizeGameId(gameId);
   const allowedModes = GAME_MODE_ALLOWLIST[normalizedGameId];
   if (!allowedModes) return false;
   return allowedModes.includes(normalizedMode);

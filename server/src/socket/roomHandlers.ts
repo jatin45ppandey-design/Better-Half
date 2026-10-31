@@ -1,7 +1,9 @@
 import type { Server, Socket } from 'socket.io';
 import { roomsService } from '../modules/rooms/rooms.service.js';
+import { normalizeGameId } from '../modules/rooms/rooms.constants.js';
 import { gameSessionService } from '../modules/games/core/gameSession.service.js';
 import { presenceManager } from './presence.js';
+import { revokeRoomMembership } from './roomMembership.js';
 import { prisma } from '../config/prisma.js';
 import { safeSocketError } from './safeError.js';
 import {
@@ -97,6 +99,15 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
         roomSnapshot = targetRoom as RoomSnapshot;
       }
 
+      if (
+        roomSnapshot.status === 'CLOSED' ||
+        roomSnapshot.status === 'EXPIRED' ||
+        new Date(roomSnapshot.expiresAt).getTime() <= Date.now()
+      ) {
+        callback?.({ success: false, error: 'This room is closed or expired.' });
+        return;
+      }
+
       const roomChannel = `room:${roomSnapshot.id}`;
       await socket.join(roomChannel);
 
@@ -139,12 +150,12 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
     if (!payload) return;
 
     try {
-      const { roomId } = payload;
+      const { roomId: roomIdentifier } = payload;
+      const roomId = await roomsService.getCanonicalRoomId(roomIdentifier);
       const result = await roomsService.leaveRoom(roomId, userId);
 
       const roomChannel = `room:${roomId}`;
-      await socket.leave(roomChannel);
-      presenceManager.leaveRoom(roomId, userId);
+      const onlineUserIds = await revokeRoomMembership(io, roomId, userId, 'LEFT');
 
       if (result) {
         io.to(roomChannel).emit('room:player:left', {
@@ -157,7 +168,6 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
           io.to(roomChannel).emit('room:state', result.room);
         }
 
-        const onlineUserIds = presenceManager.getRoomOnlineUsers(roomId);
         io.to(roomChannel).emit('room:presence:update', { onlineUserIds });
       }
 
@@ -177,7 +187,8 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
     if (!payload) return;
 
     try {
-      const { roomId, isReady } = payload;
+      const { roomId: roomIdentifier, isReady } = payload;
+      const roomId = await roomsService.getCanonicalRoomId(roomIdentifier);
       const updatedRoom = await roomsService.toggleReady(roomId, userId, isReady);
       if (!updatedRoom) {
         callback?.({ success: false, error: 'Room not found' });
@@ -216,7 +227,8 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
     if (!payload) return;
 
     try {
-      const { roomId, gameId } = payload;
+      const { roomId: roomIdentifier, gameId } = payload;
+      const roomId = await roomsService.getCanonicalRoomId(roomIdentifier);
       const updatedRoom = await roomsService.voteGame(roomId, userId, gameId);
       if (!updatedRoom) {
         callback?.({ success: false, error: 'Room not found' });
@@ -226,7 +238,7 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
       const roomChannel = `room:${roomId}`;
       io.to(roomChannel).emit('room:game:voted', {
         userId,
-        gameId,
+        gameId: normalizeGameId(gameId),
         votes: updatedRoom.gameVotes,
       });
 
@@ -248,7 +260,8 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
     if (!payload) return;
 
     try {
-      const { roomId, gameId } = payload;
+      const { roomId: roomIdentifier, gameId } = payload;
+      const roomId = await roomsService.getCanonicalRoomId(roomIdentifier);
       const updatedRoom = await roomsService.selectGame(roomId, userId, gameId);
       if (!updatedRoom) {
         callback?.({ success: false, error: 'Room not found' });
@@ -257,7 +270,7 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
 
       const roomChannel = `room:${roomId}`;
       io.to(roomChannel).emit('room:game:selected', {
-        selectedGameId: gameId,
+        selectedGameId: normalizeGameId(gameId),
       });
 
       io.to(roomChannel).emit('room:state', updatedRoom);
@@ -278,7 +291,8 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
     if (!payload) return;
 
     try {
-      const { roomId } = payload;
+      const { roomId: roomIdentifier } = payload;
+      const roomId = await roomsService.getCanonicalRoomId(roomIdentifier);
       const check = await roomsService.canStartGame(roomId, userId);
 
       if (!check.canStart) {
@@ -298,6 +312,7 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
 
       // Initialize authoritative Phase 3 Game Session
       let sessionId = '';
+      let startedGameId = room.selectedGameId;
       try {
         const { session } = await gameSessionService.createSession(
           roomId,
@@ -305,6 +320,7 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
           userId
         );
         sessionId = session.sessionId;
+        startedGameId = session.gameId;
       } catch (err: any) {
         callback?.({ success: false, error: safeSocketError(err, 'Failed to create game session') });
         return;
@@ -313,12 +329,12 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
       const roomChannel = `room:${roomId}`;
       io.to(roomChannel).emit('game:session:started', {
         sessionId,
-        gameId: room.selectedGameId,
+        gameId: startedGameId,
         roomCode: room.code,
       });
 
       io.to(roomChannel).emit('room:start:launch', {
-        gameId: room.selectedGameId,
+        gameId: startedGameId,
         launchedAt: new Date().toISOString(),
       });
 
@@ -338,7 +354,8 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
     if (!payload) return;
 
     try {
-      const { roomId, newHostId } = payload;
+      const { roomId: roomIdentifier, newHostId } = payload;
+      const roomId = await roomsService.getCanonicalRoomId(roomIdentifier);
       const updatedRoom = await roomsService.transferHost(roomId, userId, newHostId);
       if (!updatedRoom) {
         callback?.({ success: false, error: 'Room not found' });
@@ -369,29 +386,17 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
     if (!payload) return;
 
     try {
-      const { roomId, targetUserId } = payload;
+      const { roomId: roomIdentifier, targetUserId } = payload;
+      const roomId = await roomsService.getCanonicalRoomId(roomIdentifier);
       const result = await roomsService.kickParticipant(roomId, userId, targetUserId);
 
       const roomChannel = `room:${roomId}`;
-
-      // Evict target user's active sockets from room channel and notify them
-      const targetSockets = presenceManager.getUserSockets(targetUserId);
-      for (const sId of targetSockets) {
-        const s = io.sockets.sockets.get(sId);
-        if (s) {
-          s.leave(roomChannel);
-          s.emit('room:player:kicked', { targetUserId, roomId });
-        }
-      }
+      const onlineUserIds = await revokeRoomMembership(io, roomId, targetUserId, 'KICKED');
 
       io.to(roomChannel).emit('room:player:kicked', { targetUserId, roomId });
       if (result.room) {
         io.to(roomChannel).emit('room:state', result.room);
       }
-
-      // Remove target user's presence
-      presenceManager.leaveRoom(roomId, targetUserId);
-      const onlineUserIds = presenceManager.getRoomOnlineUsers(roomId);
       io.to(roomChannel).emit('room:presence:update', { onlineUserIds });
 
       callback?.({ success: true });
@@ -410,7 +415,8 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
     if (!payload) return;
 
     try {
-      const { roomId, message } = payload;
+      const { roomId: roomIdentifier, message } = payload;
+      const roomId = await roomsService.getCanonicalRoomId(roomIdentifier);
       const createdMessage = await roomsService.postMessage(roomId, userId, message);
 
       const roomChannel = `room:${roomId}`;
@@ -425,46 +431,53 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
   /**
    * room:reaction:send
    */
-  socket.on('room:reaction:send', (rawPayload, callback) => {
+  socket.on('room:reaction:send', async (rawPayload, callback) => {
     if (checkSuspension(callback)) return;
 
     const payload = validateSocketPayload(roomReactionSendSchema, rawPayload, callback);
     if (!payload) return;
 
-    const { roomId, reaction } = payload;
+    const { roomId: roomIdentifier, reaction } = payload;
 
-    // Verify user is present in the room
-    const userRooms = presenceManager.getUserRooms(userId);
-    if (!userRooms.includes(roomId)) {
-      callback?.({ success: false, error: 'You are not present in this room' });
-      return;
+    try {
+      // Presence alone is not authorization: confirm active database membership
+      // and normalize the room code/ID before checking presence or broadcasting.
+      const roomId = await roomsService.getActiveRoomIdForUser(roomIdentifier, userId);
+      const userRooms = presenceManager.getUserRooms(userId);
+      if (!userRooms.includes(roomId)) {
+        callback?.({ success: false, error: 'You are not present in this room' });
+        return;
+      }
+
+      const now = Date.now();
+      for (const [limitedUserId, limit] of reactionRateLimits.entries()) {
+        if (now > limit.resetAt) reactionRateLimits.delete(limitedUserId);
+      }
+
+      const limit = reactionRateLimits.get(userId) || { count: 0, resetAt: now + 3000 };
+      if (now > limit.resetAt) {
+        limit.count = 1;
+        limit.resetAt = now + 3000;
+      } else {
+        limit.count++;
+      }
+      reactionRateLimits.set(userId, limit);
+
+      if (limit.count > 10) {
+        callback?.({ success: false, error: 'Too many reactions sent. Please slow down.' });
+        return;
+      }
+
+      io.to(`room:${roomId}`).emit('room:reaction:new', {
+        senderId: userId,
+        reaction,
+        timestamp: new Date().toISOString(),
+      });
+
+      callback?.({ success: true });
+    } catch (err: any) {
+      callback?.({ success: false, error: safeSocketError(err, 'Failed to send reaction') });
     }
-
-    const now = Date.now();
-
-    // Check rate limit: 10 reactions per 3 seconds
-    const limit = reactionRateLimits.get(userId) || { count: 0, resetAt: now + 3000 };
-    if (now > limit.resetAt) {
-      limit.count = 1;
-      limit.resetAt = now + 3000;
-    } else {
-      limit.count++;
-    }
-    reactionRateLimits.set(userId, limit);
-
-    if (limit.count > 10) {
-      callback?.({ success: false, error: 'Too many reactions sent. Please slow down.' });
-      return;
-    }
-
-    const roomChannel = `room:${roomId}`;
-    io.to(roomChannel).emit('room:reaction:new', {
-      senderId: userId,
-      reaction,
-      timestamp: new Date().toISOString(),
-    });
-
-    callback?.({ success: true });
   });
 
   /**

@@ -249,10 +249,13 @@ export class BlindRankingEngine
         privateStates[p.userId] = { board: [null, null, null, null, null] };
       });
 
+      const isCompleted = state.round >= BLIND_RANKING_CATEGORIES.length;
       return {
         success: true,
         newState: state,
         newPrivateStates: privateStates,
+        isCompleted,
+        winnerUserId: null,
       };
     }
 

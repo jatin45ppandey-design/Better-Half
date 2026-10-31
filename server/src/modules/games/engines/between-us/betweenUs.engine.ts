@@ -1,5 +1,6 @@
 import {
   BETWEEN_US_QUESTIONS,
+  BETWEEN_US_CATEGORIES,
   type BetweenUsQuestion,
 } from '../../../../data/questions/betweenUsQuestions.js';
 import type {
@@ -93,8 +94,11 @@ export class BetweenUsEngine
       if (context.state.submittedUserIds.includes(actorUserId)) {
         return { valid: false, error: 'You have already submitted an answer.' };
       }
-      if (!action.answer || action.answer.trim().length === 0) {
+      if (typeof action.answer !== 'string' || action.answer.trim().length === 0) {
         return { valid: false, error: 'Answer cannot be empty.' };
+      }
+      if (action.answer.trim().length > 1000) {
+        return { valid: false, error: 'Answer cannot exceed 1000 characters.' };
       }
       return { valid: true };
     }
@@ -104,6 +108,16 @@ export class BetweenUsEngine
     }
 
     if (action.type === 'SET_SETTINGS') {
+      if (
+        action.category !== undefined &&
+        action.category !== 'All' &&
+        !BETWEEN_US_CATEGORIES.includes(action.category as (typeof BETWEEN_US_CATEGORIES)[number])
+      ) {
+        return { valid: false, error: 'Invalid BETWEEN US category.' };
+      }
+      if (action.intensity !== undefined && ![1, 2, 3, 4, 5].includes(action.intensity)) {
+        return { valid: false, error: 'Intensity must be between 1 and 5.' };
+      }
       if (action.intensity === 5) {
         // Both participants must have consented!
         const consented = context.state.adultConsentUserIds;
@@ -125,6 +139,13 @@ export class BetweenUsEngine
       return { valid: true };
     }
 
+    if (action.type === 'FINISH_SESSION') {
+      if (context.state.phase !== 'REVEAL' || context.state.questionsAnsweredCount < 1) {
+        return { valid: false, error: 'Complete at least one shared prompt before wrapping up.' };
+      }
+      return { valid: true };
+    }
+
     return { valid: false, error: 'Invalid action type.' };
   }
 
@@ -142,6 +163,21 @@ export class BetweenUsEngine
       state.adultConsentUserIds = Array.from(
         new Set([...state.adultConsentUserIds, actorUserId])
       );
+
+      // Level 5 is enabled only after every active participant explicitly opts in.
+      const everyoneConsented = participants.every((participant) =>
+        state.adultConsentUserIds.includes(participant.userId)
+      );
+      if (everyoneConsented) {
+        state.intensity = 5;
+        const pool = this.getEligibleQuestions(
+          state.category,
+          state.intensity,
+          (state as any).questionsPool
+        );
+        state.currentQuestion = pool[state.questionIndex % pool.length];
+      }
+
       return {
         success: true,
         newState: state,
@@ -164,7 +200,7 @@ export class BetweenUsEngine
     }
 
     if (action.type === 'SUBMIT_ANSWER') {
-      // Store in volatile memory only
+      // Persist the pending answer in the participant-private session state.
       privateStates[actorUserId] = { pendingAnswer: action.answer.trim() };
       const submitted = Array.from(new Set([...state.submittedUserIds, actorUserId]));
       state.submittedUserIds = submitted;
@@ -176,7 +212,7 @@ export class BetweenUsEngine
         const revealed: Record<string, string> = {};
         participants.forEach((p) => {
           revealed[p.userId] = privateStates[p.userId]?.pendingAnswer || '';
-          // Wipe volatile answer buffer immediately after copying to single ephemeral reveal
+          // Clear the private buffer after copying answers into the shared reveal.
           privateStates[p.userId] = { pendingAnswer: null };
         });
 
@@ -227,6 +263,23 @@ export class BetweenUsEngine
         success: true,
         newState: state,
         newPrivateStates: privateStates,
+      };
+    }
+
+    if (action.type === 'FINISH_SESSION') {
+      return {
+        success: true,
+        newState: state,
+        newPrivateStates: privateStates,
+        scores,
+        isCompleted: true,
+        winnerUserId: null,
+        events: [
+          {
+            type: 'betweenUs:sessionCompleted',
+            payload: { questionsAnsweredCount: state.questionsAnsweredCount },
+          },
+        ],
       };
     }
 

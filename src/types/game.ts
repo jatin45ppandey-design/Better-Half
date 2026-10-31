@@ -98,5 +98,7 @@ export interface RoomSession {
   gameVotes: Record<string, string[]>; // gameId -> participantId[]
   chatMessages: ChatMessage[];
   status: 'lobby' | 'playing' | 'results';
+  activeSessionId?: string | null;
+  activeSessionStatus?: string | null;
   createdAt: string;
 }

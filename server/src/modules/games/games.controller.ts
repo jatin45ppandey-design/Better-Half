@@ -3,6 +3,7 @@ import { gameSessionService } from './core/gameSession.service.js';
 import { gameStateService } from './core/gameState.service.js';
 import { adminService } from '../admin/admin.service.js';
 import { AppError } from '../../utils/errors.js';
+import { getRealtimeServer } from '../../socket/realtime.js';
 
 export const gamesController = {
   async getCatalog(_req: Request, res: Response) {
@@ -33,16 +34,32 @@ export const gamesController = {
         return res.status(401).json({ error: 'Unauthorized' });
       }
 
-      const { session, roomCode } = await gameSessionService.createSession(
+      const { session, roomCode, created } = await gameSessionService.createSession(
         roomId,
         gameId,
         userId
       );
 
+      // Keep REST fallback behavior identical to the Socket.IO start path:
+      // every connected room participant receives the same active session ID.
+      const realtimeServer = getRealtimeServer();
+      if (realtimeServer) {
+        const roomChannel = `room:${session.roomId}`;
+        realtimeServer.to(roomChannel).emit('game:session:started', {
+          sessionId: session.sessionId,
+          gameId: session.gameId,
+          roomCode,
+        });
+        realtimeServer.to(roomChannel).emit('room:start:launch', {
+          gameId: session.gameId,
+          launchedAt: new Date().toISOString(),
+        });
+      }
+
       const publicState = gameStateService.getPublicProjection(session.sessionId);
       const userPrivateState = gameStateService.getPrivateProjection(session.sessionId, userId);
 
-      return res.status(201).json({
+      return res.status(created ? 201 : 200).json({
         sessionId: session.sessionId,
         roomCode,
         gameId: session.gameId,

@@ -14,42 +14,71 @@ import { Input } from '../../../components/ui/Input';
 import { PassDeviceScreen } from '../../../components/game-ui/PassDeviceScreen';
 import type { PlayerScoreSummary } from '../../../components/game-ui/GameResultsModal';
 
+type TruthDareHistoryEntry = { player: string; type: string; text: string };
+
 interface TruthOrDareGameProps {
   players: { id: string; name: string; avatarInitials: string; avatarColor: string }[];
   onFinishMatch: (results: { winnerName?: string; playerScores: PlayerScoreSummary[] }) => void;
   onUpdateTurn?: (playerName: string, roundInfo: string) => void;
+  sessionState?: any;
+  onSendAction?: (action: any) => Promise<{ success: boolean; error?: string }>;
+  currentUserId?: string;
 }
 
 export const TruthOrDareGame: React.FC<TruthOrDareGameProps> = ({
   players,
   onFinishMatch,
   onUpdateTurn,
+  sessionState,
+  onSendAction,
+  currentUserId,
 }) => {
   const p1 = players[0] || { id: 'p1', name: 'Alex', avatarInitials: 'AR', avatarColor: 'bg-[#9670E8]' };
   const p2 = players[1] || { id: 'p2', name: 'Sam', avatarInitials: 'SP', avatarColor: 'bg-[#D94C65]' };
 
   const [activePlayerIndex, setActivePlayerIndex] = useState<0 | 1>(0);
-  const [selectedType, setSelectedType] = useState<'truth' | 'dare' | null>(null);
-  const [currentPrompt, setCurrentPrompt] = useState<TruthOrDareItem | null>(null);
+  const [localSelectedType, setSelectedType] = useState<'truth' | 'dare' | null>(null);
+  const [localCurrentPrompt, setCurrentPrompt] = useState<TruthOrDareItem | null>(null);
   const [intensity, setIntensity] = useState<'Soft' | 'Spicy' | 'Wild'>('Spicy');
   const [category, setCategory] = useState<'Romantic' | 'Funny' | 'Personal' | 'Challenging'>('Romantic');
-  const [skipsUsed, setSkipsUsed] = useState<{ [playerId: string]: number }>({ [p1.id]: 0, [p2.id]: 0 });
-  const [completedCount, setCompletedCount] = useState<{ [playerId: string]: number }>({ [p1.id]: 0, [p2.id]: 0 });
-  const [history, setHistory] = useState<{ player: string; type: string; text: string }[]>([]);
+  const [localSkipsUsed, setSkipsUsed] = useState<{ [playerId: string]: number }>({ [p1.id]: 0, [p2.id]: 0 });
+  const [localCompletedCount, setCompletedCount] = useState<{ [playerId: string]: number }>({ [p1.id]: 0, [p2.id]: 0 });
+  const [localHistory, setHistory] = useState<TruthDareHistoryEntry[]>([]);
   const [showCustomModal, setShowCustomModal] = useState(false);
   const [customText, setCustomText] = useState('');
   const [showPassDevice, setShowPassDevice] = useState(false);
 
-  const activePlayer = activePlayerIndex === 0 ? p1 : p2;
+  const isMultiplayer = Boolean(sessionState && onSendAction);
+  const selectedType = isMultiplayer ? sessionState.selectedType : localSelectedType;
+  const currentPrompt: TruthOrDareItem | null = isMultiplayer ? sessionState.currentPrompt : localCurrentPrompt;
+  const skipsUsed = isMultiplayer ? sessionState.skipsUsed || {} : localSkipsUsed;
+  const completedCount = isMultiplayer ? sessionState.completedCount || {} : localCompletedCount;
+  const history: TruthDareHistoryEntry[] = isMultiplayer
+    ? (sessionState.history || []).map((entry: any): TruthDareHistoryEntry => ({
+        player: entry.userName || players.find((player) => player.id === entry.userId)?.name || 'Player',
+        type: entry.type,
+        text: entry.text,
+      }))
+    : localHistory;
+  const activePlayer = isMultiplayer
+    ? players.find((player) => player.id === sessionState.currentTurnUserId) || p1
+    : activePlayerIndex === 0 ? p1 : p2;
+  const isMyTurn = !isMultiplayer || sessionState.currentTurnUserId === currentUserId;
   const targetSkips = skipsUsed[activePlayer.id] || 0;
 
   useEffect(() => {
     if (onUpdateTurn) {
-      onUpdateTurn(activePlayer.name, `Turn ${history.length + 1} • Truth or Dare`);
+      onUpdateTurn(activePlayer.name, `Turn ${(sessionState?.totalTurns ?? history.length) + 1} • Truth or Dare`);
     }
-  }, [activePlayer, history.length, onUpdateTurn]);
+  }, [activePlayer.name, history.length, onUpdateTurn, sessionState?.totalTurns]);
 
   const pickRandomPrompt = (type: 'truth' | 'dare') => {
+    if (isMultiplayer) {
+      if (!isMyTurn) return;
+      void onSendAction?.({ type: 'CHOOSE_TYPE', promptType: type, category, intensity });
+      return;
+    }
+
     const pool = TRUTH_OR_DARE_ITEMS.filter(
       (item) => item.type === type && (item.category === category || item.intensity === intensity)
     );
@@ -62,6 +91,11 @@ export const TruthOrDareGame: React.FC<TruthOrDareGameProps> = ({
   };
 
   const handleComplete = () => {
+    if (isMultiplayer) {
+      if (isMyTurn) void onSendAction?.({ type: 'COMPLETE' });
+      return;
+    }
+
     if (currentPrompt) {
       setHistory((prev) => [
         { player: activePlayer.name, type: currentPrompt.type.toUpperCase(), text: currentPrompt.text },
@@ -95,7 +129,11 @@ export const TruthOrDareGame: React.FC<TruthOrDareGameProps> = ({
   };
 
   const handleSkip = () => {
-    if (targetSkips >= 2) return;
+    if (targetSkips >= 2 || !isMyTurn) return;
+    if (isMultiplayer) {
+      void onSendAction?.({ type: 'SKIP' });
+      return;
+    }
     setSkipsUsed((prev) => ({ ...prev, [activePlayer.id]: targetSkips + 1 }));
     if (selectedType) {
       pickRandomPrompt(selectedType);
@@ -104,6 +142,7 @@ export const TruthOrDareGame: React.FC<TruthOrDareGameProps> = ({
 
   const handleAddCustom = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isMultiplayer) return;
     if (!customText.trim() || !selectedType) return;
 
     setCurrentPrompt({
@@ -117,7 +156,7 @@ export const TruthOrDareGame: React.FC<TruthOrDareGameProps> = ({
     setShowCustomModal(false);
   };
 
-  if (showPassDevice) {
+  if (showPassDevice && !isMultiplayer) {
     return (
       <PassDeviceScreen
         targetPlayerName={activePlayer.name}
@@ -178,6 +217,7 @@ export const TruthOrDareGame: React.FC<TruthOrDareGameProps> = ({
                   key={cat}
                   type="button"
                   onClick={() => setCategory(cat)}
+                  disabled={isMultiplayer && !isMyTurn}
                   className={`px-3 py-1 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
                     category === cat
                       ? 'bg-[#593B91] text-white shadow-xs'
@@ -195,6 +235,7 @@ export const TruthOrDareGame: React.FC<TruthOrDareGameProps> = ({
                   key={lvl}
                   type="button"
                   onClick={() => setIntensity(lvl)}
+                  disabled={isMultiplayer && !isMyTurn}
                   className={`px-2.5 py-1 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
                     intensity === lvl
                       ? 'bg-[#D94C65] text-white shadow-xs'
@@ -212,6 +253,7 @@ export const TruthOrDareGame: React.FC<TruthOrDareGameProps> = ({
             <button
               type="button"
               onClick={() => pickRandomPrompt('truth')}
+              disabled={isMultiplayer && !isMyTurn}
               className="p-6 rounded-3xl border-2 border-[#9670E8] bg-gradient-to-br from-[#F8F4FF] to-white hover:shadow-lg hover:shadow-[#9670E8]/10 hover:-translate-y-1 transition-all cursor-pointer flex flex-col items-center gap-3 text-center group"
             >
               <div className="w-14 h-14 rounded-2xl bg-[#F1EAFF] text-[#593B91] flex items-center justify-center group-hover:scale-105 transition-transform">
@@ -226,6 +268,7 @@ export const TruthOrDareGame: React.FC<TruthOrDareGameProps> = ({
             <button
               type="button"
               onClick={() => pickRandomPrompt('dare')}
+              disabled={isMultiplayer && !isMyTurn}
               className="p-6 rounded-3xl border-2 border-[#D94C65] bg-gradient-to-br from-[#FFF5F8] to-white hover:shadow-lg hover:shadow-[#D94C65]/10 hover:-translate-y-1 transition-all cursor-pointer flex flex-col items-center gap-3 text-center group"
             >
               <div className="w-14 h-14 rounded-2xl bg-[#FDF2F8] text-[#9D174D] flex items-center justify-center group-hover:scale-105 transition-transform">
@@ -251,6 +294,7 @@ export const TruthOrDareGame: React.FC<TruthOrDareGameProps> = ({
                 variant="ghost"
                 size="sm"
                 onClick={() => setShowCustomModal(true)}
+                disabled={isMultiplayer}
                 leftIcon={<Plus className="w-3.5 h-3.5" />}
                 className="text-xs"
               >
@@ -260,7 +304,7 @@ export const TruthOrDareGame: React.FC<TruthOrDareGameProps> = ({
                 variant="outline"
                 size="sm"
                 onClick={handleSkip}
-                disabled={targetSkips >= 2}
+                disabled={targetSkips >= 2 || (isMultiplayer && !isMyTurn)}
                 leftIcon={<RefreshCw className="w-3.5 h-3.5" />}
                 className="text-xs"
               >
@@ -285,6 +329,7 @@ export const TruthOrDareGame: React.FC<TruthOrDareGameProps> = ({
               variant="outline"
               size="sm"
               onClick={() => setSelectedType(null)}
+              disabled={isMultiplayer}
             >
               Back to Choice
             </Button>
@@ -292,6 +337,7 @@ export const TruthOrDareGame: React.FC<TruthOrDareGameProps> = ({
               variant="primary"
               size="md"
               onClick={handleComplete}
+              disabled={isMultiplayer && !isMyTurn}
               rightIcon={<Check className="w-4 h-4" />}
               className="font-bold shadow-md shadow-[#593B91]/15"
             >

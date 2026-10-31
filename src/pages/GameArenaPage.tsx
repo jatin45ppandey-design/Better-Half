@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useRoom } from '../context/RoomContext';
 import { useAuth } from '../context/AuthContext';
@@ -31,6 +31,7 @@ interface GameArenaContentProps {
   roomCode?: string;
   gameKey: number;
   onRematchLocal: () => void;
+  onReplaceSession: (sessionId: string) => void;
   onReturnToLobby: () => void;
 }
 
@@ -39,6 +40,7 @@ const GameArenaContent: React.FC<GameArenaContentProps> = ({
   roomCode,
   gameKey,
   onRematchLocal,
+  onReplaceSession,
   onReturnToLobby,
 }) => {
   const session = useGameSession();
@@ -52,13 +54,25 @@ const GameArenaContent: React.FC<GameArenaContentProps> = ({
     winnerName?: string;
     playerScores: PlayerScoreSummary[];
   } | null>(null);
+  const [rematchError, setRematchError] = useState<string | null>(null);
 
   // Authoritative pause synchronization
   const isPaused = session ? session.isPaused : localPaused;
 
+  // Both participants switch to the new authoritative session when the host
+  // successfully creates a rematch on the previous session channel. The guard
+  // makes this transition idempotent even if a parent callback is recreated.
+  const handledReplacementSessionRef = useRef<string | null>(null);
+  useEffect(() => {
+    const nextSessionId = session?.replacementSessionId;
+    if (!nextSessionId || handledReplacementSessionRef.current === nextSessionId) return;
+    handledReplacementSessionRef.current = nextSessionId;
+    onReplaceSession(nextSessionId);
+  }, [session?.replacementSessionId, onReplaceSession]);
+
   // Authoritative completion listener
   useEffect(() => {
-    if (session?.winnerUserId !== undefined && session.winnerUserId !== null && !showResults) {
+    if (session?.sessionStatus === 'COMPLETED' && !showResults) {
       const winner = session.participants.find((p) => p.userId === session.winnerUserId);
       const playerScores: PlayerScoreSummary[] = session.participants.map((p) => ({
         playerId: p.userId,
@@ -70,14 +84,43 @@ const GameArenaContent: React.FC<GameArenaContentProps> = ({
       }));
 
       setMatchResults({
-        winnerName: winner ? winner.name : 'Tie / Draw',
+        winnerName: winner ? winner.name : 'Tie / Cooperative Result',
         playerScores,
       });
       setShowResults(true);
     }
-  }, [session?.winnerUserId, session?.participants, session?.scores, showResults]);
+  }, [session?.sessionStatus, session?.winnerUserId, session?.participants, session?.scores, showResults]);
 
   if (!game) return null;
+
+  // A room-backed arena must never silently fall back to the local pass-and-play
+  // implementation while its authoritative session is loading or unavailable.
+  if (session?.isLoading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6">
+        <Loader2 className="w-10 h-10 text-[#9670E8] animate-spin mb-4" />
+        <h2 className="text-lg font-bold text-[#211A2D]">Connecting to Multiplayer Session</h2>
+        <p className="text-xs text-[#756D82] mt-1">Loading the latest server-authoritative game state</p>
+      </div>
+    );
+  }
+
+  if (session?.error || (!session && roomCode)) {
+    return (
+      <div className="min-h-screen bg-[#FCFAFF] flex items-center justify-center p-4">
+        <div className="max-w-md rounded-3xl border border-[#EAE3F3] bg-white p-8 text-center shadow-xl">
+          <AlertCircle className="mx-auto h-10 w-10 text-amber-500" />
+          <h2 className="mt-4 text-xl font-bold text-[#211A2D]">Multiplayer Session Unavailable</h2>
+          <p className="mt-2 text-sm text-[#756D82]">
+            {session?.error || 'This room does not have an active game session connected to this arena.'}
+          </p>
+          <Button variant="primary" onClick={onReturnToLobby} className="mt-5">
+            Return to Room Lobby
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   // Resolve participants from session or current room
   const participants =
@@ -115,14 +158,19 @@ const GameArenaContent: React.FC<GameArenaContentProps> = ({
     setShowResults(true);
   };
 
-  const handleRematch = () => {
-    setShowResults(false);
-    setMatchResults(null);
+  const handleRematch = async () => {
+    setRematchError(null);
     if (session) {
-      session.requestRematch();
+      const result = await session.requestRematch();
+      if (!result.success) {
+        setRematchError(result.error || 'Unable to start rematch.');
+        return;
+      }
     } else {
       onRematchLocal();
     }
+    setShowResults(false);
+    setMatchResults(null);
   };
 
   const handleTogglePause = () => {
@@ -192,6 +240,12 @@ const GameArenaContent: React.FC<GameArenaContentProps> = ({
         {renderGameComponent()}
       </main>
 
+      {rematchError && (
+        <div role="alert" className="fixed bottom-4 left-1/2 z-50 w-[min(92vw,420px)] -translate-x-1/2 rounded-xl border border-rose-200 bg-white px-4 py-3 text-sm text-rose-700 shadow-lg">
+          {rematchError}
+        </div>
+      )}
+
       <GameInstructionsModal
         isOpen={showInstructions}
         onClose={() => setShowInstructions(false)}
@@ -224,6 +278,7 @@ export const GameArenaPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const { currentRoom } = useRoom();
+  const { user } = useAuth();
 
   const game = gameId ? getGameById(gameId) : undefined;
   const roomCode = searchParams.get('room') || currentRoom?.code;
@@ -231,34 +286,69 @@ export const GameArenaPage: React.FC = () => {
 
   const [activeSessionId, setActiveSessionId] = useState<string | null>(urlSessionId);
   const [isInitializing, setIsInitializing] = useState<boolean>(!urlSessionId && !!roomCode);
+  const [initializationError, setInitializationError] = useState<string | null>(null);
   const [gameKey, setGameKey] = useState(0);
 
-  // Auto-initialize session if roomCode is provided but session query param is missing
+  // Prefer the room's existing active session. Only the host may create a new
+  // session, so a guest opening a URL without a session ID cannot accidentally
+  // attempt to create a second session.
   useEffect(() => {
-    if (!activeSessionId && roomCode && currentRoom && game) {
-      let mounted = true;
+    if (activeSessionId || !roomCode || !game) return;
+
+    let mounted = true;
+
+    const initializeSession = async () => {
       setIsInitializing(true);
+      setInitializationError(null);
 
-      const rId = currentRoom.id || currentRoom.code;
-      api.games
-        .start(rId, game.id)
-        .then((res) => {
-          if (!mounted) return;
-          setActiveSessionId(res.sessionId);
-          setSearchParams({ room: roomCode, session: res.sessionId });
-          setIsInitializing(false);
-        })
-        .catch((err) => {
-          if (!mounted) return;
-          console.warn('[GameArena] Auto-start returned error:', err.message);
-          setIsInitializing(false);
-        });
+      try {
+        let roomSnapshot: any =
+          currentRoom?.code === roomCode ? currentRoom : null;
 
-      return () => {
-        mounted = false;
-      };
-    }
-  }, [activeSessionId, roomCode, currentRoom, game, setSearchParams]);
+        if (!roomSnapshot?.activeSessionId) {
+          const latestSnapshot = await api.rooms.getByCode(roomCode);
+          roomSnapshot = latestSnapshot.room || latestSnapshot;
+        }
+
+        if (!mounted) return;
+
+        const existingSessionId = roomSnapshot?.activeSessionId;
+        if (existingSessionId) {
+          setActiveSessionId(existingSessionId);
+          setSearchParams({ room: roomCode, session: existingSessionId });
+          setIsInitializing(false);
+          return;
+        }
+
+        if (!roomSnapshot?.id || roomSnapshot.hostId !== user?.id) {
+          throw new Error('The room host has not started this game session yet.');
+        }
+
+        if (roomSnapshot.selectedGameId && roomSnapshot.selectedGameId !== game.id) {
+          throw new Error('This room has selected a different game. Return to the lobby.');
+        }
+
+        const response = await api.games.start(roomSnapshot.id, game.id);
+        if (!mounted) return;
+
+        setActiveSessionId(response.sessionId);
+        setSearchParams({ room: roomCode, session: response.sessionId });
+        setIsInitializing(false);
+      } catch (err: any) {
+        if (!mounted) return;
+        const message = err?.message || 'Unable to initialize the multiplayer session.';
+        console.warn('[GameArena] Session initialization failed:', message);
+        setInitializationError(message);
+        setIsInitializing(false);
+      }
+    };
+
+    void initializeSession();
+
+    return () => {
+      mounted = false;
+    };
+  }, [activeSessionId, roomCode, currentRoom, game, user?.id, setSearchParams]);
 
   const handleReturnToLobby = () => {
     if (roomCode) {
@@ -267,6 +357,39 @@ export const GameArenaPage: React.FC = () => {
       navigate('/dashboard');
     }
   };
+
+  const handleReplaceSession = useCallback((nextSessionId: string) => {
+    setActiveSessionId((current) => current === nextSessionId ? current : nextSessionId);
+    setSearchParams((previous) => {
+      if (
+        previous.get('session') === nextSessionId &&
+        previous.get('room') === (roomCode || '')
+      ) {
+        return previous;
+      }
+      const next = new URLSearchParams(previous);
+      if (roomCode) next.set('room', roomCode);
+      else next.delete('room');
+      next.set('session', nextSessionId);
+      return next;
+    });
+    setGameKey((key) => key + 1);
+  }, [roomCode, setSearchParams]);
+
+  if (initializationError) {
+    return (
+      <div className="min-h-screen bg-[#FCFAFF] flex items-center justify-center p-4">
+        <div className="max-w-md rounded-3xl border border-[#EAE3F3] bg-white p-8 text-center shadow-xl">
+          <AlertCircle className="mx-auto h-10 w-10 text-amber-500" />
+          <h2 className="mt-4 text-xl font-bold text-[#211A2D]">Unable to open multiplayer session</h2>
+          <p className="mt-2 text-sm text-[#756D82]">{initializationError}</p>
+          <Button variant="primary" onClick={handleReturnToLobby} className="mt-5">
+            Return to Room Lobby
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   if (!game) {
     return (
@@ -341,12 +464,13 @@ export const GameArenaPage: React.FC = () => {
 
   if (activeSessionId) {
     return (
-      <GameSessionProvider sessionId={activeSessionId} initialGameId={game.id}>
+      <GameSessionProvider key={activeSessionId} sessionId={activeSessionId} initialGameId={game.id}>
         <GameArenaContent
           game={game}
           roomCode={roomCode}
           gameKey={gameKey}
           onRematchLocal={() => setGameKey((k) => k + 1)}
+          onReplaceSession={handleReplaceSession}
           onReturnToLobby={handleReturnToLobby}
         />
       </GameSessionProvider>
@@ -359,6 +483,7 @@ export const GameArenaPage: React.FC = () => {
       roomCode={roomCode}
       gameKey={gameKey}
       onRematchLocal={() => setGameKey((k) => k + 1)}
+      onReplaceSession={() => undefined}
       onReturnToLobby={handleReturnToLobby}
     />
   );

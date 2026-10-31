@@ -74,7 +74,7 @@ describe('PlaySpace Phase 4.1 — Production Correctness & Reliability Remediati
   // =========================================================================
   describe('Durable Game-Session Creation & Rematch', () => {
     it('1. Session creation fails when DB persistence fails', async () => {
-      vi.spyOn(prisma.room, 'findUnique').mockResolvedValue({
+      vi.spyOn(prisma.room, 'findFirst').mockResolvedValue({
         id: 'room-fail-1',
         code: 'FAIL01',
         hostId: userHost.id,
@@ -106,7 +106,7 @@ describe('PlaySpace Phase 4.1 — Production Correctness & Reliability Remediati
     it('2. No memory-only session is exposed after failed DB creation', async () => {
       const activeSessionsCountBefore = Object.keys((gameStateService as any).sessions || {}).length;
 
-      vi.spyOn(prisma.room, 'findUnique').mockResolvedValue({
+      vi.spyOn(prisma.room, 'findFirst').mockResolvedValue({
         id: 'room-fail-2',
         code: 'FAIL02',
         hostId: userHost.id,
@@ -156,13 +156,41 @@ describe('PlaySpace Phase 4.1 — Production Correctness & Reliability Remediati
         code: 'RMTCH1',
         hostId: userHost.id,
         mode: 'COUPLE',
-        status: 'READY_TO_START',
+        status: 'COMPLETED',
         participants: [
           { userId: userHost.id, leftAt: null, isReady: true, user: userHost },
           { userId: userGuest.id, leftAt: null, isReady: true, user: userGuest },
         ],
       } as any);
-      const txSpy = vi.spyOn(prisma, '$transaction').mockResolvedValueOnce([{}, {}] as any);
+      const txClient = {
+        $queryRaw: vi.fn().mockResolvedValue([]),
+        room: {
+          findUnique: vi.fn().mockResolvedValue({
+            id: 'room-rematch-1',
+            code: 'RMTCH1',
+            hostId: userHost.id,
+            mode: 'COUPLE',
+            status: 'COMPLETED',
+            expiresAt: new Date(Date.now() + 3600000),
+            participants: [
+              { userId: userHost.id, leftAt: null, isReady: true, user: userHost },
+              { userId: userGuest.id, leftAt: null, isReady: true, user: userGuest },
+            ],
+          }),
+          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        },
+        gameSession: {
+          findUnique: vi.fn().mockResolvedValue({
+            status: 'COMPLETED',
+            roomId: 'room-rematch-1',
+            gameId: 'basketball-rivalry',
+          }),
+          findFirst: vi.fn().mockResolvedValue(null),
+          create: vi.fn().mockResolvedValue({ id: 'rematch-new-session' }),
+        },
+        gameConfiguration: { findUnique: vi.fn().mockResolvedValue(null) },
+      };
+      const txSpy = vi.spyOn(prisma, '$transaction').mockImplementation(async (callback: any) => callback(txClient));
 
       const rematch = await gameSessionService.rematchSession('sess-prev-1', userHost.id);
 
@@ -216,7 +244,7 @@ describe('PlaySpace Phase 4.1 — Production Correctness & Reliability Remediati
           sessionId,
           actionId: 'act-fail-1',
           expectedVersion: 1,
-          action: { type: 'SHOOT', vx: 10, vy: 15 },
+          action: { type: 'SHOOT', angle: 55, power: 60 },
         },
         userHost.id
       );
@@ -294,10 +322,10 @@ describe('PlaySpace Phase 4.1 — Production Correctness & Reliability Remediati
       );
 
       expect(res.success).toBe(true);
-      // Verify that privateState was passed as undefined (never written to PostgreSQL)
-      capturedParticipantUpdates.forEach((updateCall) => {
-        expect(updateCall.data.privateState).toBeUndefined();
-      });
+      // Pending answer state is durable in per-player private columns, never in
+      // the public session snapshot or the sanitized action audit metadata.
+      expect(capturedParticipantUpdates).toHaveLength(2);
+      expect(capturedParticipantUpdates.every((updateCall) => updateCall.data.privateState !== undefined)).toBe(true);
     });
 
     it('6. Duplicate action IDs cannot double-apply', async () => {
@@ -334,7 +362,7 @@ describe('PlaySpace Phase 4.1 — Production Correctness & Reliability Remediati
           sessionId,
           actionId: 'act-already-done',
           expectedVersion: 3,
-          action: { type: 'SHOOT', vx: 5, vy: 5 },
+          action: { type: 'SHOOT', angle: 55, power: 60 },
         },
         userHost.id
       );
@@ -384,7 +412,7 @@ describe('PlaySpace Phase 4.1 — Production Correctness & Reliability Remediati
           sessionId,
           actionId: 'act-race-1',
           expectedVersion: 2,
-          action: { type: 'SHOOT', vx: 10, vy: 10 },
+          action: { type: 'SHOOT', angle: 55, power: 70 },
         },
         userHost.id
       );
@@ -660,7 +688,7 @@ describe('PlaySpace Phase 4.1 — Production Correctness & Reliability Remediati
     });
 
     it('14. Disabled games cannot start through direct API calls', async () => {
-      vi.spyOn(prisma.room, 'findUnique').mockResolvedValue({
+      vi.spyOn(prisma.room, 'findFirst').mockResolvedValue({
         id: 'room-dis-1',
         code: 'DIS001',
         hostId: userHost.id,
@@ -685,7 +713,7 @@ describe('PlaySpace Phase 4.1 — Production Correctness & Reliability Remediati
     });
 
     it('15. Couple-only restrictions cannot be bypassed in Friend Mode', async () => {
-      vi.spyOn(prisma.room, 'findUnique').mockResolvedValue({
+      vi.spyOn(prisma.room, 'findFirst').mockResolvedValue({
         id: 'room-co-1',
         code: 'FRND99',
         hostId: userHost.id,

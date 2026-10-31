@@ -1,4 +1,5 @@
 import type { GameActionEnvelope, ActionResult, GameEngineContext } from './gameEngine.types.js';
+import { Prisma } from '@prisma/client';
 import { gameSessionService } from './gameSession.service.js';
 import { gameStateService } from './gameState.service.js';
 import { gameEngineFactory } from './gameEngineFactory.js';
@@ -20,8 +21,8 @@ export interface ActionExecutionResult {
 function sanitizeActionMetadata(action: any, gameId: string): any {
   if (!action || typeof action !== 'object') return null;
 
-  // Strict privacy: never persist BETWEEN US answers or sensitive text answers
-  if (gameId === 'between-us' || action.type === 'SUBMIT_ANSWER') {
+  // Strict privacy: never persist submitted private answer text in action history.
+  if (gameId === 'between-us' && action.type === 'SUBMIT_ANSWER') {
     return { type: action.type, hasSubmitted: true };
   }
 
@@ -53,22 +54,6 @@ export class GameActionService {
     }
     if (!session) {
       return { success: false, error: 'Session not found.', version: 0 };
-    }
-
-    if (session.status !== 'ACTIVE') {
-      return {
-        success: false,
-        error: `Cannot apply action. Session is ${session.status.toLowerCase()}.`,
-        version: session.version,
-      };
-    }
-
-    if (session.isPaused) {
-      return {
-        success: false,
-        error: 'Game is currently paused.',
-        version: session.version,
-      };
     }
 
     // 1. Enforce Action ID idempotency across process restarts
@@ -103,6 +88,25 @@ export class GameActionService {
       };
     }
 
+    // A retry for an already-committed action is acknowledged before the
+    // session status gate. The original action may itself have completed or
+    // paused the session before its ACK reached the client.
+    if (session.status !== 'ACTIVE') {
+      return {
+        success: false,
+        error: `Cannot apply action. Session is ${session.status.toLowerCase()}.`,
+        version: session.version,
+      };
+    }
+
+    if (session.isPaused) {
+      return {
+        success: false,
+        error: 'Game is currently paused.',
+        version: session.version,
+      };
+    }
+
     // 2. State version verification (optimistic concurrency check)
     if (expectedVersion !== undefined && expectedVersion !== session.version) {
       return {
@@ -110,6 +114,24 @@ export class GameActionService {
         error: `Version conflict: client expected v${expectedVersion}, but server is at v${session.version}.`,
         version: session.version,
       };
+    }
+
+    // Snatch The Fries uses room host authority to schedule drops. Refresh
+    // that role from PostgreSQL so a lobby host transfer / room host change
+    // cannot leave a stale in-memory isHost flag authorizing the old host.
+    if (session.gameId === 'snatch-the-fries' && session.roomId) {
+      const roomHost = await prisma.room.findUnique({
+        where: { id: session.roomId },
+        select: { hostId: true },
+      });
+      if (!roomHost) {
+        return { success: false, error: 'The game room no longer exists.', version: session.version };
+      }
+      session.participants = session.participants.map((gameParticipant) => ({
+        ...gameParticipant,
+        isHost: gameParticipant.userId === roomHost.hostId,
+      }));
+      gameStateService.setSession(sessionId, session);
     }
 
     // 3. Check membership
@@ -181,7 +203,6 @@ export class GameActionService {
     if (result.winnerUserId !== undefined) workingSession.winnerUserId = result.winnerUserId;
     if (result.isCompleted) workingSession.status = 'COMPLETED';
 
-    const publicProj = engine.getPublicProjection(workingSession.state, workingSession);
     const sanitized = sanitizeActionMetadata(action, workingSession.gameId);
 
     // 7. Execute single atomic transaction:
@@ -200,7 +221,9 @@ export class GameActionService {
             stateVersion: newVersion,
             currentTurnUserId: workingSession.currentTurnUserId,
             status: workingSession.status,
-            publicState: publicProj as any,
+            // Persist the complete internal engine snapshot for safe restart
+            // recovery. Clients only receive engine.getPublicProjection().
+            publicState: workingSession.state as any,
             completedAt: workingSession.status === 'COMPLETED' ? new Date() : undefined,
           },
         });
@@ -223,11 +246,9 @@ export class GameActionService {
 
         // C. Update participant scores and permitted private state
         for (const p of workingSession.participants) {
-          // Never persist BETWEEN US personal answers or pending Would You Rather choices
-          const safePrivateState =
-            workingSession.gameId === 'between-us' || workingSession.gameId === 'would-you-rather'
-              ? undefined
-              : (workingSession.privateStates[p.userId] as any);
+          // Durable private state lives in the per-participant column; it is
+          // never exposed through the public session projection.
+          const privateState = workingSession.privateStates[p.userId];
 
           await tx.gameSessionParticipant.updateMany({
             where: {
@@ -236,7 +257,7 @@ export class GameActionService {
             },
             data: {
               score: workingSession.scores[p.userId] || 0,
-              privateState: safePrivateState,
+              privateState: privateState == null ? Prisma.DbNull : (privateState as any),
             },
           });
         }
@@ -249,6 +270,9 @@ export class GameActionService {
           }
           finalizedMatchId = finalized.matchId;
         }
+      }, {
+        maxWait: 5000,
+        timeout: 15000,
       });
     } catch (err: any) {
       logger.error(`Action transaction failed: ${err?.message || err}`);

@@ -2,101 +2,189 @@ import { io, Socket } from 'socket.io-client';
 import { supabase } from '../lib/supabase';
 
 const SOCKET_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000').replace(/\/$/, '');
+const ACK_TIMEOUT_MS = 10_000;
+
+type RoomJoinPayload = {
+  roomId?: string;
+  code?: string;
+};
 
 class SocketService {
   private socket: Socket | null = null;
-  private isConnecting = false;
+  private connectionPromise: Promise<Socket | null> | null = null;
   private listeners: Map<string, Set<Function>> = new Map();
+  // Socket.IO room membership is connection-scoped. Keep the rooms this client
+  // has joined so they can be re-authorized and rejoined after reconnect.
+  private joinedRooms: Map<string, RoomJoinPayload> = new Map();
+  private joinedSessions: Set<string> = new Set();
 
   /**
-   * Initialize or retrieve active socket connection
+   * Initialize or retrieve an authenticated socket connection.
+   * Resolves only after the socket connects (or a bounded failure), never with
+   * a socket that is still connecting.
    */
   async connect(): Promise<Socket | null> {
-    if (this.socket?.connected) {
-      return this.socket;
-    }
+    if (this.socket?.connected) return this.socket;
+    if (this.connectionPromise) return this.connectionPromise;
 
-    if (this.isConnecting) {
-      return new Promise((resolve) => {
-        const check = setInterval(() => {
-          if (this.socket?.connected) {
-            clearInterval(check);
-            resolve(this.socket);
-          }
-        }, 100);
-      });
-    }
-
-    this.isConnecting = true;
+    const pending = this.connectInternal();
+    this.connectionPromise = pending;
 
     try {
-      const { data } = await supabase.auth.getSession();
+      return await pending;
+    } finally {
+      if (this.connectionPromise === pending) {
+        this.connectionPromise = null;
+      }
+    }
+  }
+
+  private async connectInternal(): Promise<Socket | null> {
+    if (!this.socket) {
+      const { data, error } = await supabase.auth.getSession();
       const token = data?.session?.access_token;
 
-      if (!token) {
-        this.isConnecting = false;
+      if (error || !token) {
         return null;
       }
 
       this.socket = io(SOCKET_URL, {
-        auth: { token },
+        // Resolve a fresh Supabase access token for the initial connection and
+        // every Socket.IO reconnect instead of reusing an expired JWT.
+        auth: (callback: (credentials: { token: string }) => void) => {
+          void supabase.auth.getSession()
+            .then(({ data: freshData, error: freshError }) => {
+              callback({
+                token: freshError ? '' : freshData.session?.access_token || '',
+              });
+            })
+            .catch(() => callback({ token: '' }));
+        },
         transports: ['websocket', 'polling'],
         reconnection: true,
         reconnectionAttempts: 10,
         reconnectionDelay: 1000,
-        timeout: 10000,
+        timeout: ACK_TIMEOUT_MS,
       });
 
-      this.socket.on('connect', () => {
-        console.log('[Socket] Connected with ID:', this.socket?.id);
-        this.isConnecting = false;
-      });
+      this.attachSocketListeners(this.socket);
+    }
 
-      this.socket.on('connect_error', (err) => {
-        console.warn('[Socket] Connection error:', err.message);
-        this.isConnecting = false;
-      });
+    const socket = this.socket;
+    if (socket.connected) return socket;
 
-      this.socket.on('disconnect', (reason) => {
-        console.log('[Socket] Disconnected:', reason);
-      });
+    return new Promise<Socket | null>((resolve) => {
+      let settled = false;
 
-      // Re-attach registered custom listeners
-      for (const [event, callbacks] of this.listeners.entries()) {
-        for (const cb of callbacks) {
-          this.socket.on(event, cb as any);
-        }
+      const cleanup = () => {
+        clearTimeout(timeout);
+        socket.off('connect', onConnect);
+        socket.off('connect_error', onConnectError);
+      };
+
+      const finish = (value: Socket | null) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve(value);
+      };
+
+      const onConnect = () => finish(socket);
+      const onConnectError = (error: Error) => {
+        // A connect_error does not necessarily end Socket.IO's reconnect
+        // cycle. Keep waiting for a successful reconnect until the bounded
+        // connection deadline is reached.
+        console.warn('[Socket] Connection attempt failed; retrying:', error.message);
+      };
+
+      const timeout = setTimeout(() => {
+        finish(null);
+      }, ACK_TIMEOUT_MS * 3);
+
+      socket.once('connect', onConnect);
+      socket.on('connect_error', onConnectError);
+
+      if (!socket.connected) socket.connect();
+      else finish(socket);
+    });
+  }
+
+  private attachSocketListeners(socket: Socket): void {
+    socket.on('connect', () => {
+      console.log('[Socket] Connected with ID:', socket.id);
+
+      // A reconnect creates a new server-side socket with no room/session
+      // memberships. Rejoin through normal handlers so authorization is rechecked.
+      for (const [key, payload] of this.joinedRooms.entries()) {
+        socket.timeout(ACK_TIMEOUT_MS).emit('room:join', payload, (error: Error | null, response: any) => {
+          if (error || !response?.success) {
+            console.warn('[Socket] Room rejoin failed:', key, response?.error || error?.message);
+          }
+        });
       }
 
-      return this.socket;
-    } catch (err) {
-      console.error('[Socket] Failed to connect:', err);
-      this.isConnecting = false;
-      return null;
+      for (const sessionId of this.joinedSessions) {
+        socket.timeout(ACK_TIMEOUT_MS).emit(
+          'game:session:join',
+          { sessionId },
+          (error: Error | null, response: any) => {
+            if (error || !response?.success) {
+              console.warn(
+                '[Socket] Game session rejoin failed:',
+                sessionId,
+                response?.error || error?.message
+              );
+            }
+          }
+        );
+      }
+    });
+
+    socket.on('connect_error', (err) => {
+      console.warn('[Socket] Connection error:', err.message);
+    });
+
+    socket.on('disconnect', (reason) => {
+      console.log('[Socket] Disconnected:', reason);
+    });
+
+    socket.on('room:membership:revoked', (data: { roomId?: string }) => {
+      if (!data?.roomId) return;
+      this.joinedRooms.delete(data.roomId.trim().toUpperCase());
+    });
+
+    // Re-attach registered custom listeners to a newly created socket.
+    for (const [event, callbacks] of this.listeners.entries()) {
+      for (const callback of callbacks) {
+        socket.on(event, callback as any);
+      }
     }
   }
 
+  private roomKey(payload: RoomJoinPayload | undefined): string | null {
+    const identifier = payload?.roomId || payload?.code;
+    return typeof identifier === 'string' && identifier.trim()
+      ? identifier.trim().toUpperCase()
+      : null;
+  }
+
   /**
-   * Disconnect active socket
+   * Disconnect the active socket. This is intended for logout/session teardown.
    */
   disconnect(): void {
+    this.joinedRooms.clear();
+    this.joinedSessions.clear();
     if (this.socket) {
       this.socket.disconnect();
       this.socket = null;
     }
-    this.isConnecting = false;
+    this.connectionPromise = null;
   }
 
-  /**
-   * Get current socket instance
-   */
   getSocket(): Socket | null {
     return this.socket;
   }
 
-  /**
-   * Register event listener
-   */
   on(event: string, callback: (...args: any[]) => void): () => void {
     if (!this.listeners.has(event)) {
       this.listeners.set(event, new Set());
@@ -110,42 +198,85 @@ class SocketService {
     return () => this.off(event, callback);
   }
 
-  /**
-   * Remove event listener
-   */
   off(event: string, callback: (...args: any[]) => void): void {
     const callbacks = this.listeners.get(event);
     if (callbacks) {
       callbacks.delete(callback);
-      if (callbacks.size === 0) {
-        this.listeners.delete(event);
-      }
+      if (callbacks.size === 0) this.listeners.delete(event);
     }
 
-    if (this.socket) {
-      this.socket.off(event, callback);
-    }
+    this.socket?.off(event, callback);
   }
 
   /**
-   * Emit event with optional callback
+   * Emit an event after a successful connection. Acknowledged events have a
+   * finite timeout and return a consistent failure object when unavailable.
    */
   emit(event: string, payload?: any, callback?: (response: any) => void): void {
-    if (!this.socket?.connected) {
-      // Attempt connect first then emit
-      this.connect().then((sock) => {
-        if (sock?.connected) {
-          sock.emit(event, payload, callback);
-        } else {
-          callback?.({ success: false, error: 'Socket not connected' });
+    const isRoomJoin = event === 'room:join';
+    const isRoomLeave = event === 'room:leave';
+    const isSessionJoin = event === 'game:session:join';
+    const isSessionLeave = event === 'game:session:leave';
+    const roomPayload = payload as RoomJoinPayload | undefined;
+    const sessionId = typeof payload?.sessionId === 'string' ? payload.sessionId : null;
+
+    if (isSessionLeave && sessionId) {
+      this.joinedSessions.delete(sessionId);
+    }
+
+    if (isRoomLeave) {
+      const key = this.roomKey(roomPayload);
+      if (key) this.joinedRooms.delete(key);
+      if (roomPayload?.code) this.joinedRooms.delete(roomPayload.code.trim().toUpperCase());
+    }
+
+    const send = (socket: Socket | null) => {
+      if (!socket?.connected) {
+        callback?.({ success: false, error: 'Socket not connected' });
+        return;
+      }
+
+      const shouldAck = typeof callback === 'function' || isRoomJoin || isSessionJoin;
+      if (!shouldAck) {
+        socket.emit(event, payload);
+        return;
+      }
+
+      (socket as any).timeout(ACK_TIMEOUT_MS).emit(
+        event,
+        payload,
+        (error: Error | null, response: any) => {
+          if (error) {
+            callback?.({ success: false, error: 'Socket acknowledgement timed out' });
+            return;
+          }
+
+          if (isRoomJoin) {
+            const key = this.roomKey(roomPayload);
+            if (key && response?.success) {
+              this.joinedRooms.set(key, roomPayload || {});
+            }
+          }
+
+          if (isSessionJoin && sessionId && response?.success) {
+            this.joinedSessions.add(sessionId);
+          }
+
+          callback?.(response ?? { success: false, error: 'No acknowledgement received' });
         }
-      });
+      );
+    };
+
+    if (this.socket?.connected) {
+      send(this.socket);
       return;
     }
 
-    this.socket.emit(event, payload, callback);
+    this.connect().then(send).catch((error) => {
+      console.warn('[Socket] Could not connect before emit:', error);
+      callback?.({ success: false, error: 'Socket connection failed' });
+    });
   }
 }
 
 export const socketService = new SocketService();
-

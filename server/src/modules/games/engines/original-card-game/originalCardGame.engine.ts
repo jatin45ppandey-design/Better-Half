@@ -176,8 +176,11 @@ export class OriginalCardGameEngine
         return { valid: false, error: `Cannot play ${card.label}. Match color (${activeColor}) or value (${top.value}).` };
       }
 
-      if (isWild && !action.chosenColor) {
-        return { valid: false, error: 'Must specify chosen color when playing Wild.' };
+      if (
+        isWild &&
+        !['purple', 'lavender', 'amber', 'emerald'].includes(action.chosenColor || '')
+      ) {
+        return { valid: false, error: 'A Wild card requires a valid selected color.' };
       }
       return { valid: true };
     }
@@ -207,20 +210,22 @@ export class OriginalCardGameEngine
     const state = { ...context.state };
     const privateStates = { ...context.privateStates };
     const participants = context.participants;
-    let piles = this.serverPiles.get(context.sessionId);
-
-    if (!piles && (state as any)._serverPiles) {
-      piles = (state as any)._serverPiles;
-      this.serverPiles.set(context.sessionId, piles!);
-    }
-
-    if (!piles) {
-      piles = {
-        drawPile: this.generateDeck(),
-        discardPile: [state.topDiscard],
-      };
-      this.serverPiles.set(context.sessionId, piles);
-    }
+    // Work on detached piles. Engine actions may still fail during DB commit;
+    // mutating a shared in-memory pile before commit would corrupt the live match.
+    const persistedPiles = (state as any)._serverPiles as
+      | { drawPile: GameCard[]; discardPile: GameCard[] }
+      | undefined;
+    const cachedPiles = this.serverPiles.get(context.sessionId);
+    const sourcePiles = persistedPiles || cachedPiles;
+    const piles = sourcePiles
+      ? {
+          drawPile: [...sourcePiles.drawPile],
+          discardPile: [...sourcePiles.discardPile],
+        }
+      : {
+          drawPile: this.generateDeck(),
+          discardPile: [state.topDiscard],
+        };
 
     const getNextPlayerId = (currentId: string, steps = 1): string => {
       const idx = participants.findIndex((p) => p.userId === currentId);

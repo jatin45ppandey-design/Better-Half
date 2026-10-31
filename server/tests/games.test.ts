@@ -64,49 +64,73 @@ describe('PlaySpace Phase 3 — All 11 Server Game Engines & Real-time Integrati
       return [{}, {}];
     });
 
-    // Mock Prisma Room find for game session initialization
-    vi.spyOn(prisma.room, 'findUnique').mockImplementation(async ({ where }: any) => {
-      const code = where.code || 'COUPLE99';
-      return {
-        id: 'room-p3-couple',
-        code,
-        hostId: userA.id,
-        name: 'Couple Room',
-        mode: 'COUPLE',
-        status: 'READY_TO_START',
-        selectedGameId: 'truth-or-dare',
-        maxPlayers: 2,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        expiresAt: new Date(Date.now() + 3600000),
-        participants: [
-          {
-            id: 'part-p3-a',
-            roomId: 'room-p3-couple',
-            userId: userA.id,
-            role: 'HOST',
-            isReady: true,
-            joinedAt: new Date(),
-            updatedAt: new Date(),
-            leftAt: null,
-            user: userA,
-          },
-          {
-            id: 'part-p3-b',
-            roomId: 'room-p3-couple',
-            userId: userB.id,
-            role: 'PLAYER',
-            isReady: true,
-            joinedAt: new Date(),
-            updatedAt: new Date(),
-            leftAt: null,
-            user: userB,
-          },
-        ],
-      } as any;
-    });
+    // Mock the room record used by both the outside-transaction lookup and
+    // the authoritative re-check performed after the room-row lock.
+    const roomRecord = {
+      id: 'room-p3-couple',
+      code: 'COUPLE99',
+      hostId: userA.id,
+      name: 'Couple Room',
+      mode: 'COUPLE',
+      status: 'READY_TO_START',
+      selectedGameId: 'tic-tac-toe',
+      maxPlayers: 2,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      expiresAt: new Date(Date.now() + 3600000),
+      participants: [
+        {
+          id: 'part-p3-a',
+          roomId: 'room-p3-couple',
+          userId: userA.id,
+          role: 'HOST',
+          isReady: true,
+          joinedAt: new Date(),
+          updatedAt: new Date(),
+          leftAt: null,
+          user: userA,
+        },
+        {
+          id: 'part-p3-b',
+          roomId: 'room-p3-couple',
+          userId: userB.id,
+          role: 'PLAYER',
+          isReady: true,
+          joinedAt: new Date(),
+          updatedAt: new Date(),
+          leftAt: null,
+          user: userB,
+        },
+      ],
+    };
+    vi.spyOn(prisma.room, 'findUnique').mockResolvedValue(roomRecord as any);
+    vi.spyOn(prisma.room, 'findFirst').mockResolvedValue(roomRecord as any);
 
-    vi.spyOn(prisma, '$transaction').mockResolvedValue([{}, {}] as any);
+    // Execute Prisma transaction callbacks in tests so session creation and
+    // action persistence follow the same code path as PostgreSQL in CI.
+    vi.spyOn(prisma, '$transaction').mockImplementation(async (arg: any) => {
+      if (typeof arg !== 'function') return [{}, {}];
+      return arg({
+        $queryRaw: vi.fn().mockResolvedValue([{ id: roomRecord.id }]),
+        room: {
+          findUnique: vi.fn().mockResolvedValue(roomRecord),
+          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        },
+        gameSession: {
+          findFirst: vi.fn().mockResolvedValue(null),
+          create: vi.fn().mockResolvedValue({ id: 'session-created' }),
+          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        },
+        gameConfiguration: { findUnique: vi.fn().mockResolvedValue(null) },
+        gameAction: { create: vi.fn().mockResolvedValue({}) },
+        gameSessionParticipant: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+        match: { findUnique: vi.fn().mockResolvedValue(null), create: vi.fn().mockResolvedValue({ id: 'm-1' }) },
+        matchParticipant: { create: vi.fn().mockResolvedValue({}) },
+        userGameStats: { upsert: vi.fn().mockResolvedValue({}) },
+        rivalryStats: { findUnique: vi.fn().mockResolvedValue(null), upsert: vi.fn().mockResolvedValue({}) },
+        userProfile: { findMany: vi.fn().mockResolvedValue([]) },
+      });
+    });
 
     const app = createApp();
     server = http.createServer(app);

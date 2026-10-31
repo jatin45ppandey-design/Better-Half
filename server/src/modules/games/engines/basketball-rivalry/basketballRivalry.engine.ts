@@ -85,11 +85,11 @@ export class BasketballRivalryEngine
       if (shots >= TOTAL_SHOTS_PER_PLAYER) {
         return { valid: false, error: 'You have already taken all your shots.' };
       }
-      if (action.angle < 30 || action.angle > 85) {
-        return { valid: false, error: 'Angle must be between 30 and 85 degrees.' };
+      if (!Number.isFinite(action.angle) || action.angle < 30 || action.angle > 85) {
+        return { valid: false, error: 'Angle must be a finite value between 30 and 85 degrees.' };
       }
-      if (action.power < 20 || action.power > 100) {
-        return { valid: false, error: 'Power must be between 20 and 100.' };
+      if (!Number.isFinite(action.power) || action.power < 20 || action.power > 100) {
+        return { valid: false, error: 'Power must be a finite value between 20 and 100.' };
       }
       return { valid: true };
     }

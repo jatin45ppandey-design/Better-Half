@@ -28,63 +28,106 @@ interface BetweenUsProps {
   players: { id: string; name: string; avatarInitials: string; avatarColor: string }[];
   onFinishMatch: (results: { winnerName?: string; playerScores: PlayerScoreSummary[] }) => void;
   isPaused?: boolean;
+  sessionState?: any;
+  sessionPrivateState?: any;
+  onSendAction?: (action: any) => Promise<{ success: boolean; error?: string }>;
+  currentUserId?: string;
 }
 
-type TurnPhase = 'P1_ANSWER' | 'PASS_TO_P2' | 'P2_ANSWER' | 'REVEAL' | 'SUMMARY';
+type TurnPhase = 'P1_ANSWER' | 'PASS_TO_P2' | 'P2_ANSWER' | 'REVEAL' | 'SUMMARY' | 'ONLINE_ANSWER' | 'WAITING';
 
 export const BetweenUsGame: React.FC<BetweenUsProps> = ({
   players,
   onFinishMatch,
   isPaused = false,
+  sessionState,
+  onSendAction,
+  currentUserId,
 }) => {
   const partner1 = players[0] || { id: 'p1', name: 'Partner 1', avatarInitials: 'P1', avatarColor: 'bg-primary-500' };
   const partner2 = players[1] || { id: 'p2', name: 'Partner 2', avatarInitials: 'P2', avatarColor: 'bg-secondary-500' };
 
   // Settings
-  const [selectedCategory, setSelectedCategory] = useState<BetweenUsCategory | 'All'>('All');
-  const [intensity, setIntensity] = useState<1 | 2 | 3 | 4 | 5>(2);
+  const [localSelectedCategory, setSelectedCategory] = useState<BetweenUsCategory | 'All'>('All');
+  const [localIntensity, setIntensity] = useState<1 | 2 | 3 | 4 | 5>(2);
   const [isAdultConsentGranted, setIsAdultConsentGranted] = useState(false);
   const [showConsentModal, setShowConsentModal] = useState(false);
 
   // Filtered pool
   const eligibleQuestions = useMemo(() => {
     return BETWEEN_US_QUESTIONS.filter((q) => {
-      const matchCat = selectedCategory === 'All' || q.category === selectedCategory;
-      const matchInt = q.intensity <= intensity;
+      const matchCat = localSelectedCategory === 'All' || q.category === localSelectedCategory;
+      const matchInt = q.intensity <= localIntensity;
       return matchCat && matchInt;
     });
-  }, [selectedCategory, intensity]);
+  }, [localSelectedCategory, localIntensity]);
 
   // Question index & History (in-memory only!)
   const [questionIdx, setQuestionIdx] = useState(0);
-  const currentQuestion: BetweenUsQuestion = eligibleQuestions[questionIdx % eligibleQuestions.length] || BETWEEN_US_QUESTIONS[0];
+  const [localPhase, setPhase] = useState<TurnPhase>('P1_ANSWER');
+  const [localP1Answer, setP1Answer] = useState('');
+  const [localP2Answer, setP2Answer] = useState('');
+  const [draftAnswer, setDraftAnswer] = useState('');
+  const [localQuestionsAnsweredCount, setQuestionsAnsweredCount] = useState(0);
 
-  // Gameplay Flow state
-  const [phase, setPhase] = useState<TurnPhase>('P1_ANSWER');
-  const [p1Answer, setP1Answer] = useState('');
-  const [p2Answer, setP2Answer] = useState('');
+  const isMultiplayer = Boolean(sessionState && onSendAction);
+  const selectedCategory = isMultiplayer ? sessionState.category : localSelectedCategory;
+  const intensity: 1 | 2 | 3 | 4 | 5 = isMultiplayer ? sessionState.intensity : localIntensity;
+  const currentQuestion: BetweenUsQuestion = isMultiplayer
+    ? sessionState.currentQuestion
+    : eligibleQuestions[questionIdx % eligibleQuestions.length] || BETWEEN_US_QUESTIONS[0];
+  const phase: TurnPhase = isMultiplayer
+    ? sessionState.phase === 'REVEAL'
+      ? 'REVEAL'
+      : sessionState.submittedUserIds?.includes(currentUserId)
+      ? 'WAITING'
+      : 'ONLINE_ANSWER'
+    : localPhase;
+  const p1Answer = isMultiplayer
+    ? sessionState.revealedAnswers?.[partner1.id] || ''
+    : localP1Answer;
+  const p2Answer = isMultiplayer
+    ? sessionState.revealedAnswers?.[partner2.id] || ''
+    : localP2Answer;
+  const questionsAnsweredCount = isMultiplayer
+    ? sessionState.questionsAnsweredCount || 0
+    : localQuestionsAnsweredCount;
   const [showFollowUp, setShowFollowUp] = useState(false);
   const [showSurpriseCard, setShowSurpriseCard] = useState(false);
-  const [questionsAnsweredCount, setQuestionsAnsweredCount] = useState(0);
   const [_sessionLog, setSessionLog] = useState<Array<{ prompt: string; category: string }>>([]);
 
   const handleIntensityClick = (level: 1 | 2 | 3 | 4 | 5) => {
-    if (level === 5 && !isAdultConsentGranted) {
+    if (level === 5 && !(isMultiplayer
+      ? (sessionState.adultConsentUserIds || []).includes(currentUserId)
+      : isAdultConsentGranted)) {
       setShowConsentModal(true);
+      return;
+    }
+    if (isMultiplayer) {
+      void onSendAction?.({ type: 'SET_SETTINGS', intensity: level });
     } else {
       setIntensity(level);
     }
   };
 
   const handleGrantConsent = () => {
-    setIsAdultConsentGranted(true);
-    setIntensity(5);
+    if (isMultiplayer) {
+      void onSendAction?.({ type: 'GRANT_ADULT_CONSENT' });
+    } else {
+      setIsAdultConsentGranted(true);
+      setIntensity(5);
+    }
     setShowConsentModal(false);
   };
 
   // Turn Flow
   const handleP1Submit = () => {
-    if (!p1Answer.trim()) return;
+    if (isMultiplayer) {
+      if (!draftAnswer.trim()) return;
+      void onSendAction?.({ type: 'SUBMIT_ANSWER', answer: draftAnswer.trim() });
+      return;
+    }
+    if (!localP1Answer.trim()) return;
     setPhase('PASS_TO_P2');
   };
 
@@ -93,13 +136,20 @@ export const BetweenUsGame: React.FC<BetweenUsProps> = ({
   };
 
   const handleP2Submit = () => {
-    if (!p2Answer.trim()) return;
+    if (!localP2Answer.trim()) return;
     setPhase('REVEAL');
     setQuestionsAnsweredCount((c) => c + 1);
     setSessionLog((prev) => [{ prompt: currentQuestion.prompt, category: currentQuestion.category }, ...prev]);
   };
 
   const handleNextPrompt = () => {
+    if (isMultiplayer) {
+      void onSendAction?.({ type: 'NEXT_QUESTION' });
+      setDraftAnswer('');
+      setShowFollowUp(false);
+      setShowSurpriseCard(false);
+      return;
+    }
     setP1Answer('');
     setP2Answer('');
     setShowFollowUp(false);
@@ -109,6 +159,7 @@ export const BetweenUsGame: React.FC<BetweenUsProps> = ({
   };
 
   const handleSkipPrompt = () => {
+    if (isMultiplayer) return;
     setP1Answer('');
     setP2Answer('');
     setQuestionIdx((i) => i + 1);
@@ -116,6 +167,10 @@ export const BetweenUsGame: React.FC<BetweenUsProps> = ({
   };
 
   const handleFinishSession = () => {
+    if (isMultiplayer) {
+      void onSendAction?.({ type: 'FINISH_SESSION' });
+      return;
+    }
     onFinishMatch({
       winnerName: 'Both of You 💕',
       playerScores: [
@@ -194,6 +249,7 @@ export const BetweenUsGame: React.FC<BetweenUsProps> = ({
             variant="outline"
             size="sm"
             onClick={handleFinishSession}
+            disabled={isMultiplayer && (phase !== 'REVEAL' || questionsAnsweredCount < 1)}
             className="border-rose-400/30 text-rose-200 hover:bg-rose-900/40 text-xs"
           >
             Wrap Up Session ({questionsAnsweredCount})
@@ -209,7 +265,11 @@ export const BetweenUsGame: React.FC<BetweenUsProps> = ({
           <span className="text-xs font-semibold text-gray-700 whitespace-nowrap">Category:</span>
           <select
             value={selectedCategory}
-            onChange={(e) => setSelectedCategory(e.target.value as BetweenUsCategory | 'All')}
+            onChange={(e) => {
+              const category = e.target.value as BetweenUsCategory | 'All';
+              if (isMultiplayer) void onSendAction?.({ type: 'SET_SETTINGS', category });
+              else setSelectedCategory(category);
+            }}
             className="text-xs bg-rose-50 border border-rose-200 text-gray-900 rounded-xl px-2.5 py-1.5 focus:ring-2 focus:ring-rose-400 outline-none w-full sm:w-56"
           >
             <option value="All">✨ All 17 Categories ({eligibleQuestions.length})</option>
@@ -258,7 +318,7 @@ export const BetweenUsGame: React.FC<BetweenUsProps> = ({
           </Badge>
           <div className="flex items-center gap-1.5 text-xs text-rose-600 font-semibold">
             <Lock className="w-3.5 h-3.5" />
-            Temporary In-Memory State Only
+            {isMultiplayer ? 'Private until both submit' : 'Local pass-and-play privacy'}
           </div>
         </div>
 
@@ -275,36 +335,46 @@ export const BetweenUsGame: React.FC<BetweenUsProps> = ({
         </div>
 
         {/* Phase 1: Partner 1 Private Input */}
-        {phase === 'P1_ANSWER' && (
+        {(phase === 'P1_ANSWER' || phase === 'ONLINE_ANSWER') && (
           <div className="flex flex-col gap-4 animate-in fade-in duration-200">
             <div className="flex items-center gap-2 text-xs font-bold text-rose-700">
               <div className={`w-6 h-6 rounded-lg ${partner1.avatarColor} text-white flex items-center justify-center text-[10px]`}>
                 {partner1.avatarInitials}
               </div>
-              <span>{partner1.name}'s Confidential Submission:</span>
+              <span>{isMultiplayer ? 'Your Confidential Submission:' : `${partner1.name}'s Confidential Submission:`}</span>
             </div>
 
             <textarea
-              value={p1Answer}
-              onChange={(e) => setP1Answer(e.target.value)}
+              value={isMultiplayer ? draftAnswer : localP1Answer}
+              onChange={(e) => isMultiplayer ? setDraftAnswer(e.target.value) : setP1Answer(e.target.value)}
               placeholder="Speak gently and honestly from your heart..."
               rows={4}
               className="w-full p-4 rounded-2xl border-2 border-rose-200 focus:border-rose-500 focus:ring-4 focus:ring-rose-200/50 outline-none text-sm text-gray-900 bg-white shadow-inner resize-none"
             />
 
             <div className="flex items-center justify-between gap-3">
-              <Button variant="ghost" size="sm" onClick={handleSkipPrompt} className="text-xs text-gray-500">
+              <Button variant="ghost" size="sm" onClick={handleSkipPrompt} disabled={isMultiplayer} className="text-xs text-gray-500">
                 Skip Prompt
               </Button>
               <Button
                 size="md"
                 onClick={handleP1Submit}
-                disabled={!p1Answer.trim()}
+                disabled={!(isMultiplayer ? draftAnswer.trim() : localP1Answer.trim())}
                 className="bg-rose-600 hover:bg-rose-700 text-white font-bold flex items-center gap-2"
               >
                 Lock My Answer <Lock className="w-4 h-4" />
               </Button>
             </div>
+          </div>
+        )}
+
+        {phase === 'WAITING' && (
+          <div className="rounded-2xl border border-rose-200 bg-white p-6 text-center">
+            <Lock className="mx-auto h-8 w-8 text-rose-500" />
+            <h4 className="mt-3 font-bold text-gray-900">Your answer is locked</h4>
+            <p className="mt-1 text-sm text-gray-600">
+              It stays private until the other participant submits their answer.
+            </p>
           </div>
         )}
 
@@ -319,7 +389,7 @@ export const BetweenUsGame: React.FC<BetweenUsProps> = ({
             </div>
 
             <textarea
-              value={p2Answer}
+              value={localP2Answer}
               onChange={(e) => setP2Answer(e.target.value)}
               placeholder="Your vulnerable turn to share..."
               rows={4}
@@ -333,7 +403,7 @@ export const BetweenUsGame: React.FC<BetweenUsProps> = ({
               <Button
                 size="md"
                 onClick={handleP2Submit}
-                disabled={!p2Answer.trim()}
+                disabled={!localP2Answer.trim()}
                 className="bg-purple-600 hover:bg-purple-700 text-white font-bold flex items-center gap-2"
               >
                 Lock & Reveal Both Together <Eye className="w-4 h-4" />

@@ -110,8 +110,15 @@ export class PenFightEngine
       if (!activePen || !activePen.isAlive) {
         return { valid: false, error: 'Your pen has been eliminated this round.' };
       }
-      if (action.power < 5 || action.power > 100) {
-        return { valid: false, error: 'Flick power must be between 5 and 100.' };
+      if (!Number.isFinite(action.dx) || !Number.isFinite(action.dy)) {
+        return { valid: false, error: 'Flick direction must contain finite coordinates.' };
+      }
+      const directionMagnitude = Math.hypot(action.dx, action.dy);
+      if (directionMagnitude < 0.001 || directionMagnitude > Math.hypot(640, 440)) {
+        return { valid: false, error: 'Flick direction magnitude is invalid.' };
+      }
+      if (!Number.isFinite(action.power) || action.power < 5 || action.power > 100) {
+        return { valid: false, error: 'Flick power must be a finite value between 5 and 100.' };
       }
       return { valid: true };
     }

@@ -157,6 +157,7 @@ model RoomParticipant {
   joinedAt  DateTime    @default(now())
   updatedAt DateTime    @updatedAt
   leftAt    DateTime?
+  kickedAt  DateTime?
 
   room Room        @relation(fields: [roomId], references: [id], onDelete: Cascade)
   user UserProfile @relation("RoomParticipations", fields: [userId], references: [id], onDelete: Cascade)

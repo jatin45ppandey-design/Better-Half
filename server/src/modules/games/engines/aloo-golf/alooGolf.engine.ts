@@ -134,8 +134,11 @@ export class AlooGolfEngine
       if (ball && ball.sunk) {
         return { valid: false, error: 'Ball already sunk on this hole.' };
       }
-      if (action.power < 2 || action.power > 100) {
-        return { valid: false, error: 'Stroke power must be between 2 and 100.' };
+      if (!Number.isFinite(action.angle) || action.angle < 0 || action.angle > 360) {
+        return { valid: false, error: 'Stroke angle must be a finite value between 0 and 360 degrees.' };
+      }
+      if (!Number.isFinite(action.power) || action.power < 2 || action.power > 100) {
+        return { valid: false, error: 'Stroke power must be a finite value between 2 and 100.' };
       }
       return { valid: true };
     }

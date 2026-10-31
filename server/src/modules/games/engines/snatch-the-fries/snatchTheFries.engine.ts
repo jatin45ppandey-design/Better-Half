@@ -88,11 +88,18 @@ export class SnatchTheFriesEngine
   validateAction(
     action: SnatchTheFriesAction,
     context: GameEngineContext<SnatchTheFriesState>,
-    _actorUserId: string
+    actorUserId: string
   ): { valid: boolean; error?: string } {
     if (action.type === 'SPAWN_DROP') {
       if (context.state.matchOver) {
         return { valid: false, error: 'Match has concluded.' };
+      }
+      const actor = context.participants.find((participant) => participant.userId === actorUserId);
+      if (!actor?.isHost) {
+        return { valid: false, error: 'Only the room host may schedule a fry drop.' };
+      }
+      if (context.state.dropState === 'DROPPED') {
+        return { valid: false, error: 'A fry is already waiting to be snatched.' };
       }
       return { valid: true };
     }
@@ -101,9 +108,13 @@ export class SnatchTheFriesEngine
       if (context.state.matchOver) {
         return { valid: false, error: 'Match has concluded.' };
       }
-      // If waiting, false start is allowed as a game action (will incur penalty)
+      // One false-start penalty per waiting cycle. Further taps are rejected
+      // until the host advances to the next server-timed drop.
       if (context.state.dropState === 'SNATCHED') {
         return { valid: false, error: 'Fry was already snatched.' };
+      }
+      if (context.state.dropState === 'FALSE_START') {
+        return { valid: false, error: 'A false start was already recorded. Wait for the next drop.' };
       }
       return { valid: true };
     }

@@ -16,6 +16,9 @@ interface TicTacToeProps {
   players: { id: string; name: string; avatarInitials: string; avatarColor: string }[];
   onFinishMatch: (results: { winnerName?: string; playerScores: PlayerScoreSummary[] }) => void;
   isPaused?: boolean;
+  sessionState?: any;
+  onSendAction?: (action: any) => Promise<{ success: boolean; error?: string }>;
+  currentUserId?: string;
 }
 
 type BoardState = (string | null)[]; // 'X' | 'O' | null
@@ -36,23 +39,53 @@ export const TicTacToeGame: React.FC<TicTacToeProps> = ({
   players,
   onFinishMatch,
   isPaused = false,
+  sessionState,
+  onSendAction,
+  currentUserId,
 }) => {
   // If >2 players, assign active duelists indices
   const [duelist1Idx] = useState(0);
   const [duelist2Idx, setDuelist2Idx] = useState(1);
-  const [seriesFormat, setSeriesFormat] = useState<SeriesFormat>(3);
+  const [localSeriesFormat, setSeriesFormat] = useState<SeriesFormat>(3);
 
-  const player1 = players[duelist1Idx] || { id: 'p1', name: 'Player 1', avatarInitials: 'P1', avatarColor: 'bg-primary-500' };
-  const player2 = players[duelist2Idx] || { id: 'p2', name: 'Player 2', avatarInitials: 'P2', avatarColor: 'bg-secondary-500' };
+  const localPlayer1 = players[duelist1Idx] || { id: 'p1', name: 'Player 1', avatarInitials: 'P1', avatarColor: 'bg-primary-500' };
+  const localPlayer2 = players[duelist2Idx] || { id: 'p2', name: 'Player 2', avatarInitials: 'P2', avatarColor: 'bg-secondary-500' };
 
-  const [board, setBoard] = useState<BoardState>(Array(9).fill(null));
-  const [turnSymbol, setTurnSymbol] = useState<'X' | 'O'>('X');
-  const [p1Wins, setP1Wins] = useState(0);
-  const [p2Wins, setP2Wins] = useState(0);
-  const [draws, setDraws] = useState(0);
-  const [currentRound, setCurrentRound] = useState(1);
-  const [winningCombo, setWinningCombo] = useState<number[] | null>(null);
-  const [roundWinner, setRoundWinner] = useState<'X' | 'O' | 'DRAW' | null>(null);
+  const [localBoard, setBoard] = useState<BoardState>(Array(9).fill(null));
+  const [localTurnSymbol, setTurnSymbol] = useState<'X' | 'O'>('X');
+  const [localP1Wins, setP1Wins] = useState(0);
+  const [localP2Wins, setP2Wins] = useState(0);
+  const [localDraws, setDraws] = useState(0);
+  const [localCurrentRound, setCurrentRound] = useState(1);
+  const [localWinningCombo, setWinningCombo] = useState<number[] | null>(null);
+  const [localRoundWinner, setRoundWinner] = useState<'X' | 'O' | 'DRAW' | null>(null);
+
+  const isMultiplayer = Boolean(sessionState && onSendAction);
+  const serverState = isMultiplayer ? sessionState : null;
+  const player1 = isMultiplayer
+    ? players.find((player) => player.id === serverState.duelistXUserId) || localPlayer1
+    : localPlayer1;
+  const player2 = isMultiplayer
+    ? players.find((player) => player.id === serverState.duelistOUserId) || localPlayer2
+    : localPlayer2;
+  const board: BoardState = isMultiplayer ? serverState.board : localBoard;
+  const turnSymbol: 'X' | 'O' = isMultiplayer ? serverState.currentSymbol : localTurnSymbol;
+  const p1Wins = isMultiplayer ? serverState.xWins : localP1Wins;
+  const p2Wins = isMultiplayer ? serverState.oWins : localP2Wins;
+  const draws = isMultiplayer ? serverState.draws : localDraws;
+  const currentRound = isMultiplayer ? serverState.currentRound : localCurrentRound;
+  const seriesFormat: SeriesFormat = isMultiplayer ? serverState.seriesFormat : localSeriesFormat;
+  const winningCombo: number[] | null = isMultiplayer ? serverState.winningCombo : localWinningCombo;
+  const roundWinner: 'X' | 'O' | 'DRAW' | null = isMultiplayer
+    ? serverState.roundStatus === 'X_WON'
+      ? 'X'
+      : serverState.roundStatus === 'O_WON'
+      ? 'O'
+      : serverState.roundStatus === 'DRAW'
+      ? 'DRAW'
+      : null
+    : localRoundWinner;
+  const isMyTurn = !isMultiplayer || serverState.currentTurnUserId === currentUserId;
   const [moveHistory, setMoveHistory] = useState<Array<{ round: number; player: string; cell: number; symbol: 'X' | 'O' }>>([]);
   const [showHistory, setShowHistory] = useState(false);
 
@@ -70,7 +103,11 @@ export const TicTacToeGame: React.FC<TicTacToeProps> = ({
   const activePlayer = turnSymbol === 'X' ? player1 : player2;
 
   const handleCellClick = (index: number) => {
-    if (isPaused || board[index] || roundWinner) return;
+    if (isPaused || board[index] || roundWinner || !isMyTurn) return;
+    if (isMultiplayer) {
+      void onSendAction?.({ type: 'MAKE_MOVE', cellIndex: index });
+      return;
+    }
 
     const newBoard = [...board];
     newBoard[index] = turnSymbol;
@@ -130,6 +167,10 @@ export const TicTacToeGame: React.FC<TicTacToeProps> = ({
   };
 
   const handleNextRound = () => {
+    if (isMultiplayer) {
+      void onSendAction?.({ type: 'START_NEXT_ROUND' });
+      return;
+    }
     setBoard(Array(9).fill(null));
     setWinningCombo(null);
     setRoundWinner(null);
@@ -138,7 +179,7 @@ export const TicTacToeGame: React.FC<TicTacToeProps> = ({
   };
 
   const handleRotateDuelist = () => {
-    if (players.length <= 2) return;
+    if (isMultiplayer || players.length <= 2) return;
     // Rotate player2 with next in line
     const nextIdx = (duelist2Idx + 1) % players.length;
     const finalNextIdx = nextIdx === duelist1Idx ? (nextIdx + 1) % players.length : nextIdx;
@@ -154,7 +195,11 @@ export const TicTacToeGame: React.FC<TicTacToeProps> = ({
     return `R${row}C${col}`;
   };
 
-  const waitingPlayers = players.filter((_, idx) => idx !== duelist1Idx && idx !== duelist2Idx);
+  const waitingPlayers = isMultiplayer
+    ? (serverState.waitingQueueUserIds || [])
+        .map((userId: string) => players.find((player) => player.id === userId))
+        .filter(Boolean)
+    : players.filter((_, idx) => idx !== duelist1Idx && idx !== duelist2Idx);
   const targetWins = Math.ceil(seriesFormat / 2);
 
   return (
@@ -179,7 +224,10 @@ export const TicTacToeGame: React.FC<TicTacToeProps> = ({
             {([1, 3, 5] as SeriesFormat[]).map((fmt) => (
               <button
                 key={fmt}
-                onClick={() => setSeriesFormat(fmt)}
+                onClick={() => {
+                  if (isMultiplayer) void onSendAction?.({ type: 'SET_SERIES_FORMAT', format: fmt });
+                  else setSeriesFormat(fmt);
+                }}
                 className={`px-3 py-1 text-xs font-semibold rounded-lg transition-all ${
                   seriesFormat === fmt ? 'bg-primary-600 text-white shadow-sm' : 'text-gray-600 hover:text-gray-900'
                 }`}
@@ -204,6 +252,7 @@ export const TicTacToeGame: React.FC<TicTacToeProps> = ({
             variant="ghost"
             size="sm"
             onClick={handleNextRound}
+            disabled={isMultiplayer && !roundWinner}
             className="flex items-center gap-1.5 text-xs text-gray-700"
           >
             <RotateCcw className="w-3.5 h-3.5" />
@@ -289,7 +338,7 @@ export const TicTacToeGame: React.FC<TicTacToeProps> = ({
                 <button
                   key={idx}
                   onClick={() => handleCellClick(idx)}
-                  disabled={Boolean(cell || roundWinner || isPaused)}
+                  disabled={Boolean(cell || roundWinner || isPaused || !isMyTurn)}
                   aria-label={`Cell ${getCellLabel(idx)}`}
                   className={`relative rounded-2xl flex items-center justify-center font-black transition-all duration-200 shadow-inner group
                     ${
@@ -372,7 +421,7 @@ export const TicTacToeGame: React.FC<TicTacToeProps> = ({
               Tic Tac Toe is strictly 2 players on the active board. Non-active friends wait their turn or challenge the winner.
             </p>
             <div className="space-y-2 mt-1">
-              {waitingPlayers.map((p) => (
+              {waitingPlayers.map((p: (typeof players)[number]) => (
                 <div key={p.id} className="flex items-center justify-between p-2.5 rounded-xl bg-gray-50 border border-gray-100">
                   <div className="flex items-center gap-2.5">
                     <div className={`w-8 h-8 rounded-lg ${p.avatarColor} text-white font-bold flex items-center justify-center text-xs`}>
@@ -390,10 +439,11 @@ export const TicTacToeGame: React.FC<TicTacToeProps> = ({
               variant="outline"
               size="sm"
               onClick={handleRotateDuelist}
+              disabled={isMultiplayer}
               className="mt-2 w-full text-xs flex items-center justify-center gap-1.5"
             >
               <Swords className="w-3.5 h-3.5" />
-              Swap Duelist O with Queue
+              {isMultiplayer ? 'Queue rotation at next session' : 'Swap Duelist O with Queue'}
             </Button>
           </div>
         )}
@@ -431,7 +481,7 @@ export const TicTacToeGame: React.FC<TicTacToeProps> = ({
           <Sparkles className="w-3.5 h-3.5 text-primary-500" />
           Round {currentRound} • Draws: {draws}
         </span>
-        <span>Local 2-Player Pass-and-Play Protocol</span>
+        <span>{isMultiplayer ? 'Server-synchronized multiplayer' : 'Local 2-Player Pass-and-Play Protocol'}</span>
       </div>
     </div>
   );

@@ -14,6 +14,9 @@ let ioServer: any;
 let serverPort: number;
 
 beforeAll(async () => {
+  vi.spyOn(roomsService, 'getCanonicalRoomId').mockImplementation(
+    async (roomIdOrCode: string) => roomIdOrCode
+  );
   httpServer = http.createServer(app);
   ioServer = createSocketServer(httpServer);
   await new Promise<void>((resolve) => {

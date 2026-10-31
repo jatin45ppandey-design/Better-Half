@@ -16,6 +16,9 @@ interface PenFightProps {
   players: { id: string; name: string; avatarInitials: string; avatarColor: string }[];
   onFinishMatch: (results: { winnerName?: string; playerScores: PlayerScoreSummary[] }) => void;
   isPaused?: boolean;
+  sessionState?: any;
+  onSendAction?: (action: any) => Promise<{ success: boolean; error?: string }>;
+  currentUserId?: string;
 }
 
 interface Pen {
@@ -50,15 +53,18 @@ export const PenFightGame: React.FC<PenFightProps> = ({
   players,
   onFinishMatch,
   isPaused = false,
+  sessionState,
+  onSendAction,
+  currentUserId,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [round, setRound] = useState(1);
-  const [roundWins, setRoundWins] = useState<{ [playerId: string]: number }>({});
-  const [currentTurnIdx, setCurrentTurnIdx] = useState(0);
+  const [localRound, setRound] = useState(1);
+  const [localRoundWins, setRoundWins] = useState<{ [playerId: string]: number }>({});
+  const [localCurrentTurnIdx, setCurrentTurnIdx] = useState(0);
   const [isAiming, setIsAiming] = useState(false);
   const [aimVector, setAimVector] = useState<{ dx: number; dy: number; power: number }>({ dx: 0, dy: 0, power: 0 });
   const [isSimulating, setIsSimulating] = useState(false);
-  const [roundWinner, setRoundWinner] = useState<string | null>(null);
+  const [localRoundWinner, setRoundWinner] = useState<string | null>(null);
   const [fallMessage, setFallMessage] = useState<string | null>(null);
 
   // Initialize pens
@@ -90,15 +96,99 @@ export const PenFightGame: React.FC<PenFightProps> = ({
     return penList;
   }, [players]);
 
-  const [pens, setPens] = useState<Pen[]>(spawnPens);
+  const [localPens, setPens] = useState<Pen[]>(spawnPens);
+  const isMultiplayer = Boolean(sessionState && onSendAction);
+  const [serverAnimationPens, setServerAnimationPens] = useState<Pen[]>([]);
+  const currentTurnIdx = isMultiplayer
+    ? Math.max(0, players.findIndex((player) => player.id === sessionState.currentTurnUserId))
+    : localCurrentTurnIdx;
+  const round = isMultiplayer ? sessionState.round : localRound;
+  const roundWins = isMultiplayer ? sessionState.roundWins || {} : localRoundWins;
+  const serverPens = isMultiplayer
+    ? (sessionState.pens || []).map((pen: any) => ({
+        id: pen.userId,
+        userId: pen.userId,
+        name: pen.name,
+        color: pen.color,
+        x: pen.x,
+        y: pen.y,
+        vx: pen.vx,
+        vy: pen.vy,
+        angle: pen.angle,
+        length: pen.length,
+        width: pen.width,
+        isAlive: pen.isAlive,
+      }))
+    : localPens;
+  const pens = isMultiplayer && serverAnimationPens.length > 0 ? serverAnimationPens : serverPens;
   const pensRef = useRef<Pen[]>(pens);
+  const isMyTurn = !isMultiplayer || sessionState.currentTurnUserId === currentUserId;
+  const serverRoundWinner = isMultiplayer
+    ? sessionState.roundStatus === 'MATCH_OVER'
+      ? players.find((player) => player.id === sessionState.matchWinnerUserId)?.name || 'Winner'
+      : sessionState.roundStatus === 'ROUND_OVER'
+      ? sessionState.roundWinnerUserId
+        ? players.find((player) => player.id === sessionState.roundWinnerUserId)?.name || 'Winner'
+        : 'DRAW'
+      : null
+    : null;
+  const roundWinner = isMultiplayer ? serverRoundWinner : localRoundWinner;
 
   useEffect(() => {
     pensRef.current = pens;
   }, [pens]);
 
+  // Animate the authoritative server simulation frames locally for presentation
+  // only; the final pen positions, collisions and eliminations always come from
+  // the server snapshot.
+  useEffect(() => {
+    if (!isMultiplayer || !sessionState?.simulationFrames?.length) return;
+    const frames = sessionState.simulationFrames;
+    let frameIndex = 0;
+    let animationId = 0;
+    setIsSimulating(true);
+
+    const renderFrame = () => {
+      const frame = frames[frameIndex];
+      if (frame) {
+        const finalByUser = new Map<string, any>(
+          (sessionState.pens || []).map((pen: any) => [pen.userId, pen])
+        );
+        const nextPens = frame.map((position: any) => {
+          const serverPen = finalByUser.get(position.id.replace(/^pen-/, '')) || {};
+          return {
+            id: position.id.replace(/^pen-/, ''),
+            userId: position.id.replace(/^pen-/, ''),
+            name: serverPen.name || players.find((player) => player.id === position.id.replace(/^pen-/, ''))?.name || 'Player',
+            color: serverPen.color || '#8b5cf6',
+            x: position.x,
+            y: position.y,
+            vx: 0,
+            vy: 0,
+            angle: position.angle,
+            length: serverPen.length || 44,
+            width: serverPen.width || 14,
+            isAlive: position.isAlive,
+          } as Pen;
+        });
+        setServerAnimationPens(nextPens);
+        frameIndex += 1;
+      }
+
+      if (frameIndex < frames.length) {
+        animationId = requestAnimationFrame(renderFrame);
+      } else {
+        setServerAnimationPens([]);
+        setIsSimulating(false);
+      }
+    };
+
+    animationId = requestAnimationFrame(renderFrame);
+    return () => cancelAnimationFrame(animationId);
+  }, [isMultiplayer, sessionState?.simulationFrames, sessionState?.pens, players]);
+
   const activePlayer = players[currentTurnIdx] || players[0];
-  const activePen = pens.find((p) => p.id === activePlayer.id);
+  const activePen = pens.find((p: Pen) => p.id === activePlayer.id);
 
   // Check round victory
   const checkRoundStatus = useCallback((currentPens: Pen[]) => {
@@ -146,7 +236,7 @@ export const PenFightGame: React.FC<PenFightProps> = ({
         return;
       }
 
-      if (isSimulating) {
+      if (isSimulating && !isMultiplayer) {
         let anyMoving = false;
         const updated = pensRef.current.map((pen) => ({ ...pen }));
 
@@ -368,6 +458,7 @@ export const PenFightGame: React.FC<PenFightProps> = ({
 
   // Handle Drag / Aiming Controls
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (isMultiplayer && !isMyTurn) return;
     if (isSimulating || isPaused || roundWinner || !activePen || !activePen.isAlive) return;
 
     const rect = canvasRef.current?.getBoundingClientRect();
@@ -412,6 +503,16 @@ export const PenFightGame: React.FC<PenFightProps> = ({
     if (!isAiming || !activePen) return;
 
     if (aimVector.power > 1.5) {
+      if (isMultiplayer) {
+        void onSendAction?.({
+          type: 'FLICK_PEN',
+          dx: aimVector.dx,
+          dy: aimVector.dy,
+          power: Math.min(100, Math.round(aimVector.power * 5)),
+        });
+        setIsAiming(false);
+        return;
+      }
       // Launch pen!
       const updated = pensRef.current.map((p) => {
         if (p.id === activePen.id) {
@@ -431,6 +532,16 @@ export const PenFightGame: React.FC<PenFightProps> = ({
 
   // Keyboard / Quick flick fallback
   const handleQuickFlick = (powerMultiplier = 1) => {
+    if (isMultiplayer) {
+      if (isSimulating || isPaused || roundWinner || !isMyTurn || !activePen?.isAlive) return;
+      void onSendAction?.({
+        type: 'FLICK_PEN',
+        dx: Math.cos(activePen.angle),
+        dy: Math.sin(activePen.angle),
+        power: Math.min(100, Math.round(60 * powerMultiplier)),
+      });
+      return;
+    }
     if (isSimulating || isPaused || roundWinner || !activePen || !activePen.isAlive) return;
     const angle = activePen.angle;
     const power = 12 * powerMultiplier;
@@ -449,6 +560,7 @@ export const PenFightGame: React.FC<PenFightProps> = ({
   };
 
   const handleRotatePen = () => {
+    if (isMultiplayer) return;
     if (isSimulating || isPaused || roundWinner || !activePen || !activePen.isAlive) return;
     setPens((prev) =>
       prev.map((p) => (p.id === activePen.id ? { ...p, angle: p.angle + Math.PI / 8 } : p))
@@ -456,6 +568,10 @@ export const PenFightGame: React.FC<PenFightProps> = ({
   };
 
   const handleNextRound = () => {
+    if (isMultiplayer) {
+      void onSendAction?.({ type: 'START_NEXT_ROUND' });
+      return;
+    }
     setPens(spawnPens());
     setRoundWinner(null);
     setRound((r) => r + 1);
@@ -503,6 +619,7 @@ export const PenFightGame: React.FC<PenFightProps> = ({
           variant="ghost"
           size="sm"
           onClick={handleNextRound}
+          disabled={isMultiplayer || isSimulating}
           className="text-xs text-gray-700 flex items-center gap-1.5"
         >
           <RotateCcw className="w-3.5 h-3.5" />
@@ -547,6 +664,7 @@ export const PenFightGame: React.FC<PenFightProps> = ({
               <Button
                 size="md"
                 onClick={handleNextRound}
+                disabled={isMultiplayer && sessionState.roundStatus === 'MATCH_OVER'}
                 className="bg-amber-500 hover:bg-amber-600 text-gray-950 font-bold flex items-center gap-2"
               >
                 Next Round <ChevronRight className="w-4 h-4" />
@@ -574,7 +692,7 @@ export const PenFightGame: React.FC<PenFightProps> = ({
               variant="outline"
               size="sm"
               onClick={handleRotatePen}
-              disabled={isSimulating || Boolean(roundWinner)}
+              disabled={isMultiplayer || isSimulating || Boolean(roundWinner) || !isMyTurn}
               className="text-xs text-gray-700 flex items-center gap-1.5"
             >
               <RotateCcw className="w-3.5 h-3.5" />
@@ -584,7 +702,7 @@ export const PenFightGame: React.FC<PenFightProps> = ({
               variant="secondary"
               size="sm"
               onClick={() => handleQuickFlick(0.8)}
-              disabled={isSimulating || Boolean(roundWinner)}
+              disabled={isSimulating || Boolean(roundWinner) || !isMyTurn}
               className="text-xs flex items-center gap-1.5"
             >
               <Target className="w-3.5 h-3.5" />
@@ -594,7 +712,7 @@ export const PenFightGame: React.FC<PenFightProps> = ({
               variant="primary"
               size="sm"
               onClick={() => handleQuickFlick(1.4)}
-              disabled={isSimulating || Boolean(roundWinner)}
+              disabled={isSimulating || Boolean(roundWinner) || !isMyTurn}
               className="text-xs flex items-center gap-1.5 bg-gradient-to-r from-violet-600 to-indigo-600"
             >
               <Zap className="w-3.5 h-3.5" />
