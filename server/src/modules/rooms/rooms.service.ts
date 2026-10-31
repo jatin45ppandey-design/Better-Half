@@ -947,37 +947,54 @@ export class RoomsService {
       },
     });
 
-    if (!room) {
-      throw new NotFoundError('Room not found');
-    }
-
-    if (room.hostId !== userId) {
-      throw new ForbiddenError('Only the room host can directly select the game');
-    }
+    if (!room) throw new NotFoundError('Room not found');
 
     if (!isGamePermittedForMode(gameId, room.mode)) {
       throw new AppError(`Game '${gameId}' is not permitted in ${room.mode.toLowerCase()} mode`, 400);
     }
 
-    await prisma.room.update({
-      where: { id: room.id },
-      data: { selectedGameId: gameId },
-    });
+    await prisma.$transaction(
+      async (tx) => {
+        await this.lockRoomRow(tx, room.id);
+        const currentRoom = await tx.room.findUnique({
+          where: { id: room.id },
+          select: { hostId: true, mode: true, status: true },
+        });
 
-    // Also update host's vote
-    await prisma.gameVote.upsert({
-      where: {
-        roomId_userId: {
-          roomId: room.id,
-          userId,
-        },
+        if (!currentRoom) throw new NotFoundError('Room not found');
+        if (currentRoom.hostId !== userId) {
+          throw new ForbiddenError('Only the room host can directly select the game');
+        }
+        if (!['WAITING', 'READY_TO_START'].includes(currentRoom.status)) {
+          throw new AppError('The game cannot be changed after the match has started.', 400);
+        }
+        if (!isGamePermittedForMode(gameId, currentRoom.mode)) {
+          throw new AppError(`Game '${gameId}' is not permitted in ${currentRoom.mode.toLowerCase()} mode`, 400);
+        }
+
+        await tx.room.update({
+          where: { id: room.id },
+          data: { selectedGameId: gameId },
+        });
+
+        await tx.gameVote.upsert({
+          where: {
+            roomId_userId: { roomId: room.id, userId },
+          },
+          create: { roomId: room.id, userId, gameId },
+          update: { gameId },
+        });
       },
-      create: { roomId: room.id, userId, gameId },
-      update: { gameId },
-    });
+      {
+        maxWait: 5000,
+        timeout: 10000,
+      }
+    );
 
-    const full = await this.findRoomWithRelations({ id: room.id });
-    return this.formatRoomSnapshot(full);
+    const fullRoom = await this.findRoomWithRelations({ id: room.id });
+    if (!fullRoom) throw new NotFoundError('Room not found after selecting game');
+
+    return this.formatRoomSnapshot(fullRoom);
   }
 
   /**
@@ -1197,15 +1214,38 @@ export class RoomsService {
     });
 
     if (!room) throw new NotFoundError('Room not found');
-    if (room.hostId !== hostId) throw new ForbiddenError('Only the host can close the room');
 
-    await prisma.room.update({
-      where: { id: room.id },
-      data: { status: ROOM_STATUS.CLOSED },
-    });
+    await prisma.$transaction(
+      async (tx) => {
+        await this.lockRoomRow(tx, room.id);
+        const currentRoom = await tx.room.findUnique({
+          where: { id: room.id },
+          select: { hostId: true, status: true },
+        });
 
-    const full = await this.findRoomWithRelations({ id: room.id });
-    return this.formatRoomSnapshot(full);
+        if (!currentRoom) throw new NotFoundError('Room not found');
+        if (currentRoom.hostId !== hostId) {
+          throw new ForbiddenError('Only the host can close the room');
+        }
+        if (currentRoom.status === 'IN_PROGRESS') {
+          throw new AppError('An active game must be completed or abandoned before closing the room.', 400);
+        }
+
+        await tx.room.update({
+          where: { id: room.id },
+          data: { status: ROOM_STATUS.CLOSED },
+        });
+      },
+      {
+        maxWait: 5000,
+        timeout: 10000,
+      }
+    );
+
+    const fullRoom = await this.findRoomWithRelations({ id: room.id });
+    if (!fullRoom) throw new NotFoundError('Room not found after closing');
+
+    return this.formatRoomSnapshot(fullRoom);
   }
 
   /**
@@ -1219,35 +1259,54 @@ export class RoomsService {
     });
 
     if (!room) throw new NotFoundError('Room not found');
-    if (room.status === ROOM_STATUS.CLOSED || room.status === ROOM_STATUS.EXPIRED) {
-      throw new AppError('Cannot post messages to a closed or expired room', 400);
-    }
 
-    const participant = await prisma.roomParticipant.findUnique({
-      where: { roomId_userId: { roomId: room.id, userId: senderId } },
-      include: { user: true },
-    });
+    const cleanMessage = message.trim();
+    if (!cleanMessage) throw new AppError('Message cannot be empty', 400);
 
-    if (!participant || participant.leftAt) {
-      throw new ForbiddenError('Only active room participants can send chat messages');
-    }
+    const created = await prisma.$transaction(
+      async (tx) => {
+        await this.lockRoomRow(tx, room.id);
+        const currentRoom = await tx.room.findUnique({
+          where: { id: room.id },
+          select: { status: true },
+        });
 
-    const created = await prisma.roomMessage.create({
-      data: {
-        roomId: room.id,
-        senderId,
-        message: message.trim(),
-      },
-      include: {
-        sender: {
-          select: {
-            id: true,
-            displayName: true,
-            username: true,
+        if (!currentRoom) throw new NotFoundError('Room not found');
+        if (currentRoom.status === ROOM_STATUS.CLOSED || currentRoom.status === ROOM_STATUS.EXPIRED) {
+          throw new AppError('Cannot post messages to a closed or expired room', 400);
+        }
+
+        const participant = await tx.roomParticipant.findUnique({
+          where: { roomId_userId: { roomId: room.id, userId: senderId } },
+          select: { leftAt: true },
+        });
+
+        if (!participant || participant.leftAt) {
+          throw new ForbiddenError('Only active room participants can send chat messages');
+        }
+
+        return tx.roomMessage.create({
+          data: {
+            roomId: room.id,
+            senderId,
+            message: cleanMessage,
           },
-        },
+          include: {
+            sender: {
+              select: {
+                id: true,
+                displayName: true,
+                username: true,
+              },
+            },
+          },
+        });
       },
-    });
+      {
+        maxWait: 5000,
+        timeout: 10000,
+      }
+    );
 
     return {
       id: created.id,
