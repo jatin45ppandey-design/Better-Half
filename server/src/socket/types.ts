@@ -62,10 +62,10 @@ export interface ServerToClientEvents {
   // Phase 3 Real-time Game Events (Server to Client)
   'game:session:started': (data: { sessionId: string; gameId: string; roomCode: string }) => void;
   'game:state': (data: { publicState: Record<string, unknown> }) => void;
-  'game:state:private': (data: { privateState: Record<string, unknown> }) => void;
+  'game:state:private': (data: { sessionId: string; privateState: Record<string, unknown> }) => void;
   'game:action:accepted': (data: { actionId: string; version: number }) => void;
   'game:action:rejected': (data: { actionId: string; error: string }) => void;
-  'game:event': (data: { type: string; payload: unknown }) => void;
+  'game:event': (data: { sessionId: string; type: string; payload: unknown }) => void;
   'game:paused': (data: { sessionId: string; pausedBy: string }) => void;
   'game:resumed': (data: { sessionId: string; resumedBy: string }) => void;
   'game:completed': (data: { sessionId: string; winnerUserId: string | null; scores: Record<string, number>; matchId?: string | null }) => void;
