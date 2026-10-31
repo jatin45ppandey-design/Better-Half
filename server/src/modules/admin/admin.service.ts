@@ -215,6 +215,8 @@ export class AdminService {
     const updatedUser = await prisma.$transaction(async (tx) => {
       // Protect last active administrator from being suspended (transactional race guard)
       if (isTargetAdmin && status === 'SUSPENDED') {
+        if (typeof (tx as any).$queryRaw === 'function') await (tx as any).$queryRaw<Array<{ id: string }>>`SELECT "id" FROM "AppRole" WHERE "role" = 'ADMIN' FOR UPDATE`;
+
         const activeAdminCount = await tx.appRole.count({
           where: {
             role: 'ADMIN',
@@ -305,6 +307,9 @@ export class AdminService {
   async revokeRole(targetUserId: string, role: 'ADMIN' | 'MODERATOR', actorUserId: string) {
     return prisma.$transaction(async (tx) => {
       if (role === 'ADMIN') {
+        // Lock ADMIN role records to serialize concurrent role modifications and protect last admin
+        if (typeof (tx as any).$queryRaw === 'function') await (tx as any).$queryRaw<Array<{ id: string }>>`SELECT "id" FROM "AppRole" WHERE "role" = 'ADMIN' FOR UPDATE`;
+
         const activeAdminCount = await tx.appRole.count({
           where: {
             role: 'ADMIN',
@@ -379,26 +384,29 @@ export class AdminService {
       throw new Error(`Game "${def.name}" is strictly Couple-only and cannot be enabled in Friend Mode.`);
     }
 
-    const updated = await prisma.gameConfiguration.upsert({
-      where: { gameId },
-      update: {
-        ...(data.isEnabled !== undefined ? { isEnabled: data.isEnabled } : {}),
-        ...(data.coupleEnabled !== undefined ? { coupleEnabled: data.coupleEnabled } : {}),
-        ...(data.friendEnabled !== undefined ? { friendEnabled: data.friendEnabled } : {}),
-        ...(data.maintenanceMessage !== undefined ? { maintenanceMessage: data.maintenanceMessage } : {}),
-        updatedBy: actorUserId,
-      },
-      create: {
-        gameId,
-        isEnabled: data.isEnabled ?? true,
-        coupleEnabled: data.coupleEnabled ?? def.modes.includes('couple'),
-        friendEnabled: isCoupleOnly ? false : (data.friendEnabled ?? def.modes.includes('friend')),
-        maintenanceMessage: data.maintenanceMessage || null,
-        updatedBy: actorUserId,
-      },
-    });
+    const updated = await prisma.$transaction(async (tx) => {
+      const rec = await tx.gameConfiguration.upsert({
+        where: { gameId },
+        update: {
+          ...(data.isEnabled !== undefined ? { isEnabled: data.isEnabled } : {}),
+          ...(data.coupleEnabled !== undefined ? { coupleEnabled: data.coupleEnabled } : {}),
+          ...(data.friendEnabled !== undefined ? { friendEnabled: data.friendEnabled } : {}),
+          ...(data.maintenanceMessage !== undefined ? { maintenanceMessage: data.maintenanceMessage } : {}),
+          updatedBy: actorUserId,
+        },
+        create: {
+          gameId,
+          isEnabled: data.isEnabled ?? true,
+          coupleEnabled: data.coupleEnabled ?? def.modes.includes('couple'),
+          friendEnabled: isCoupleOnly ? false : (data.friendEnabled ?? def.modes.includes('friend')),
+          maintenanceMessage: data.maintenanceMessage || null,
+          updatedBy: actorUserId,
+        },
+      });
 
-    await auditService.logAction(actorUserId, 'GAME_CONFIG_UPDATED', 'GAME', gameId, data);
+      await auditService.logAction(actorUserId, 'GAME_CONFIG_UPDATED', 'GAME', gameId, data, tx);
+      return rec;
+    });
     return updated;
   }
 
@@ -540,24 +548,28 @@ export class AdminService {
 
     const sourceKey = `custom-${data.gameId}-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
 
-    const question = await prisma.questionEntry.create({
-      data: {
-        gameId: data.gameId,
-        sourceKey,
-        prompt: data.prompt,
-        questionType: data.questionType || null,
-        optionA: data.optionA || null,
-        optionB: data.optionB || null,
-        category: data.category || null,
-        intensity: data.intensity || null,
-        isActive: true,
-        createdBy: actorUserId,
-      },
-    });
+    const question = await prisma.$transaction(async (tx) => {
+      const q = await tx.questionEntry.create({
+        data: {
+          gameId: data.gameId,
+          sourceKey,
+          prompt: data.prompt,
+          questionType: data.questionType || null,
+          optionA: data.optionA || null,
+          optionB: data.optionB || null,
+          category: data.category || null,
+          intensity: data.intensity || null,
+          isActive: true,
+          createdBy: actorUserId,
+        },
+      });
 
-    await auditService.logAction(actorUserId, 'QUESTION_CREATED', 'QUESTION', question.id, {
-      gameId: data.gameId,
-      category: data.category,
+      await auditService.logAction(actorUserId, 'QUESTION_CREATED', 'QUESTION', q.id, {
+        gameId: data.gameId,
+        category: data.category,
+      }, tx);
+
+      return q;
     });
 
     return question;
@@ -581,21 +593,24 @@ export class AdminService {
     });
     if (!question) throw new Error('Question not found.');
 
-    const updated = await prisma.questionEntry.update({
-      where: { id: questionId },
-      data: {
-        ...(data.prompt !== undefined ? { prompt: data.prompt } : {}),
-        ...(data.questionType !== undefined ? { questionType: data.questionType } : {}),
-        ...(data.optionA !== undefined ? { optionA: data.optionA } : {}),
-        ...(data.optionB !== undefined ? { optionB: data.optionB } : {}),
-        ...(data.category !== undefined ? { category: data.category } : {}),
-        ...(data.intensity !== undefined ? { intensity: data.intensity } : {}),
-        ...(data.isActive !== undefined ? { isActive: data.isActive } : {}),
-        updatedBy: actorUserId,
-      },
-    });
+    const updated = await prisma.$transaction(async (tx) => {
+      const q = await tx.questionEntry.update({
+        where: { id: questionId },
+        data: {
+          ...(data.prompt !== undefined ? { prompt: data.prompt } : {}),
+          ...(data.questionType !== undefined ? { questionType: data.questionType } : {}),
+          ...(data.optionA !== undefined ? { optionA: data.optionA } : {}),
+          ...(data.optionB !== undefined ? { optionB: data.optionB } : {}),
+          ...(data.category !== undefined ? { category: data.category } : {}),
+          ...(data.intensity !== undefined ? { intensity: data.intensity } : {}),
+          ...(data.isActive !== undefined ? { isActive: data.isActive } : {}),
+          updatedBy: actorUserId,
+        },
+      });
 
-    await auditService.logAction(actorUserId, 'QUESTION_UPDATED', 'QUESTION', questionId, data);
+      await auditService.logAction(actorUserId, 'QUESTION_UPDATED', 'QUESTION', questionId, data, tx);
+      return q;
+    });
     return updated;
   }
 
@@ -605,14 +620,17 @@ export class AdminService {
     });
     if (!question) throw new Error('Question not found.');
 
-    // Soft delete by disabling
-    const updated = await prisma.questionEntry.update({
-      where: { id: questionId },
-      data: { isActive: false, updatedBy: actorUserId },
-    });
+    // Soft delete by disabling within the same transaction as audit log
+    const updated = await prisma.$transaction(async (tx) => {
+      const q = await tx.questionEntry.update({
+        where: { id: questionId },
+        data: { isActive: false, updatedBy: actorUserId },
+      });
 
-    await auditService.logAction(actorUserId, 'QUESTION_DISABLED', 'QUESTION', questionId, {
-      gameId: question.gameId,
+      await auditService.logAction(actorUserId, 'QUESTION_DISABLED', 'QUESTION', questionId, {
+        gameId: question.gameId,
+      }, tx);
+      return q;
     });
 
     return updated;

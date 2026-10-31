@@ -6,6 +6,7 @@ import type {
   GameParticipant,
 } from '../../core/gameEngine.types.js';
 import type { TruthOrDareState, TruthOrDareAction } from './truthOrDare.types.js';
+import { createRng } from '../../../../utils/random.js';
 
 export class TruthOrDareEngine
   implements IGameEngine<TruthOrDareState, Record<string, never>, TruthOrDareAction>
@@ -39,7 +40,9 @@ export class TruthOrDareEngine
       params.customQuestions && params.customQuestions.length > 0
         ? params.customQuestions.map((q) => ({
             id: q.id,
-            type: q.category?.toUpperCase() === 'DARE' ? ('DARE' as const) : ('TRUTH' as const),
+            type: (q.questionType?.toUpperCase() === 'DARE' || (!q.questionType && q.category?.toUpperCase() === 'DARE'))
+              ? ('DARE' as const)
+              : ('TRUTH' as const),
             text: q.prompt,
             category: q.category || 'Romantic',
             intensity: q.intensity === 3 ? 'Wild' : q.intensity === 2 ? 'Spicy' : 'Soft',
@@ -138,7 +141,8 @@ export class TruthOrDareEngine
         : customFallback.length > 0
         ? customFallback
         : builtInFallback;
-      const chosen = candidates[Math.floor(Math.random() * candidates.length)];
+      const rng = createRng((context.rngSeed || 'tod') + `_turn_${state.totalTurns}_${action.promptType}`);
+      const chosen = rng.choice(candidates);
 
       state.selectedType = action.promptType;
       state.category = cat;

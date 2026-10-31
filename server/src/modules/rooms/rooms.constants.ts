@@ -1,3 +1,5 @@
+import crypto from 'node:crypto';
+
 export const ROOM_MODES = {
   COUPLE: 'couple',
   FRIEND: 'friend',
@@ -72,7 +74,7 @@ const CODE_ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
 export function generateRoomCode(): string {
   let result = '';
   for (let i = 0; i < 6; i++) {
-    const randomIndex = Math.floor(Math.random() * CODE_ALPHABET.length);
+    const randomIndex = crypto.randomInt(0, CODE_ALPHABET.length);
     result += CODE_ALPHABET[randomIndex];
   }
   return result;

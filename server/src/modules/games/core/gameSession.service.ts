@@ -423,11 +423,15 @@ export class GameSessionService {
     const participant = session.participants.find((p) => p.userId === actorUserId);
     if (!participant) throw new ForbiddenError('Not a participant of this game session');
 
+    if (session.status !== 'ACTIVE') {
+      throw new AppError(`Cannot pause session in '${session.status}' state. Only ACTIVE sessions can be paused.`, 409);
+    }
+
     const nextVersion = session.version + 1;
 
     // Persist pause status and CAS version increment to database
     const updateResult = await prisma.gameSession.updateMany({
-      where: { id: sessionId, stateVersion: session.version },
+      where: { id: sessionId, status: 'ACTIVE', stateVersion: session.version },
       data: {
         status: 'PAUSED',
         stateVersion: nextVersion,
@@ -456,11 +460,15 @@ export class GameSessionService {
     const participant = session.participants.find((p) => p.userId === actorUserId);
     if (!participant) throw new ForbiddenError('Not a participant of this game session');
 
+    if (session.status !== 'PAUSED') {
+      throw new AppError(`Cannot resume session in '${session.status}' state. Only PAUSED sessions can be resumed.`, 409);
+    }
+
     const nextVersion = session.version + 1;
 
     // Persist resume status and CAS version increment to database
     const updateResult = await prisma.gameSession.updateMany({
-      where: { id: sessionId, stateVersion: session.version },
+      where: { id: sessionId, status: 'PAUSED', stateVersion: session.version },
       data: {
         status: 'ACTIVE',
         stateVersion: nextVersion,
@@ -490,6 +498,20 @@ export class GameSessionService {
     }
     if (!prevSession.roomId) {
       throw new AppError('Cannot rematch a session without an associated room.', 400);
+    }
+
+    // Repeated or concurrent rematch requests return the active rematch session if already started
+    const existingActiveInitial = typeof prisma.gameSession.findFirst === 'function'
+      ? await prisma.gameSession.findFirst({
+      where: { roomId: prevSession.roomId, status: { in: ['ACTIVE', 'PAUSED'] } },
+      select: { id: true, gameId: true },
+    }) : null;
+    if (
+      existingActiveInitial &&
+      normalizeGameId(existingActiveInitial.gameId) === normalizeGameId(prevSession.gameId)
+    ) {
+      const existingContext = await this.getOrRestoreSession(existingActiveInitial.id);
+      if (existingContext) return existingContext;
     }
 
     const room = await prisma.room.findUnique({
@@ -587,7 +609,7 @@ export class GameSessionService {
     // Serialize rematch creation on the room row. The previous completed
     // session, current host, participants, readiness, config and active-session
     // uniqueness are all revalidated under the same lock as the new insert.
-    await prisma.$transaction(async (tx) => {
+    const txResult = await prisma.$transaction(async (tx) => {
       await tx.$queryRaw<Array<{ id: string }>>`SELECT "id" FROM "Room" WHERE "id" = ${room.id} FOR UPDATE`;
 
       const [currentRoom, previousRecord, existingActive, lockedConfig] = await Promise.all([
@@ -633,6 +655,9 @@ export class GameSessionService {
         throw new AppError('The previous game changed. Please return to the lobby.', 409);
       }
       if (existingActive) {
+        if (normalizeGameId(previousRecord.gameId) === gameId) {
+          return { alreadyCreatedId: existingActive.id };
+        }
         throw new AppError('Another active game session already exists for this room.', 409);
       }
       if (lockedConfig) {
@@ -700,6 +725,11 @@ export class GameSessionService {
       maxWait: 5000,
       timeout: 15000,
     });
+
+    if (txResult?.alreadyCreatedId) {
+      const restored = await this.getOrRestoreSession(txResult.alreadyCreatedId);
+      if (restored) return restored;
+    }
 
     gameStateService.setSession(newSessionId, newContext);
     return newContext;

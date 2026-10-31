@@ -74,11 +74,27 @@ export async function getMyActiveRooms(req: Request, res: Response, next: NextFu
 
 export async function joinRoom(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
+    const key = req.user?.id || getClientIp(req);
+    const bruteForceCheck = isRoomLookupBlocked(key);
+    if (bruteForceCheck.blocked) {
+      res.setHeader('Retry-After', bruteForceCheck.retryAfterSeconds);
+      res.status(429).json({
+        error: 'Too Many Requests',
+        message: 'Too many failed room lookup attempts. Please wait before trying again.',
+        retryAfter: bruteForceCheck.retryAfterSeconds,
+      });
+      return;
+    }
+
     const userId = req.user!.id;
     const { code } = req.body;
     const room = await roomsService.joinRoom(userId, code);
     res.status(200).json(room);
   } catch (error) {
+    if (error instanceof NotFoundError) {
+      const key = req.user?.id || getClientIp(req);
+      recordFailedRoomLookup(key);
+    }
     next(error);
   }
 }

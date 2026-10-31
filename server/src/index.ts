@@ -1,6 +1,10 @@
 import http from 'node:http';
 import { createApp } from './app.js';
+import { assertValidEnvironment } from './config/envValidator.js';
 import { env } from './config/env.js';
+
+// Fail fast before accepting traffic if mandatory production configuration is missing or invalid
+assertValidEnvironment();
 import { prisma } from './config/prisma.js';
 import { createSocketServer } from './socket/index.js';
 import { gameSessionService } from './modules/games/core/gameSession.service.js';

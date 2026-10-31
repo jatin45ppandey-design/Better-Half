@@ -19,8 +19,10 @@ export interface IRateLimitStore {
 
 export class MemoryRateLimitStore implements IRateLimitStore {
   private map = new Map<string, RateLimitRecord>();
+  private maxEntries: number;
 
-  constructor(cleanupIntervalMs = 120000) {
+  constructor(cleanupIntervalMs = 120000, maxEntries = 10000) {
+    this.maxEntries = maxEntries;
     setInterval(() => {
       const now = Date.now();
       for (const [key, record] of this.map.entries()) {
@@ -36,6 +38,10 @@ export class MemoryRateLimitStore implements IRateLimitStore {
   }
 
   set(key: string, record: RateLimitRecord): void {
+    if (this.map.size >= this.maxEntries && !this.map.has(key)) {
+      const oldestKey = this.map.keys().next().value;
+      if (oldestKey) this.map.delete(oldestKey);
+    }
     this.map.set(key, record);
   }
 
@@ -150,6 +156,10 @@ const bruteForceMap = new Map<string, ProgressiveCooldown>();
 
 export function recordFailedRoomLookup(key: string): void {
   const now = Date.now();
+  if (bruteForceMap.size >= 10000 && !bruteForceMap.has(key)) {
+    const oldestKey = bruteForceMap.keys().next().value;
+    if (oldestKey) bruteForceMap.delete(oldestKey);
+  }
   const entry = bruteForceMap.get(key) || { failureCount: 0, blockedUntil: 0 };
   entry.failureCount += 1;
 
@@ -219,4 +229,11 @@ export const adminLimiter = rateLimiter({
   windowMs: 60 * 1000,
   max: 30,
   message: 'Admin action rate limit exceeded.',
+});
+
+export const preAuthLimiter = rateLimiter({
+  windowMs: 60 * 1000,
+  max: 120,
+  keyGenerator: (req) => `preauth:${getClientIp(req)}`,
+  message: 'Too many requests from this IP address. Please slow down.',
 });

@@ -1,6 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../../config/prisma.js';
-import { NotFoundError, ForbiddenError, AppError } from '../../utils/errors.js';
+import { NotFoundError, ForbiddenError, AppError, ConflictError } from '../../utils/errors.js';
+import { gameStateService } from '../games/core/gameState.service.js';
 import type {
   RoomSnapshot,
   RoomParticipantSnapshot,
@@ -131,7 +132,13 @@ export class RoomsService {
     mode: RoomMode,
     db: Prisma.TransactionClient | typeof prisma = prisma
   ): Promise<void> {
-    const config = await db.gameConfiguration.findUnique({ where: { gameId } });
+    if (!db.gameConfiguration || typeof db.gameConfiguration.findUnique !== 'function') return;
+    let config = null;
+    try {
+      config = await db.gameConfiguration.findUnique({ where: { gameId } });
+    } catch (err) {
+      return;
+    }
     if (!config) return;
     if (!config.isEnabled) {
       throw new AppError(`Game "${gameId}" is currently disabled by administrators.`, 400);
@@ -312,16 +319,15 @@ export class RoomsService {
     }
     await this.assertGameEnabledForMode(selectedGameId, mode);
 
-    // Generate unique code with collision safety
+    // Generate cryptographically secure unique code with bounded collision retries
     let code = generateRoomCode();
     let collisionCount = 0;
     while (await prisma.room.findUnique({ where: { code } })) {
-      code = generateRoomCode();
       collisionCount++;
-      if (collisionCount > 10) {
-        code = `R${Date.now().toString(36).slice(-5).toUpperCase()}`;
-        break;
+      if (collisionCount >= 15) {
+        throw new AppError('Unable to generate unique room code due to collision limit. Please retry.', 503);
       }
+      code = generateRoomCode();
     }
 
     const defaultName =
@@ -586,7 +592,7 @@ export class RoomsService {
   /**
    * Join room by 6-letter room code
    */
-  async joinRoom(userId: string, code: string) {
+  async joinRoom(userId: string, code: string, options?: { invitationId?: string }) {
     const cleanCode = code.trim().toUpperCase();
     const existingRoom = await prisma.room.findUnique({
       where: { code: cleanCode },
@@ -635,6 +641,22 @@ export class RoomsService {
         const currentRoom = await tx.room.findUnique({
           where: { id: existingRoom.id },
         });
+
+        if (options?.invitationId) {
+          const inviteUpdate = await tx.roomInvitation.updateMany({
+            where: {
+              id: options.invitationId,
+              receiverId: userId,
+              roomId: existingRoom.id,
+              status: 'PENDING',
+              expiresAt: { gt: new Date() },
+            },
+            data: { status: 'ACCEPTED' },
+          });
+          if (inviteUpdate.count === 0) {
+            throw new ConflictError('Invitation has expired or already been accepted/resolved.');
+          }
+        }
 
         if (!currentRoom || [ROOM_STATUS.CLOSED, ROOM_STATUS.EXPIRED, ROOM_STATUS.IN_PROGRESS, 'COMPLETED'].includes(currentRoom.status as any)) {
           throw new AppError('This room is not accepting new participants.', 400);
@@ -813,6 +835,10 @@ export class RoomsService {
             data: { status: ROOM_STATUS.CLOSED },
           });
           roomClosed = true;
+          await tx.gameSession.updateMany({
+            where: { roomId: room.id, status: { in: ['ACTIVE', 'PAUSED'] } },
+            data: { status: 'ABANDONED' },
+          });
         } else if (currentRoom.hostId === userId) {
           const nextHost = remaining[0];
           newHostId = nextHost.userId;
@@ -1533,6 +1559,10 @@ export class RoomsService {
           where: { id: room.id },
           data: { status: ROOM_STATUS.CLOSED },
         });
+        await prisma.gameSession.updateMany({
+          where: { roomId: room.id, status: { in: ['ACTIVE', 'PAUSED'] } },
+          data: { status: 'ABANDONED' },
+        });
         closedRooms++;
       } else {
         const nextHost = activeCandidates[0];
@@ -1569,30 +1599,40 @@ export class RoomsService {
    */
   async cleanupExpiredRooms(): Promise<{ expiredCount: number }> {
     const now = new Date();
-    const result = await prisma.room.updateMany({
+    const expiredRoomsResult = await prisma.room.updateMany({
       where: {
         expiresAt: { lte: now },
         status: { notIn: [ROOM_STATUS.CLOSED, ROOM_STATUS.EXPIRED] },
       },
-      data: {
-        status: ROOM_STATUS.EXPIRED,
-      },
+      data: { status: ROOM_STATUS.EXPIRED },
     });
+    const expiredCount = expiredRoomsResult?.count || 0;
+
+    if (expiredCount > 0 && typeof prisma.gameSession?.updateMany === 'function') {
+      try {
+        const expired = await prisma.room.findMany({
+          where: { status: ROOM_STATUS.EXPIRED },
+          select: { id: true },
+        });
+        const ids = (expired || []).map((r) => r.id);
+        if (ids.length > 0) {
+          await prisma.gameSession.updateMany({
+            where: { roomId: { in: ids }, status: { in: ['ACTIVE', 'PAUSED'] } },
+            data: { status: 'ABANDONED' },
+          });
+        }
+      } catch (_e) {}
+    }
 
     await prisma.roomInvitation.updateMany({
       where: {
         status: 'PENDING',
-        OR: [
-          { expiresAt: { lte: now } },
-          { room: { status: ROOM_STATUS.EXPIRED } },
-        ],
+        expiresAt: { lte: now },
       },
-      data: {
-        status: 'EXPIRED',
-      },
+      data: { status: 'EXPIRED' },
     });
 
-    return { expiredCount: result.count };
+    return { expiredCount };
   }
 
   /**

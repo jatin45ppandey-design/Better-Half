@@ -172,12 +172,16 @@ export class FriendsService {
     });
 
     if (oppositeRequest) {
-      // Automatically accept in a transaction!
+      // Automatically accept in a transaction with race-safe conditional update!
       return prisma.$transaction(async (tx) => {
-        await tx.friendRequest.update({
-          where: { id: oppositeRequest.id },
+        const updateOpposite = await tx.friendRequest.updateMany({
+          where: { id: oppositeRequest.id, status: 'PENDING' },
           data: { status: 'ACCEPTED' },
         });
+
+        if (updateOpposite.count === 0) {
+          throw new ConflictError('Mutual friend request status changed concurrently.');
+        }
 
         await tx.friendship.createMany({
           data: [
@@ -256,10 +260,15 @@ export class FriendsService {
     }
 
     return prisma.$transaction(async (tx) => {
-      await tx.friendRequest.update({
-        where: { id: requestId },
+      // Conditional atomic status check: only proceed if status is still PENDING
+      const updateResult = await tx.friendRequest.updateMany({
+        where: { id: requestId, receiverId: userId, status: 'PENDING' },
         data: { status: 'ACCEPTED' },
       });
+
+      if (updateResult.count === 0) {
+        throw new ConflictError('Friend request is no longer pending or has already been resolved.');
+      }
 
       await tx.friendship.createMany({
         data: [
@@ -289,10 +298,14 @@ export class FriendsService {
       throw new ForbiddenError('You can only reject requests addressed to you');
     }
 
-    await prisma.friendRequest.update({
-      where: { id: requestId },
+    const updateResult = await prisma.friendRequest.updateMany({
+      where: { id: requestId, receiverId: userId, status: 'PENDING' },
       data: { status: 'REJECTED' },
     });
+
+    if (updateResult.count === 0) {
+      throw new ConflictError('Friend request is no longer pending or has already been resolved.');
+    }
 
     return { success: true, message: 'Friend request declined' };
   }
@@ -313,10 +326,14 @@ export class FriendsService {
       throw new ForbiddenError('You can only cancel requests you created');
     }
 
-    await prisma.friendRequest.update({
-      where: { id: requestId },
+    const updateResult = await prisma.friendRequest.updateMany({
+      where: { id: requestId, senderId: userId, status: 'PENDING' },
       data: { status: 'CANCELLED' },
     });
+
+    if (updateResult.count === 0) {
+      throw new ConflictError('Friend request is no longer pending or has already been resolved.');
+    }
 
     return { success: true, message: 'Friend request cancelled' };
   }

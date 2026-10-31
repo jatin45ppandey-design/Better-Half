@@ -1,17 +1,10 @@
 import dotenv from 'dotenv';
-import { z } from 'zod';
+import { productionEnvSchema, baseEnvSchema } from './envValidator.js';
 
 dotenv.config();
 
-const envSchema = z.object({
-  NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
-  PORT: z.coerce.number().default(4000),
-  DATABASE_URL: z.string().optional().default(''),
-  DIRECT_URL: z.string().optional().default(''),
-  SUPABASE_URL: z.string().url({ message: 'SUPABASE_URL must be a valid URL (e.g. https://<project>.supabase.co)' }),
-  SUPABASE_PUBLISHABLE_KEY: z.string().min(1, { message: 'SUPABASE_PUBLISHABLE_KEY is required' }),
-  FRONTEND_URL: z.string().default('http://localhost:5173'),
-});
+const isProduction = process.env.NODE_ENV === 'production';
+const envSchema = isProduction ? productionEnvSchema : baseEnvSchema;
 
 const parsed = envSchema.safeParse(process.env);
 

@@ -32,7 +32,7 @@ export const BetterHalfLogo: React.FC<BetterHalfLogoProps> = ({
       ? 'text-white'
       : variant === 'light'
       ? 'text-[#1E1035]'
-      : 'text-[#1E1035] dark:text-white';
+      : 'text-[#1E1035]';
 
   return (
     <div className={`inline-flex items-center gap-2.5 select-none ${className}`}>
@@ -69,7 +69,7 @@ export const BetterHalfLogo: React.FC<BetterHalfLogoProps> = ({
         <span
           className={`font-extrabold tracking-tight font-heading ${textSizes} ${textColorClass}`}
         >
-          Better<span className="text-[#8B5CF6]">-Half</span>
+          Better-Half
         </span>
       )}
     </div>

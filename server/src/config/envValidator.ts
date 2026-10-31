@@ -56,6 +56,25 @@ export const KNOWN_CONFIG_KEYS = [
   'FRONTEND_URL',
 ] as const;
 
+/**
+ * Asserts environment is valid before application starts listening.
+ * Fails fast and exits with code 1 if production or critical environment variables are missing or invalid.
+ */
+export function assertValidEnvironment(env: Record<string, string | undefined> = process.env): ValidationResult {
+  const result = validateEnvironment(env);
+  if (!result.isValid) {
+    console.error('❌ Critical Environment Configuration Error:');
+    for (const error of result.errors) {
+      console.error(`  - ${error}`);
+    }
+    if (env.NODE_ENV !== 'test') {
+      console.error('Server cannot start with an invalid environment configuration. Exiting.');
+      process.exit(1);
+    }
+  }
+  return result;
+}
+
 export interface ValidationResult {
   isValid: boolean;
   errors: string[];

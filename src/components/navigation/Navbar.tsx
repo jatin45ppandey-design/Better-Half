@@ -86,7 +86,7 @@ export const Navbar: React.FC = () => {
   };
 
   return (
-    <header className="sticky top-0 z-40 w-full bg-[#FAF6FD]/90 backdrop-blur-md border-b border-[#E8DEF8] transition-all">
+    <header className={`sticky top-0 z-40 w-full transition-all ${isLandingPage ? 'bg-transparent border-b-0' : 'bg-[#FAF6FD]/90 backdrop-blur-md border-b border-[#E8DEF8]'}`}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
         {/* Brand Logo */}
         <Link

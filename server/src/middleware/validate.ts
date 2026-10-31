@@ -1,6 +1,10 @@
 import { Request, Response, NextFunction } from 'express';
 import { ZodSchema, ZodError } from 'zod';
 
+export function validate(schema: ZodSchema) {
+  return validateRequest({ body: schema });
+}
+
 export function validateRequest(schemas: {
   body?: ZodSchema;
   query?: ZodSchema;

@@ -47,14 +47,37 @@ export function createSocketServer(httpServer: http.Server) {
   // Supabase Auth verification handshake
   io.use(socketAuthMiddleware);
 
-  // Per-socket event frequency limiter
+  // Per-socket and account-level event frequency tracking
   const socketRateMap = new Map<string, { count: number; resetAt: number }>();
+  const userRateMap = new Map<string, { count: number; resetAt: number }>();
+  const userSocketsMap = new Map<string, Set<string>>();
+  const MAX_CONCURRENT_SOCKETS_PER_USER = 10;
 
   // Register room and presence events on connection
   io.on('connection', (socket) => {
-    // Socket packet event limiter: max 35 events per second per socket
+    const userId = socket.data.userId;
+
+    // Track concurrent connections per account
+    let userSockets = userSocketsMap.get(userId);
+    if (!userSockets) {
+      userSockets = new Set();
+      userSocketsMap.set(userId, userSockets);
+    }
+    if (userSockets.size >= MAX_CONCURRENT_SOCKETS_PER_USER) {
+      socket.emit('room:error', {
+        code: 'CONCURRENT_LIMIT',
+        message: 'Too many concurrent socket connections for this account.',
+      });
+      socket.disconnect(true);
+      return;
+    }
+    userSockets.add(socket.id);
+
+    // Socket packet event limiter: max 35 per socket, max 60 per account per second
     socket.use(([event], next) => {
       const now = Date.now();
+
+      // 1. Per-socket limit
       let limit = socketRateMap.get(socket.id);
       if (!limit || now > limit.resetAt) {
         limit = { count: 1, resetAt: now + 1000 };
@@ -65,11 +88,32 @@ export function createSocketServer(httpServer: http.Server) {
       if (limit.count > 35) {
         return next(new Error('Rate limit exceeded: too many socket events per second.'));
       }
+
+      // 2. Account-level multi-socket limit
+      let userLimit = userRateMap.get(userId);
+      if (!userLimit || now > userLimit.resetAt) {
+        userLimit = { count: 1, resetAt: now + 1000 };
+        userRateMap.set(userId, userLimit);
+      } else {
+        userLimit.count++;
+      }
+      if (userLimit.count > 60) {
+        return next(new Error('Account rate limit exceeded: too many socket events per second across connections.'));
+      }
+
       next();
     });
 
     socket.on('disconnect', () => {
       socketRateMap.delete(socket.id);
+      const activeSockets = userSocketsMap.get(userId);
+      if (activeSockets) {
+        activeSockets.delete(socket.id);
+        if (activeSockets.size === 0) {
+          userSocketsMap.delete(userId);
+          userRateMap.delete(userId);
+        }
+      }
     });
 
     registerRoomHandlers(io, socket);

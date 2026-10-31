@@ -20,8 +20,8 @@ export class AdminController {
       const search = req.query.search as string | undefined;
       const status = req.query.status as string | undefined;
       const role = req.query.role as string | undefined;
-      const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 20;
-      const offset = req.query.offset ? parseInt(req.query.offset as string, 10) : 0;
+      const limit = Math.min(Math.max(req.query.limit ? parseInt(req.query.limit as string, 10) : 20, 1), 100);
+      const offset = Math.min(Math.max(req.query.offset ? parseInt(req.query.offset as string, 10) : 0, 0), 10000);
 
       const users = await adminService.listUsers({ search, status, role, limit, offset });
       res.json({ success: true, data: users });
@@ -131,7 +131,7 @@ export class AdminController {
       const intensity = req.query.intensity ? parseInt(req.query.intensity as string, 10) : undefined;
       const isActive = req.query.isActive !== undefined ? req.query.isActive === 'true' : undefined;
       const cursor = req.query.cursor as string | undefined;
-      const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 20;
+      const limit = Math.min(Math.max(req.query.limit ? parseInt(req.query.limit as string, 10) : 20, 1), 100);
 
       const questions = await adminService.listQuestions({
         gameId,
@@ -186,7 +186,7 @@ export class AdminController {
       const actorUserId = req.query.actorUserId as string | undefined;
       const targetType = req.query.targetType as string | undefined;
       const cursor = req.query.cursor as string | undefined;
-      const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 25;
+      const limit = Math.min(Math.max(req.query.limit ? parseInt(req.query.limit as string, 10) : 25, 1), 100);
 
       const logs = await auditService.listAuditLogs({ action, actorUserId, targetType, cursor, limit });
       res.json({ success: true, data: logs });
@@ -199,7 +199,14 @@ export class AdminController {
   async reconcileStats(req: Request, res: Response): Promise<void> {
     try {
       const targetUserId = req.params.userId as string;
+      const actorUserId = (req as any).user?.id;
       const result = await statsService.reconcileUserStats(targetUserId);
+
+      // Audit log entry for stats reconciliation
+      if (actorUserId) {
+        await auditService.logAction(actorUserId, 'STATS_RECONCILED', 'USER', targetUserId, { result });
+      }
+
       res.json({ success: true, data: result });
     } catch (err: any) {
       res.status(400).json({ success: false, error: err.message || 'Failed to reconcile stats.' });
@@ -208,4 +215,3 @@ export class AdminController {
 }
 
 export const adminController = new AdminController();
-

@@ -2,6 +2,7 @@ import type { Socket } from 'socket.io';
 import { supabase } from '../config/supabase.js';
 import { prisma } from '../config/prisma.js';
 import { presenceManager } from './presence.js';
+import { getInjectedMockAuthVerifier } from '../middleware/auth.js';
 
 export async function socketAuthMiddleware(
   socket: Socket,
@@ -21,9 +22,17 @@ export async function socketAuthMiddleware(
   let userId: string;
   let email: string;
 
-  if (process.env.NODE_ENV === 'test' && token.startsWith('test-mock-token-')) {
-    userId = token.replace('test-mock-token-', '');
-    email = `${userId}@example.com`;
+  if (token.startsWith('test-mock-token-')) {
+    const mockVerifier = getInjectedMockAuthVerifier();
+    if (!mockVerifier) {
+      return next(new Error('Authentication failed: Mock tokens are strictly forbidden (no test provider injected)'));
+    }
+    const mockUser = mockVerifier(token);
+    if (!mockUser) {
+      return next(new Error('Authentication failed: Mock token rejected by injected test verifier'));
+    }
+    userId = mockUser.id;
+    email = mockUser.email;
   } else {
     try {
       const { data, error } = await supabase.auth.getUser(token);

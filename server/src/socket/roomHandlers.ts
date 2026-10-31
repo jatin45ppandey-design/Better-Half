@@ -6,6 +6,7 @@ import { presenceManager } from './presence.js';
 import { revokeRoomMembership } from './roomMembership.js';
 import { prisma } from '../config/prisma.js';
 import { safeSocketError } from './safeError.js';
+import { isRoomLookupBlocked, recordFailedRoomLookup } from '../middleware/rateLimiter.js';
 import {
   roomJoinSchema,
   roomLeaveSchema,
@@ -32,6 +33,9 @@ type AppServer = Server<ClientToServerEvents, ServerToClientEvents, InterServerE
 
 // Transient rate limit for emojis/reactions: userId -> count & resetTime
 const reactionRateLimits = new Map<string, { count: number; resetAt: number }>();
+
+// Account-level transient rate limit for chat messages: userId -> count & resetTime
+const chatRateLimits = new Map<string, { count: number; resetAt: number }>();
 
 export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
   const userId = socket.data.userId;
@@ -60,6 +64,15 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
   socket.on('room:join', async (rawPayload, callback) => {
     if (checkSuspension(callback)) return;
 
+    const bruteForceCheck = isRoomLookupBlocked(userId);
+    if (bruteForceCheck.blocked) {
+      callback?.({
+        success: false,
+        error: `Too many failed room lookup attempts. Please wait ${bruteForceCheck.retryAfterSeconds} seconds.`,
+      });
+      return;
+    }
+
     const payload = validateSocketPayload(roomJoinSchema, rawPayload, callback);
     if (!payload) return;
 
@@ -79,6 +92,7 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
       }
 
       if (!targetRoom) {
+        recordFailedRoomLookup(userId);
         callback?.({ success: false, error: 'Room not found' });
         return;
       }
@@ -410,6 +424,22 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
    */
   socket.on('room:chat:send', async (rawPayload, callback) => {
     if (checkSuspension(callback)) return;
+
+    // Account-level chat rate limiter: max 12 messages per 5 seconds across connections
+    const now = Date.now();
+    const chatLimit = chatRateLimits.get(userId) || { count: 0, resetAt: now + 5000 };
+    if (now > chatLimit.resetAt) {
+      chatLimit.count = 1;
+      chatLimit.resetAt = now + 5000;
+    } else {
+      chatLimit.count++;
+    }
+    chatRateLimits.set(userId, chatLimit);
+
+    if (chatLimit.count > 12) {
+      callback?.({ success: false, error: 'Chat rate limit exceeded. Please wait a few seconds before sending more messages.' });
+      return;
+    }
 
     const payload = validateSocketPayload(roomChatSendSchema, rawPayload, callback);
     if (!payload) return;

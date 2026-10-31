@@ -6,6 +6,7 @@ import { isOriginAllowed } from './config/cors.js';
 import { apiRouter } from './routes/index.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { requestTimeout } from './middleware/timeout.js';
+import { preAuthLimiter } from './middleware/rateLimiter.js';
 
 export function createApp() {
   const app = express();
@@ -83,7 +84,7 @@ export function createApp() {
   }
 
   // API Routes mounted under /api/v1
-  app.use('/api/v1', apiRouter);
+  app.use('/api/v1', preAuthLimiter, apiRouter);
 
   // Catch-all 404 handler for unmatched API routes
   app.use((req, res) => {

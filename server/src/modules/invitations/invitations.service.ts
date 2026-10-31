@@ -252,19 +252,27 @@ export class InvitationsService {
       throw new AppError('This invitation has expired', 400);
     }
 
-    // Atomic conditional transition: only succeed if status is still PENDING
+    // Atomically check-and-set invitation status
     const updateResult = await prisma.roomInvitation.updateMany({
-      where: { id: invitationId, status: 'PENDING' },
+      where: { id: invitationId, status: 'PENDING', receiverId: userId },
       data: { status: 'ACCEPTED' },
     });
 
     if (updateResult.count === 0) {
-      throw new ConflictError('Invitation has already been resolved or changed status');
+      throw new ConflictError('Invitation has expired or already been resolved');
     }
 
-    // Join room using roomsService
-    const joinedRoom = await roomsService.joinRoom(userId, invite.room.code);
-    return joinedRoom;
+    try {
+      const joinedRoom = await roomsService.joinRoom(userId, invite.room.code);
+      return joinedRoom;
+    } catch (err) {
+      // Rollback invitation state if join failed
+      await prisma.roomInvitation.updateMany({
+        where: { id: invitationId, status: 'ACCEPTED' },
+        data: { status: 'PENDING' },
+      });
+      throw err;
+    }
   }
 
   /**
