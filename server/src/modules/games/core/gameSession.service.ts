@@ -339,7 +339,7 @@ export class GameSessionService {
     const mode = sessionRecord.mode.toLowerCase() as 'couple' | 'friend';
     const context: GameEngineContext = {
       sessionId: sessionRecord.id,
-      gameId: sessionRecord.gameId,
+      gameId: normalizeGameId(sessionRecord.gameId),
       mode,
       participants,
       state: sessionRecord.publicState as any,
