@@ -459,24 +459,25 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
       }
 
       const now = Date.now();
+      for (const [limitedUserId, limit] of reactionRateLimits.entries()) {
+        if (now > limit.resetAt) reactionRateLimits.delete(limitedUserId);
+      }
 
-    // Check rate limit: 10 reactions per 3 seconds
-    const limit = reactionRateLimits.get(userId) || { count: 0, resetAt: now + 3000 };
-    if (now > limit.resetAt) {
-      limit.count = 1;
-      limit.resetAt = now + 3000;
-    } else {
-      limit.count++;
-    }
-    reactionRateLimits.set(userId, limit);
+      const limit = reactionRateLimits.get(userId) || { count: 0, resetAt: now + 3000 };
+      if (now > limit.resetAt) {
+        limit.count = 1;
+        limit.resetAt = now + 3000;
+      } else {
+        limit.count++;
+      }
+      reactionRateLimits.set(userId, limit);
 
-    if (limit.count > 10) {
-      callback?.({ success: false, error: 'Too many reactions sent. Please slow down.' });
-      return;
-    }
+      if (limit.count > 10) {
+        callback?.({ success: false, error: 'Too many reactions sent. Please slow down.' });
+        return;
+      }
 
-      const roomChannel = `room:${roomId}`;
-      io.to(roomChannel).emit('room:reaction:new', {
+      io.to(`room:${roomId}`).emit('room:reaction:new', {
         senderId: userId,
         reaction,
         timestamp: new Date().toISOString(),
