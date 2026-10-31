@@ -28,7 +28,6 @@ export const WouldYouRatherGame: React.FC<WouldYouRatherGameProps> = ({
   onFinishMatch,
   onUpdateTurn,
   sessionState,
-  sessionPrivateState,
   onSendAction,
   currentUserId,
 }) => {
