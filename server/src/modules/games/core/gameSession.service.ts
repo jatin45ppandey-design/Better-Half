@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { Prisma } from '@prisma/client';
 import { NotFoundError, ForbiddenError, AppError } from '../../../utils/errors.js';
 import { prisma } from '../../../config/prisma.js';
 import { isGameEligibleForMode, validatePlayerCount } from './gameRegistry.js';
@@ -262,9 +263,10 @@ export class GameSessionService {
                 seatIndex: participant.seatIndex,
                 status: 'ACTIVE',
                 score: context.scores[participant.userId] || 0,
+                // Stored separately from publicState and only exposed to its owner.
                 privateState:
-                  gameId === 'between-us' || gameId === 'would-you-rather'
-                    ? undefined
+                  context.privateStates[participant.userId] == null
+                    ? Prisma.DbNull
                     : (context.privateStates[participant.userId] as any),
               })),
             },
@@ -613,9 +615,10 @@ export class GameSessionService {
               seatIndex: p.seatIndex,
               status: 'ACTIVE',
               score: newContext.scores[p.userId] || 0,
+              // Rematch private state remains isolated per participant.
               privateState:
-                gameId === 'between-us' || gameId === 'would-you-rather'
-                  ? undefined
+                newContext.privateStates[p.userId] == null
+                  ? Prisma.DbNull
                   : (newContext.privateStates[p.userId] as any),
             })),
           },
