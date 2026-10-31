@@ -464,7 +464,12 @@ export class RoomsService {
       ] },
       select: { id: true },
     });
-    const isInactive = room.status === ROOM_STATUS.CLOSED || room.status === ROOM_STATUS.EXPIRED;
+    const isInactive = [
+      ROOM_STATUS.CLOSED,
+      ROOM_STATUS.EXPIRED,
+      ROOM_STATUS.IN_PROGRESS,
+      'COMPLETED',
+    ].includes(room.status as any);
     const isExpired = room.expiresAt <= new Date();
     const isFull = participantCount >= room.maxPlayers;
     const canJoin = !isKicked && !isBlocked && !isInactive && !isExpired && !isFull;
@@ -558,8 +563,8 @@ export class RoomsService {
       throw new NotFoundError(`Room "${cleanCode}" was not found.`);
     }
 
-    if (existingRoom.status === ROOM_STATUS.CLOSED || existingRoom.status === ROOM_STATUS.EXPIRED) {
-      throw new AppError(`Room "${cleanCode}" is no longer active.`, 400);
+    if ([ROOM_STATUS.CLOSED, ROOM_STATUS.EXPIRED, ROOM_STATUS.IN_PROGRESS, 'COMPLETED'].includes(existingRoom.status as any)) {
+      throw new AppError('This room is not accepting new participants.', 400);
     }
 
     if (new Date() > existingRoom.expiresAt) {
@@ -593,8 +598,8 @@ export class RoomsService {
           where: { id: existingRoom.id },
         });
 
-        if (!currentRoom || currentRoom.status === ROOM_STATUS.CLOSED || currentRoom.status === ROOM_STATUS.EXPIRED) {
-          throw new AppError(`Room "${cleanCode}" is no longer active.`, 400);
+        if (!currentRoom || [ROOM_STATUS.CLOSED, ROOM_STATUS.EXPIRED, ROOM_STATUS.IN_PROGRESS, 'COMPLETED'].includes(currentRoom.status as any)) {
+          throw new AppError('This room is not accepting new participants.', 400);
         }
 
         if (new Date() > currentRoom.expiresAt) {
@@ -835,6 +840,15 @@ export class RoomsService {
     await prisma.$transaction(
       async (tx) => {
         await this.lockRoomRow(tx, room.id);
+        const currentRoom = await tx.room.findUnique({
+          where: { id: room.id },
+          select: { status: true },
+        });
+        if (!currentRoom) throw new NotFoundError('Room not found');
+        if (![ROOM_STATUS.WAITING, ROOM_STATUS.READY_TO_START].includes(currentRoom.status as any)) {
+          throw new AppError('Ready status can only be changed while the room is in the lobby.', 400);
+        }
+
         const updated = await tx.roomParticipant.updateMany({
           where: { id: participant.id, leftAt: null },
           data: { isReady: nextReadyState },
