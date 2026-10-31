@@ -54,6 +54,7 @@ export interface ServerToClientEvents {
   'room:start:launch': (data: { gameId: string; launchedAt: string }) => void;
   'room:host:changed': (data: { hostId: string; hostName?: string }) => void;
   'room:player:kicked': (data: { targetUserId: string; roomId?: string }) => void;
+  'room:membership:revoked': (data: { roomId: string; userId: string; reason: 'LEFT' | 'KICKED' }) => void;
   'room:chat:new': (message: RoomMessageSnapshot) => void;
   'room:reaction:new': (data: { senderId: string; reaction: string; timestamp: string }) => void;
   'room:presence:update': (data: { onlineUserIds: string[] }) => void;
