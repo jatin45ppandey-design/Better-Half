@@ -6,6 +6,7 @@ import { createSocketServer } from './socket/index.js';
 import { gameSessionService } from './modules/games/core/gameSession.service.js';
 import { roomsService } from './modules/rooms/rooms.service.js';
 import { adminService } from './modules/admin/admin.service.js';
+import { createShutdownHandler, registerShutdownSignals } from './lifecycle/shutdown.js';
 
 const app = createApp();
 const httpServer = http.createServer(app);
@@ -66,38 +67,13 @@ httpServer.listen(PORT, HOST, () => {
   cleanupTimer.unref();
 });
 
-// Graceful shutdown
-async function gracefulShutdown(signal: string) {
-  console.log(`\nReceived ${signal}. Shutting down gracefully...`);
+// Robust graceful shutdown handling
+const shutdownHandler = createShutdownHandler({
+  httpServer,
+  io,
+  prisma,
+  getCleanupTimers: () => [cleanupTimer],
+  forceTimeoutMs: 10000,
+});
 
-  if (cleanupTimer) {
-    clearInterval(cleanupTimer);
-    cleanupTimer = null;
-  }
-
-  // Close socket server
-  io.close(() => {
-    console.log('Socket.IO server closed.');
-  });
-
-  // Close HTTP server
-  httpServer.close(async () => {
-    console.log('HTTP server closed.');
-    try {
-      await prisma.$disconnect();
-      console.log('Prisma disconnected.');
-    } catch (err) {
-      console.error('Error disconnecting Prisma:', err);
-    }
-    process.exit(0);
-  });
-
-  // Force close after 10s
-  setTimeout(() => {
-    console.error('Forced shutdown after timeout.');
-    process.exit(1);
-  }, 10000).unref();
-}
-
-process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+registerShutdownSignals(shutdownHandler);

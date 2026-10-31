@@ -5,6 +5,7 @@ import { env } from './config/env.js';
 import { isOriginAllowed } from './config/cors.js';
 import { apiRouter } from './routes/index.js';
 import { errorHandler } from './middleware/errorHandler.js';
+import { requestTimeout } from './middleware/timeout.js';
 
 export function createApp() {
   const app = express();
@@ -13,7 +14,42 @@ export function createApp() {
   app.set('trust proxy', 1);
 
   // Security Headers
-  app.use(helmet());
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'", "'unsafe-inline'"],
+          styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+          fontSrc: ["'self'", 'https://fonts.gstatic.com', 'data:'],
+          imgSrc: [
+            "'self'",
+            'data:',
+            'blob:',
+            'https://*.supabase.co',
+            'https://images.unsplash.com',
+            'https://lh3.googleusercontent.com',
+          ],
+          connectSrc: [
+            "'self'",
+            env.FRONTEND_URL,
+            'https://*.supabase.co',
+            'wss://*.supabase.co',
+            'http://localhost:*',
+            'ws://localhost:*',
+          ],
+          frameSrc: ["'self'", 'https://*.supabase.co'],
+          objectSrc: ["'none'"],
+          upgradeInsecureRequests: env.NODE_ENV === 'production' ? [] : null,
+        },
+      },
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
+      crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' },
+    })
+  );
+
+  // Request timeout protection (15s bounded execution)
+  app.use(requestTimeout({ timeoutMs: 15000 }));
 
   // CORS Configuration
   app.use(

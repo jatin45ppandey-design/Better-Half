@@ -77,7 +77,8 @@ export const gameActionSchema = z
   })
   .transform((data) => ({
     ...data,
-    version: (data.version ?? data.expectedVersion) as number,
+    version: ((data.expectedVersion ?? data.version) as number),
+    expectedVersion: ((data.expectedVersion ?? data.version) as number),
   }));
 
 export const gamePauseSchema = z.object({

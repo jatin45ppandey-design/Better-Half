@@ -10,6 +10,7 @@ import { gameActionService } from '../modules/games/core/gameAction.service.js';
 import { gameSessionService } from '../modules/games/core/gameSession.service.js';
 import { presenceManager } from './presence.js';
 import { safeSocketError } from './safeError.js';
+import type { GameActionEnvelope } from '../modules/games/core/gameEngine.types.js';
 import {
   gameSessionJoinSchema,
   gameActionSchema,
@@ -93,7 +94,13 @@ export function registerGameHandlers(
     if (!payload) return;
 
     try {
-      const result = await gameActionService.applyAction(payload, userId);
+      const envelope: GameActionEnvelope = {
+        sessionId: payload.sessionId,
+        actionId: payload.actionId,
+        expectedVersion: ((payload.expectedVersion ?? payload.version) as number),
+        action: payload.action,
+      };
+      const result = await gameActionService.applyAction(envelope, userId);
 
       if (!result.success) {
         socket.emit('game:action:rejected', {

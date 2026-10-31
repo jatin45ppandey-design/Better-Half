@@ -1,5 +1,11 @@
+import type { Prisma } from '@prisma/client';
 import { prisma } from '../../config/prisma.js';
 import { NotFoundError, ForbiddenError, AppError } from '../../utils/errors.js';
+import type {
+  RoomSnapshot,
+  RoomParticipantSnapshot,
+  RoomMessageSnapshot,
+} from '../../socket/types.js';
 import {
   ROOM_STATUS,
   ROOM_PARTICIPANT_ROLES,
@@ -10,27 +16,133 @@ import {
   type RoomStatus,
 } from './rooms.constants.js';
 
+const roomWithRelationsInclude = {
+  host: {
+    select: {
+      id: true,
+      username: true,
+      displayName: true,
+      avatarUrl: true,
+      avatarInitials: true,
+      avatarColor: true,
+    },
+  },
+  participants: {
+    include: {
+      user: {
+        select: {
+          id: true,
+          username: true,
+          displayName: true,
+          avatarUrl: true,
+          avatarInitials: true,
+          avatarColor: true,
+        },
+      },
+    },
+    orderBy: { joinedAt: 'asc' },
+  },
+  gameVotes: {
+    select: {
+      id: true,
+      userId: true,
+      gameId: true,
+    },
+  },
+  messages: {
+    include: {
+      sender: {
+        select: {
+          id: true,
+          displayName: true,
+          username: true,
+        },
+      },
+    },
+    orderBy: { createdAt: 'asc' },
+    take: 60,
+  },
+  gameSessions: {
+    where: { status: { in: ['ACTIVE', 'PAUSED'] } },
+    select: { id: true, status: true, stateVersion: true },
+    take: 1,
+    orderBy: { createdAt: 'desc' },
+  },
+} satisfies Prisma.RoomInclude;
+
+export type RoomWithRelations = Prisma.RoomGetPayload<{
+  include: typeof roomWithRelationsInclude;
+}>;
+
+export type RoomSnapshotSource = {
+  id: string;
+  code: string;
+  name: string;
+  mode: string;
+  status: string;
+  maxPlayers: number;
+  selectedGameId?: string | null;
+  hostId: string;
+  createdAt: Date | string;
+  expiresAt: Date | string;
+  host?: { displayName?: string | null } | null;
+  participants?: Array<{
+    userId: string;
+    role: string;
+    isReady?: boolean | null;
+    leftAt?: Date | null;
+    joinedAt: Date | string;
+    user?: {
+      displayName?: string | null;
+      username?: string | null;
+      avatarInitials?: string | null;
+      avatarColor?: string | null;
+      avatarUrl?: string | null;
+    } | null;
+  }>;
+  gameVotes?: Array<{
+    gameId: string;
+    userId: string;
+  }>;
+  messages?: Array<{
+    id: string;
+    senderId: string;
+    message: string;
+    createdAt: Date | string;
+    sender?: { displayName?: string | null } | null;
+  }>;
+  gameSessions?: Array<{
+    id: string;
+    status: string;
+  }>;
+};
+
 export class RoomsService {
   /**
    * Format database Room record into a consistent frontend-ready snapshot
    */
-  public formatRoomSnapshot(room: any) {
+  public formatRoomSnapshot(room: RoomSnapshotSource | null): RoomSnapshot | null {
     if (!room) return null;
 
-    const activeParticipants = (room.participants || [])
-      .filter((p: any) => !p.leftAt)
-      .map((p: any) => ({
-        id: p.userId,
-        name: p.user ? p.user.displayName : 'Player',
-        username: p.user ? p.user.username : 'player',
-        avatarInitials: p.user?.avatarInitials || 'PL',
-        avatarColor: p.user?.avatarColor || '#9670E8',
-        avatarUrl: p.user?.avatarUrl || null,
-        isHost: p.role === ROOM_PARTICIPANT_ROLES.HOST || p.userId === room.hostId,
-        isReady: Boolean(p.isReady),
-        role: p.role,
-        joinedAt: p.joinedAt,
-      }));
+    const activeParticipants: RoomParticipantSnapshot[] = (room.participants || [])
+      .filter((p) => !p.leftAt)
+      .map((p) => {
+        const displayName = p.user?.displayName || 'Player';
+        return {
+          id: p.userId,
+          userId: p.userId,
+          name: displayName,
+          displayName,
+          username: p.user?.username || 'player',
+          avatarInitials: p.user?.avatarInitials || 'PL',
+          avatarColor: p.user?.avatarColor || '#9670E8',
+          avatarUrl: p.user?.avatarUrl || null,
+          isHost: p.role === ROOM_PARTICIPANT_ROLES.HOST || p.userId === room.hostId,
+          isReady: Boolean(p.isReady),
+          role: (p.role as 'HOST' | 'PLAYER') || 'PLAYER',
+          joinedAt: p.joinedAt,
+        };
+      });
 
     // Group votes by gameId -> string[] userIds
     const gameVotes: Record<string, string[]> = {};
@@ -41,10 +153,10 @@ export class RoomsService {
       gameVotes[v.gameId].push(v.userId);
     }
 
-    const chatMessages = (room.messages || []).map((m: any) => ({
+    const chatMessages: RoomMessageSnapshot[] = (room.messages || []).map((m) => ({
       id: m.id,
       senderId: m.senderId,
-      senderName: m.sender ? m.sender.displayName : 'System',
+      senderName: m.sender ? m.sender.displayName || 'Player' : 'System',
       text: m.message,
       timestamp: new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       isSystem: m.senderId === 'system',
@@ -74,63 +186,14 @@ export class RoomsService {
   /**
    * Helper to retrieve room with full relations
    */
-  private async findRoomWithRelations(where: any, db: any = prisma) {
-    const client = db && db.room && typeof db.room.findFirst === 'function' ? db : prisma;
+  private async findRoomWithRelations(
+    where: Prisma.RoomWhereInput,
+    db: Prisma.TransactionClient | typeof prisma = prisma
+  ): Promise<RoomWithRelations | null> {
+    const client = db && typeof (db as any).room?.findFirst === 'function' ? db : prisma;
     return client.room.findFirst({
       where,
-      include: {
-        host: {
-          select: {
-            id: true,
-            username: true,
-            displayName: true,
-            avatarUrl: true,
-            avatarInitials: true,
-            avatarColor: true,
-          },
-        },
-        participants: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                username: true,
-                displayName: true,
-                avatarUrl: true,
-                avatarInitials: true,
-                avatarColor: true,
-              },
-            },
-          },
-          orderBy: { joinedAt: 'asc' },
-        },
-        gameVotes: {
-          select: {
-            id: true,
-            userId: true,
-            gameId: true,
-          },
-        },
-        messages: {
-          include: {
-            sender: {
-              select: {
-                id: true,
-                displayName: true,
-                username: true,
-              },
-            },
-          },
-          orderBy: { createdAt: 'asc' },
-          take: 60,
-        },
-        gameSessions: {
-          where: { status: { in: ['ACTIVE', 'PAUSED'] } },
-          select: { id: true, status: true, stateVersion: true },
-          take: 1,
-          orderBy: { createdAt: 'desc' },
-        },
-      },
+      include: roomWithRelationsInclude,
     });
   }
 
@@ -760,7 +823,7 @@ export class RoomsService {
    */
   async canStartGame(roomIdOrCode: string, userId: string): Promise<{ canStart: boolean; reason?: string }> {
     const room = await this.findRoomWithRelations({
-      OR: [{ id: roomIdOrCode }, { code: roomIdOrCode.toUpperCase() }] as any,
+      OR: [{ id: roomIdOrCode }, { code: roomIdOrCode.toUpperCase() }],
     });
 
     if (!room) {
@@ -1019,7 +1082,7 @@ export class RoomsService {
       throw new ForbiddenError('Only room participants can view room chat');
     }
 
-    const queryArgs: any = {
+    const messages = await prisma.roomMessage.findMany({
       where: { roomId: room.id },
       include: {
         sender: {
@@ -1032,14 +1095,9 @@ export class RoomsService {
       },
       orderBy: { createdAt: 'asc' },
       take: take + 1,
-    };
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+    });
 
-    if (cursor) {
-      queryArgs.cursor = { id: cursor };
-      queryArgs.skip = 1;
-    }
-
-    const messages = await prisma.roomMessage.findMany(queryArgs);
     const hasMore = messages.length > take;
     const paginatedMessages = hasMore ? messages.slice(0, take) : messages;
     const nextCursor = hasMore ? paginatedMessages[paginatedMessages.length - 1].id : null;
@@ -1161,8 +1219,12 @@ export class RoomsService {
   /**
    * Recalculate room readiness status
    */
-  private async recalculateRoomStatus(roomId: string, db: any = prisma) {
-    const room = await db.room.findUnique({
+  private async recalculateRoomStatus(
+    roomId: string,
+    db: Prisma.TransactionClient | typeof prisma = prisma
+  ) {
+    const client = db && typeof (db as any).room?.findUnique === 'function' ? db : prisma;
+    const room = await client.room.findUnique({
       where: { id: roomId },
       include: {
         participants: {
@@ -1177,7 +1239,7 @@ export class RoomsService {
 
     const active = room.participants;
     const mode = room.mode.toLowerCase() as RoomMode;
-    const allReady = active.length > 0 && active.every((p: any) => p.isReady);
+    const allReady = active.length > 0 && active.every((p) => p.isReady);
 
     let nextStatus: RoomStatus = ROOM_STATUS.WAITING;
 
@@ -1192,7 +1254,7 @@ export class RoomsService {
     }
 
     if (room.status !== nextStatus) {
-      await db.room.update({
+      await client.room.update({
         where: { id: roomId },
         data: { status: nextStatus },
       });

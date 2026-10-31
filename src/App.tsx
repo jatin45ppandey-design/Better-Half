@@ -13,10 +13,10 @@ import { AuthCallbackPage } from './pages/AuthCallbackPage';
 import { SignupPage } from './pages/SignupPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { RoomLobbyPage } from './pages/RoomLobbyPage';
-import { GameArenaPage } from './pages/GameArenaPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 
-// Lazy loaded supporting screens
+// Lazy loaded supporting screens and gameplay arena
+const GameArenaPage = lazy(() => import('./pages/GameArenaPage').then((m) => ({ default: m.GameArenaPage })));
 const ProfilePage = lazy(() => import('./pages/ProfilePage').then((m) => ({ default: m.ProfilePage })));
 const FriendsPage = lazy(() => import('./pages/FriendsPage').then((m) => ({ default: m.FriendsPage })));
 const InvitationsPage = lazy(() => import('./pages/InvitationsPage').then((m) => ({ default: m.InvitationsPage })));

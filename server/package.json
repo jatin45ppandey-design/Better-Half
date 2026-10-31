@@ -12,6 +12,7 @@
     "test": "vitest run",
     "admin:grant": "tsx src/scripts/grantAdmin.ts",
     "prisma:generate": "prisma generate",
+    "prisma:validate": "prisma validate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy"
   },

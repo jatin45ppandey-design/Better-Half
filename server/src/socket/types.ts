@@ -1,12 +1,14 @@
 export interface RoomParticipantSnapshot {
   id: string;
   userId: string;
-  username: string;
+  name: string;
   displayName: string;
+  username: string;
   avatarUrl?: string | null;
   avatarInitials?: string | null;
   avatarColor?: string | null;
-  role: 'HOST' | 'PLAYER';
+  isHost: boolean;
+  role: 'HOST' | 'PLAYER' | string;
   isReady: boolean;
   isOnline?: boolean;
   joinedAt: Date | string;
@@ -20,6 +22,8 @@ export interface RoomSnapshot {
   status: string;
   selectedGameId: string | null;
   maxPlayers: number;
+  activeSessionId?: string | null;
+  activeSessionStatus?: string | null;
   hostId: string;
   hostName: string;
   participants: RoomParticipantSnapshot[];
@@ -49,7 +53,7 @@ export interface ServerToClientEvents {
   'room:game:selected': (data: { selectedGameId: string }) => void;
   'room:start:launch': (data: { gameId: string; launchedAt: string }) => void;
   'room:host:changed': (data: { hostId: string; hostName?: string }) => void;
-  'room:player:kicked': (data: { targetUserId: string }) => void;
+  'room:player:kicked': (data: { targetUserId: string; roomId?: string }) => void;
   'room:chat:new': (message: RoomMessageSnapshot) => void;
   'room:reaction:new': (data: { senderId: string; reaction: string; timestamp: string }) => void;
   'room:presence:update': (data: { onlineUserIds: string[] }) => void;
@@ -67,6 +71,7 @@ export interface ServerToClientEvents {
   'game:completed': (data: { sessionId: string; winnerUserId: string | null; scores: Record<string, number>; matchId?: string | null }) => void;
   'game:session:reconnected': (data: { publicState: Record<string, unknown>; privateState: Record<string, unknown> | null }) => void;
   'game:error': (data: { code: string; message: string }) => void;
+  'server_shutdown'?: (data: { reason: string }) => void;
 }
 
 export interface ClientToServerEvents {

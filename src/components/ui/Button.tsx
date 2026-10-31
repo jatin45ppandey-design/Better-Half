@@ -29,12 +29,12 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     const baseStyles =
       'inline-flex items-center justify-center font-medium transition-all duration-200 select-none rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#9670E8] focus-visible:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none active:scale-[0.98] cursor-pointer';
 
-    // Size variants
+    // Size variants ensuring accessible touch targets (WCAG 2.1 AA 44x44px touch-targets on primary controls)
     const sizeStyles = {
-      sm: 'text-xs px-3 py-1.5 gap-1.5 min-h-[32px]',
-      md: 'text-sm px-4 py-2.5 gap-2 min-h-[42px]',
+      sm: 'text-xs px-3 py-1.5 gap-1.5 min-h-[36px]',
+      md: 'text-sm px-4 py-2.5 gap-2 min-h-[44px]',
       lg: 'text-base px-6 py-3.5 gap-2.5 min-h-[50px] font-semibold',
-      icon: 'p-2 min-h-[40px] min-w-[40px] rounded-xl',
+      icon: 'p-2.5 min-h-[44px] min-w-[44px] rounded-xl',
     }[size];
 
     // Variant styles
