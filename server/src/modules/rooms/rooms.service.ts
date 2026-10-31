@@ -1,7 +1,6 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../../config/prisma.js';
 import { NotFoundError, ForbiddenError, AppError, ConflictError } from '../../utils/errors.js';
-import { gameStateService } from '../games/core/gameState.service.js';
 import type {
   RoomSnapshot,
   RoomParticipantSnapshot,
@@ -1602,60 +1601,100 @@ export class RoomsService {
     const now = new Date();
     const isTest = process.env.NODE_ENV === 'test';
 
-    if (!isTest && typeof prisma.$queryRaw === 'function') {
+    // In PostgreSQL with connection pooling (e.g. PgBouncer/Supabase),
+    // session-level advisory locks can leak across pooled connections.
+    // We execute the lock and updates within a single interactive transaction
+    // using pg_try_advisory_xact_lock, guaranteeing single-connection pinning
+    // and automatic lock release upon transaction completion.
+    if (!isTest && typeof prisma.$transaction === 'function') {
       try {
-        const lockRes: any = await prisma.$queryRaw`SELECT pg_try_advisory_lock(748392019) as acquired`;
-        if (lockRes?.[0]?.acquired === false) {
-          return { expiredCount: 0 };
-        }
-      } catch {
-        // Fallback for non-Postgres or mock test runs
-      }
-    }
+        return await prisma.$transaction(
+          async (tx) => {
+            const lockRes: any = await tx.$queryRaw`SELECT pg_try_advisory_xact_lock(748392019) as acquired`;
+            const acquired = lockRes?.[0]?.acquired;
+            if (acquired === false) {
+              return { expiredCount: 0 };
+            }
 
-    try {
-      const expiredRoomsResult = await prisma.room.updateMany({
-        where: {
-          expiresAt: { lte: now },
-          status: { notIn: [ROOM_STATUS.CLOSED, ROOM_STATUS.EXPIRED] },
-        },
-        data: { status: ROOM_STATUS.EXPIRED },
-      });
-      const expiredCount = expiredRoomsResult?.count || 0;
-
-      if (expiredCount > 0 && typeof prisma.gameSession?.updateMany === 'function') {
-        try {
-          const expired = await prisma.room.findMany({
-            where: { status: ROOM_STATUS.EXPIRED },
-            select: { id: true },
-            take: 50,
-          });
-          const ids = (expired || []).map((r) => r.id);
-          if (ids.length > 0) {
-            await prisma.gameSession.updateMany({
-              where: { roomId: { in: ids }, status: { in: ['ACTIVE', 'PAUSED'] } },
-              data: { status: 'ABANDONED' },
+            const expiredRoomsResult = await tx.room.updateMany({
+              where: {
+                expiresAt: { lte: now },
+                status: { notIn: [ROOM_STATUS.CLOSED, ROOM_STATUS.EXPIRED] },
+              },
+              data: { status: ROOM_STATUS.EXPIRED },
             });
-          }
-        } catch (_e) {}
-      }
+            const expiredCount = expiredRoomsResult?.count || 0;
 
-      await prisma.roomInvitation.updateMany({
-        where: {
-          status: 'PENDING',
-          expiresAt: { lte: now },
-        },
-        data: { status: 'EXPIRED' },
-      });
+            if (expiredCount > 0 && typeof tx.gameSession?.updateMany === 'function') {
+              try {
+                const expired = await tx.room.findMany({
+                  where: { status: ROOM_STATUS.EXPIRED },
+                  select: { id: true },
+                  take: 50,
+                });
+                const ids = (expired || []).map((r) => r.id);
+                if (ids.length > 0) {
+                  await tx.gameSession.updateMany({
+                    where: { roomId: { in: ids }, status: { in: ['ACTIVE', 'PAUSED'] } },
+                    data: { status: 'ABANDONED' },
+                  });
+                }
+              } catch (_e) {}
+            }
 
-      return { expiredCount };
-    } finally {
-      if (!isTest && typeof prisma.$queryRaw === 'function') {
-        try {
-          await prisma.$queryRaw`SELECT pg_advisory_unlock(748392019)`;
-        } catch {}
+            await tx.roomInvitation.updateMany({
+              where: {
+                status: 'PENDING',
+                expiresAt: { lte: now },
+              },
+              data: { status: 'EXPIRED' },
+            });
+
+            return { expiredCount };
+          },
+          { maxWait: 2000, timeout: 10000 }
+        );
+      } catch (err) {
+        // Fallback to direct non-locking execution if transaction/raw SQL fails
       }
     }
+
+    // Direct execution fallback for tests or when transaction lock is bypassed
+    const expiredRoomsResult = await prisma.room.updateMany({
+      where: {
+        expiresAt: { lte: now },
+        status: { notIn: [ROOM_STATUS.CLOSED, ROOM_STATUS.EXPIRED] },
+      },
+      data: { status: ROOM_STATUS.EXPIRED },
+    });
+    const expiredCount = expiredRoomsResult?.count || 0;
+
+    if (expiredCount > 0 && typeof prisma.gameSession?.updateMany === 'function') {
+      try {
+        const expired = await prisma.room.findMany({
+          where: { status: ROOM_STATUS.EXPIRED },
+          select: { id: true },
+          take: 50,
+        });
+        const ids = (expired || []).map((r) => r.id);
+        if (ids.length > 0) {
+          await prisma.gameSession.updateMany({
+            where: { roomId: { in: ids }, status: { in: ['ACTIVE', 'PAUSED'] } },
+            data: { status: 'ABANDONED' },
+          });
+        }
+      } catch (_e) {}
+    }
+
+    await prisma.roomInvitation.updateMany({
+      where: {
+        status: 'PENDING',
+        expiresAt: { lte: now },
+      },
+      data: { status: 'EXPIRED' },
+    });
+
+    return { expiredCount };
   }
 
   /**

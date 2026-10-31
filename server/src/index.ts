@@ -6,18 +6,23 @@ import { env } from './config/env.js';
 // Fail fast before accepting traffic if mandatory production configuration is missing or invalid
 assertValidEnvironment();
 
-// Single-instance deployment check:
+// Strict single-instance deployment enforcement:
 // PlaySpace uses in-memory presence and room state. Scaling horizontally across multiple
 // Node instances without a distributed Redis adapter would cause split-brain room state.
 if (
   process.env.CLUSTER_MODE === 'true' ||
-  (process.env.NODE_APP_INSTANCE !== undefined && process.env.NODE_APP_INSTANCE !== '0')
+  (process.env.NODE_APP_INSTANCE !== undefined && process.env.NODE_APP_INSTANCE !== '0') ||
+  (process.env.WEB_CONCURRENCY !== undefined && Number(process.env.WEB_CONCURRENCY) > 1)
 ) {
-  console.warn(
-    '⚠️ [SCALING NOTICE] Multiple Node cluster instances detected without distributed Socket.IO Redis adapter.\n' +
-    '   PlaySpace currently operates authoritatively as a single-instance deployment (e.g. Render Web Service).\n' +
-    '   Horizontal multi-instance scaling requires Redis adapter for Socket.IO and shared session pub/sub.'
-  );
+  const errMsg =
+    '❌ [FATAL SCALING CONSTRAINT] Multiple Node cluster instances detected without distributed Socket.IO Redis adapter.\n' +
+    '   PlaySpace authoritatively operates as a single-instance deployment (e.g. Render Web Service).\n' +
+    '   Horizontal multi-instance scaling requires Redis adapter for Socket.IO and distributed rate limiting.\n' +
+    '   Aborting startup to prevent split-brain room state, desynced presence, and uncoordinated timers.';
+  console.error(errMsg);
+  if (env.NODE_ENV === 'production' && process.env.ALLOW_MULTI_INSTANCE_UNSAFE !== 'true') {
+    process.exit(1);
+  }
 }
 
 import { prisma } from './config/prisma.js';
@@ -51,6 +56,30 @@ httpServer.listen(PORT, HOST, () => {
   console.log(`🩺 Health: http://${HOST}:${PORT}/api/v1/health`);
   console.log(`🗄️ Ready:  http://${HOST}:${PORT}/api/v1/ready`);
   console.log(`===============================================`);
+
+  // Enforce authoritative single-instance database lease
+  if (env.NODE_ENV === 'production' && typeof prisma.$queryRaw === 'function') {
+    prisma.$queryRaw<Array<{ acquired: boolean }>>`SELECT pg_try_advisory_lock(583920192) as acquired`
+      .then((res) => {
+        const acquired = res?.[0]?.acquired;
+        if (acquired === false) {
+          console.error(
+            '❌ [FATAL DEPLOYMENT CONSTRAINT] Another PlaySpace server instance is already running against this database.\n' +
+            '   Single-instance mode is strictly enforced. Multiple instances cannot run concurrently\n' +
+            '   without a distributed Socket.IO Redis adapter.\n' +
+            '   Terminating this process to prevent split-brain room state and desynced presence.'
+          );
+          if (process.env.ALLOW_MULTI_INSTANCE_UNSAFE !== 'true') {
+            process.exit(1);
+          }
+        } else {
+          console.log('🔒 Authoritative single-instance database lease acquired.');
+        }
+      })
+      .catch((err) => {
+        console.warn('Could not verify database single-instance lease:', err?.message || err);
+      });
+  }
 
   // Restore any active or paused sessions from DB on startup (bounded)
   gameSessionService.restoreActiveSessions().then((count) => {
@@ -105,6 +134,13 @@ const shutdownHandler = createShutdownHandler({
     () => gameStateService.shutdown(),
     () => resetSocketRateLimits(),
     () => resetRoomLookupTracker(),
+    async () => {
+      if (typeof prisma.$queryRaw === 'function') {
+        try {
+          await prisma.$queryRaw`SELECT pg_advisory_unlock(583920192)`;
+        } catch {}
+      }
+    },
   ],
   forceTimeoutMs: 10000,
 });

@@ -30,7 +30,7 @@ This document outlines the standard operating procedures (SOPs) for handling sec
 - **Immediate Containment**:
   1. **Rotate Credentials**: Immediately reset the Supabase database password, rotating `DATABASE_URL` and `DIRECT_URL`.
   2. **Network Isolation**: Ensure database access is restricted via Supabase IP allowlisting and SSL-only connections (`sslmode=require`).
-  3. **Impact Assessment**: Note that sensitive *Between Us* game answers and intimate prompts are **never persisted** to PostgreSQL, significantly mitigating data privacy breach impact.
+  3. **Impact Assessment**: Note that sensitive *Between Us* game answers are never persisted to action audit logs (`GameAction` metadata strips answer text). In-flight answers are scoped strictly to per-participant private records (`GameSessionParticipant.privateState`) during the answering phase solely for restart durability, and private buffers are cleared upon reveal.
   4. **Regulatory Notification**: If personal user profile data (emails, display names) was accessed, notify users and relevant supervisory authorities within 72 hours under GDPR Article 33.
 
 ### 1.4 Abusive User / Harassment Procedure
@@ -54,7 +54,12 @@ This document outlines the standard operating procedures (SOPs) for handling sec
 ### 2.1 Encryption Standards
 - **Data in Transit**: Enforced TLS 1.3 for all HTTP REST traffic, WebSocket connections (`wss://`), and database connections (`sslmode=require`).
 - **Data at Rest**: Supabase PostgreSQL volumes and automated daily backups are encrypted with AES-256.
-- **Intimate Conversation Exemption**: *Between Us* questions and player answers remain 100% ephemeral in Node.js volatile memory. They are wiped immediately upon reveal and never touch disk or database.
+- **Intimate Conversation Protection**: *Between Us* questions and answers are protected by a multi-layered privacy model:
+  - During the `ANSWERING` phase, answers are scoped strictly to the author's `GameSessionParticipant.privateState` to prevent loss during server restarts/crashes.
+  - Action audit logs (`GameAction`) strip all answer text (`sanitizeActionMetadata`).
+  - Public projections conceal all answer text (`revealedAnswers: null`), revealing only participant submission presence (`submittedUserIds`).
+  - Private projections reveal pending text only to the authenticated author.
+  - Upon mutual reveal (`REVEAL` phase), participant private buffers are cleared (`pendingAnswer: null`).
 
 ### 2.2 Data Retention Policies
 
@@ -64,7 +69,7 @@ This document outlines the standard operating procedures (SOPs) for handling sec
 | Room Messages (Chat) | Lifetime of Room (24h) | Cascading foreign key delete when room is purged. |
 | Match Records & History | Indefinite (User Lifetime) | Retained for lifetime statistics and rivalry records. |
 | Audit Logs | 365 Days | Retained for compliance and audit trail integrity. |
-| Between Us Answers | 0 Seconds (Ephemeral) | Never stored on disk or database. |
+| Between Us Answers | In-Flight Session Only | Scoped to participant privateState during answering; cleared upon reveal (`pendingAnswer: null`); purged on room expiry. |
 
 ### 2.3 Account Deletion (GDPR / CCPA Right to Erasure)
 Upon user request for account deletion:

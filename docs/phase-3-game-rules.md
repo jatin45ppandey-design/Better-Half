@@ -148,7 +148,7 @@ This document provides complete documentation of the gameplay rules, state trans
 - **Core Loop**:
   - 5 intimacy levels (Level 1: Icebreakers to Level 5: After Dark 18+).
   - Dual Mutual Adult Consent: Level 5 is strictly locked until both partners independently submit mutual adult consent (`SUBMIT_CONSENT`).
-  - Private text answering: Answers are typed into client and held in volatile server RAM buffer.
+  - Private text answering: Answers are typed into client and scoped to participant privateState in RAM and DB during the in-flight answering phase for restart durability. Never logged to GameAction audit records.
   - Reveal: Both players reveal answers simultaneously.
-  - Memory Wipe: Ephemeral text buffers are wiped immediately upon reveal. Zero database persistence.
+  - Private Buffer Clear: Pending private state buffers are cleared immediately upon reveal (`pendingAnswer: null`). Complete erasure occurs when room/session expires.
 

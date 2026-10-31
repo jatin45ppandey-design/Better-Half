@@ -12,7 +12,7 @@ All remediations adhere strictly to the approved architecture:
 - **Backend**: Node.js + Express + TypeScript + Prisma 6 + Supabase Auth + Supabase PostgreSQL + Socket.IO
 - **Zero Forbidden Technologies**: No Redis, Neon, Clerk, or NextAuth introduced.
 - **Game Engine & Rules**: All 11 games preserved with canonical catalog IDs, notably `uno-style` (zero occurrences of `uno-flip`).
-- **Privacy Enforcement**: Hard zero-persistence guarantees for personal answers in BETWEEN US and pending dilemmas in Would You Rather.
+- **Privacy Enforcement**: Hard privacy guarantees for personal answers in BETWEEN US (action audit logs strip answer text; in-flight answers are scoped to participant privateState and wiped upon reveal) and pending dilemmas in Would You Rather.
 
 ---
 

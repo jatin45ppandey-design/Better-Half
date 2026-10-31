@@ -108,10 +108,24 @@ curl https://playspace-backend.onrender.com/api/v1/health
 
 ## 5. Security & Reliability Checklist
 
-1. **CORS Restrictions**: `FRONTEND_URL` on Render must match the production Vercel domain.
-2. **Ephemeral Memory Hygiene**:
-   - BETWEEN US answers are stored exclusively in memory and garbage-collected upon round reveal.
+1. **Strict Single-Instance Deployment Enforcement**:
+   - The PlaySpace backend runs as a single-instance container (Render Web Service `instances = 1`).
+   - **Enforcement Mechanisms**:
+     - At startup, Node.js checks `cluster.isPrimary` and worker forks; if clustering is detected in production without Redis, it immediately terminates (`process.exit(1)`).
+     - At startup, the server acquires a PostgreSQL lease using `SELECT pg_try_advisory_lock(583920192)`. If another container instance is already running, the new instance immediately logs `CRITICAL MULTI-INSTANCE CONFLICT` and terminates (`process.exit(1)`).
+     - Upon graceful shutdown, the lease is released (`SELECT pg_advisory_unlock(583920192)`).
+   - **Horizontal Scaling Prerequisites**: Scaling beyond 1 container requires:
+     - Redis-backed Socket.IO adapter (`@socket.io/redis-adapter`) for cross-instance WebSocket broadcasting.
+     - Centralized distributed rate limiting.
+     - Distributed job/timer scheduling for server-owned game mechanics (e.g., Snatch the Fries drops).
+2. **CORS Restrictions**: `FRONTEND_URL` on Render must match the production Vercel domain.
+3. **Between Us Privacy Architecture**:
+   - In-flight answers are scoped strictly to the author's `GameSessionParticipant.privateState` JSON column during the `ANSWERING` phase for restart durability.
+   - Action audit logs (`GameAction`) strip all answer text (`sanitizeActionMetadata`).
+   - Public projections conceal all answer text (`revealedAnswers: null`), revealing only participant submission presence (`submittedUserIds`).
+   - Private projections reveal pending text only to the authenticated author.
+   - Upon mutual reveal (`REVEAL` phase), participant private buffers are cleared (`pendingAnswer: null`).
    - Sockets implement a 15-second grace period for temporary reconnections before marking a participant departed.
-3. **Audit Trail**: Every role grant, account suspension, game config change, and question update is automatically recorded in the append-only `AuditLog` table.
-4. **Rate Limiting**: Rate limiters are configured on authentication and profile mutation endpoints.
+4. **Audit Trail**: Every role grant, account suspension, game config change, and question update is automatically recorded in the append-only `AuditLog` table.
+5. **Rate Limiting**: Rate limiters are configured on authentication, room creation, and profile mutation endpoints.
 
