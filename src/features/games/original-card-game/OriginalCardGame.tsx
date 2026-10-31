@@ -268,7 +268,7 @@ export const OriginalCardGame: React.FC<OriginalCardGameProps> = ({
 
       {/* Opponents Hands Bar */}
       <div className="flex flex-wrap items-center justify-center gap-4">
-        {activePlayers.map((player, idx) => {
+        {activePlayers.map((player) => {
           const isTurn = player.id === activePlayer.id;
           const handSize = cardCounts[player.id] || 0;
 
