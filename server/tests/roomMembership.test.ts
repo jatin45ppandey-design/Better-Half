@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { revokeRoomMembership } from '../src/socket/roomMembership.js';
 import { presenceManager } from '../src/socket/presence.js';
+import { RoomsService } from '../src/modules/rooms/rooms.service.js';
+import { prisma } from '../src/config/prisma.js';
+
 
 describe('Room membership revocation across tabs', () => {
   beforeEach(() => {
@@ -61,5 +64,63 @@ describe('Room membership revocation across tabs', () => {
       });
       expect(socket.leave).toHaveBeenCalledWith('room:room-2');
     }
+  });
+});
+
+describe('Room leave during active matches', () => {
+  it('rejects room leave when the room has an active or paused game session', async () => {
+    const roomsService = new RoomsService();
+    vi.spyOn(prisma.room, 'findFirst').mockResolvedValue({
+      id: 'room-active-1',
+      code: 'ACT001',
+    } as any);
+    vi.spyOn(prisma.roomParticipant, 'findUnique').mockResolvedValue({
+      id: 'participant-a',
+      leftAt: null,
+      user: { displayName: 'Player A' },
+    } as any);
+
+    const tx = {
+      $queryRaw: vi.fn().mockResolvedValue([{ id: 'room-active-1' }]),
+      room: {
+        findUnique: vi.fn().mockResolvedValue({ hostId: 'player-a', status: 'WAITING' }),
+      },
+      gameSession: {
+        findFirst: vi.fn().mockResolvedValue({ id: 'session-active-1' }),
+      },
+    };
+    vi.spyOn(prisma, '$transaction').mockImplementation(async (callback: any) => callback(tx));
+
+    await expect(roomsService.leaveRoom('room-active-1', 'player-a')).rejects.toThrow(
+      'Cannot leave the room while a game is in progress.'
+    );
+  });
+
+  it('rejects room leave if the room is still marked IN_PROGRESS even when no active session is found', async () => {
+    const roomsService = new RoomsService();
+    vi.spyOn(prisma.room, 'findFirst').mockResolvedValue({
+      id: 'room-in-progress-1',
+      code: 'INP001',
+    } as any);
+    vi.spyOn(prisma.roomParticipant, 'findUnique').mockResolvedValue({
+      id: 'participant-a',
+      leftAt: null,
+      user: { displayName: 'Player A' },
+    } as any);
+
+    const tx = {
+      $queryRaw: vi.fn().mockResolvedValue([{ id: 'room-in-progress-1' }]),
+      room: {
+        findUnique: vi.fn().mockResolvedValue({ hostId: 'player-a', status: 'IN_PROGRESS' }),
+      },
+      gameSession: {
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
+    };
+    vi.spyOn(prisma, '$transaction').mockImplementation(async (callback: any) => callback(tx));
+
+    await expect(roomsService.leaveRoom('room-in-progress-1', 'player-a')).rejects.toThrow(
+      'Cannot leave the room while a game is in progress.'
+    );
   });
 });
