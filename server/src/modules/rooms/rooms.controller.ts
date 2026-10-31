@@ -1,5 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { roomsService } from './rooms.service.js';
+import { getRealtimeServer } from '../../socket/realtime.js';
+import { revokeRoomMembership } from '../../socket/roomMembership.js';
 import { NotFoundError } from '../../utils/errors.js';
 import {
   getClientIp,
@@ -86,6 +88,27 @@ export async function leaveRoom(req: Request, res: Response, next: NextFunction)
     const userId = req.user!.id;
     const roomId = getParam(req.params.id);
     const result = await roomsService.leaveRoom(roomId, userId);
+    const realtimeServer = getRealtimeServer();
+
+    if (realtimeServer && result?.room?.id) {
+      const canonicalRoomId = result.room.id;
+      const roomChannel = `room:${canonicalRoomId}`;
+      const onlineUserIds = await revokeRoomMembership(
+        realtimeServer,
+        canonicalRoomId,
+        userId,
+        'LEFT'
+      );
+
+      realtimeServer.to(roomChannel).emit('room:player:left', {
+        userId,
+        ...(result.newHostId ? { newHostId: result.newHostId } : {}),
+        roomClosed: result.roomClosed,
+      });
+      realtimeServer.to(roomChannel).emit('room:state', result.room);
+      realtimeServer.to(roomChannel).emit('room:presence:update', { onlineUserIds });
+    }
+
     res.status(200).json(result);
   } catch (error) {
     next(error);
@@ -167,8 +190,28 @@ export async function kickParticipant(req: Request, res: Response, next: NextFun
     const userId = req.user!.id;
     const roomId = getParam(req.params.id);
     const { targetUserId } = req.body;
-    const room = await roomsService.kickParticipant(roomId, userId, targetUserId);
-    res.status(200).json(room);
+    const result = await roomsService.kickParticipant(roomId, userId, targetUserId);
+    const realtimeServer = getRealtimeServer();
+
+    if (realtimeServer && result.room?.id) {
+      const canonicalRoomId = result.room.id;
+      const roomChannel = `room:${canonicalRoomId}`;
+      const onlineUserIds = await revokeRoomMembership(
+        realtimeServer,
+        canonicalRoomId,
+        targetUserId,
+        'KICKED'
+      );
+
+      realtimeServer.to(roomChannel).emit('room:player:kicked', {
+        targetUserId,
+        roomId: canonicalRoomId,
+      });
+      realtimeServer.to(roomChannel).emit('room:state', result.room);
+      realtimeServer.to(roomChannel).emit('room:presence:update', { onlineUserIds });
+    }
+
+    res.status(200).json(result);
   } catch (error) {
     next(error);
   }
