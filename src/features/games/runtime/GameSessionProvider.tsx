@@ -39,7 +39,8 @@ export const GameSessionProvider: React.FC<GameSessionProviderProps> = ({
 
   const versionRef = useRef(version);
   useEffect(() => {
-    versionRef.current = version;
+    // Never let a delayed React render move the request version backwards.
+    versionRef.current = Math.max(versionRef.current, version);
   }, [version]);
 
   // Initialize and join session over Socket.IO and REST fallback
@@ -58,7 +59,9 @@ export const GameSessionProvider: React.FC<GameSessionProviderProps> = ({
           setMode((sessionData.mode?.toLowerCase() as 'couple' | 'friend') || 'couple');
           if (sessionData.publicState) {
             setPublicState(sessionData.publicState.state || sessionData.publicState);
-            setVersion(sessionData.publicState.version || 1);
+            const initialVersion = sessionData.publicState.version || 1;
+            versionRef.current = Math.max(versionRef.current, initialVersion);
+            setVersion(versionRef.current);
             setIsPaused(!!sessionData.publicState.isPaused);
             setSessionStatus(sessionData.publicState.status || sessionData.status || 'ACTIVE');
             setScores(sessionData.publicState.scores || {});
@@ -93,7 +96,9 @@ export const GameSessionProvider: React.FC<GameSessionProviderProps> = ({
           } else {
             if (res.publicState) {
               setPublicState(res.publicState.state || res.publicState);
-              setVersion(res.publicState.version || 1);
+              const joinedVersion = res.publicState.version || 1;
+              versionRef.current = Math.max(versionRef.current, joinedVersion);
+              setVersion(versionRef.current);
               setIsPaused(!!res.publicState.isPaused);
               setSessionStatus(res.publicState.status || res.status || 'ACTIVE');
               setScores(res.publicState.scores || {});
@@ -117,7 +122,9 @@ export const GameSessionProvider: React.FC<GameSessionProviderProps> = ({
       if (!mounted || !data?.publicState) return;
       const pub = data.publicState;
       setPublicState(pub.state || pub);
-      setVersion(pub.version || 1);
+      const incomingVersion = pub.version || 1;
+      versionRef.current = Math.max(versionRef.current, incomingVersion);
+      setVersion(versionRef.current);
       setIsPaused(!!pub.isPaused);
       setSessionStatus(pub.status || 'ACTIVE');
       setScores(pub.scores || {});
@@ -173,6 +180,10 @@ export const GameSessionProvider: React.FC<GameSessionProviderProps> = ({
       const res = await sendGameAction(sessionId, versionRef.current, action);
       if (!res.success) {
         return { success: false, error: res.error || 'Action rejected.' };
+      }
+      if (typeof res.version === 'number' && Number.isFinite(res.version)) {
+        versionRef.current = Math.max(versionRef.current, res.version);
+        setVersion(versionRef.current);
       }
       return { success: true };
     },
