@@ -259,6 +259,17 @@ describe('PlaySpace Backend API — Phase 1 Test Suite', () => {
         .mockResolvedValueOnce({ id: 'chat-room', status: 'WAITING', code: 'CHAT22' } as any)
         .mockResolvedValueOnce({ id: 'chat-room', status: 'WAITING', code: 'CHAT22' } as any);
       vi.spyOn(prisma.roomParticipant, 'findUnique').mockResolvedValueOnce(null).mockResolvedValueOnce(null);
+      vi.spyOn(prisma, '$transaction').mockImplementation(async (callback: any) =>
+        callback({
+          $queryRaw: vi.fn().mockResolvedValue([{ id: 'chat-room' }]),
+          room: {
+            findUnique: vi.fn().mockResolvedValue({ id: 'chat-room', status: 'WAITING' }),
+          },
+          roomParticipant: {
+            findUnique: vi.fn().mockResolvedValue(null),
+          },
+        })
+      );
       const read = await request(app).get('/api/v1/rooms/chat-room/messages')
         .set('Authorization', 'Bearer test-mock-token-user-test-uuid');
       const post = await request(app).post('/api/v1/rooms/chat-room/messages')
