@@ -557,7 +557,6 @@ export class RoomsService {
       throw new AppError(`Room "${cleanCode}" has expired.`, 400);
     }
 
-    // Check block list between user and host
     const block = await prisma.blockedUser.findFirst({
       where: {
         OR: [
@@ -571,104 +570,103 @@ export class RoomsService {
       throw new ForbiddenError('You are blocked from entering this room.');
     }
 
-    // Atomic transaction for concurrency-safe join
-    return prisma.$transaction(async (tx) => {
-      // Re-read room inside transaction to ensure fresh status and expiry check
-      const currentRoom = await tx.room.findUnique({
-        where: { id: existingRoom.id },
-      });
+    // Lock the room row before checking capacity so simultaneous last-slot
+    // joins serialize instead of both observing the same available slot.
+    const transactionResult = await prisma.$transaction(
+      async (tx) => {
+        await tx.$queryRaw<Array<{ id: string }>>`SELECT "id" FROM "Room" WHERE "id" = ${existingRoom.id} FOR UPDATE`;
 
-      if (!currentRoom || currentRoom.status === ROOM_STATUS.CLOSED || currentRoom.status === ROOM_STATUS.EXPIRED) {
-        throw new AppError(`Room "${cleanCode}" is no longer active.`, 400);
-      }
-
-      if (new Date() > currentRoom.expiresAt) {
-        await tx.room.update({
-          where: { id: currentRoom.id },
-          data: { status: ROOM_STATUS.EXPIRED },
+        const currentRoom = await tx.room.findUnique({
+          where: { id: existingRoom.id },
         });
-        throw new AppError(`Room "${cleanCode}" has expired.`, 400);
-      }
 
-      // Re-fetch active count inside transaction
-      const activeCount = await tx.roomParticipant.count({
-        where: { roomId: currentRoom.id, leftAt: null },
-      });
+        if (!currentRoom || currentRoom.status === ROOM_STATUS.CLOSED || currentRoom.status === ROOM_STATUS.EXPIRED) {
+          throw new AppError(`Room "${cleanCode}" is no longer active.`, 400);
+        }
 
-      const existingParticipant = await tx.roomParticipant.findUnique({
-        where: {
-          roomId_userId: {
-            roomId: currentRoom.id,
-            userId,
+        if (new Date() > currentRoom.expiresAt) {
+          throw new AppError(`Room "${cleanCode}" has expired.`, 400);
+        }
+
+        const activeCount = await tx.roomParticipant.count({
+          where: { roomId: currentRoom.id, leftAt: null },
+        });
+
+        const existingParticipant = await tx.roomParticipant.findUnique({
+          where: {
+            roomId_userId: {
+              roomId: currentRoom.id,
+              userId,
+            },
           },
-        },
-      });
+        });
 
-      const userProfile = await tx.userProfile.findUnique({ where: { id: userId } });
-      const userName = userProfile?.displayName || 'Player';
+        const userProfile = await tx.userProfile.findUnique({ where: { id: userId } });
+        const userName = userProfile?.displayName || 'Player';
 
-      if (existingParticipant && !existingParticipant.leftAt) {
-        // User is already active in the room; idempotent return
-        const full = await this.findRoomWithRelations({ id: currentRoom.id }, tx);
-        return {
-          room: this.formatRoomSnapshot(full),
-          isNewJoin: false,
-        };
-      }
+        if (existingParticipant && !existingParticipant.leftAt) {
+          return { isNewJoin: false };
+        }
 
-      // Check room capacity against current active count
-      if (activeCount >= currentRoom.maxPlayers) {
-        throw new AppError(
-          `Room ${cleanCode} is full (Maximum ${currentRoom.maxPlayers} players allowed for ${currentRoom.mode.toLowerCase()} mode).`,
-          400
-        );
-      }
+        if (activeCount >= currentRoom.maxPlayers) {
+          throw new AppError(
+            `Room ${cleanCode} is full (Maximum ${currentRoom.maxPlayers} players allowed for ${currentRoom.mode.toLowerCase()} mode).`,
+            400
+          );
+        }
 
-      if (existingParticipant && existingParticipant.leftAt) {
-        // Re-activating a player who previously left
-        await tx.roomParticipant.update({
-          where: { id: existingParticipant.id },
+        if (existingParticipant && existingParticipant.leftAt) {
+          await tx.roomParticipant.update({
+            where: { id: existingParticipant.id },
+            data: {
+              leftAt: null,
+              isReady: false,
+              updatedAt: new Date(),
+            },
+          });
+        } else {
+          await tx.roomParticipant.create({
+            data: {
+              roomId: currentRoom.id,
+              userId,
+              role: ROOM_PARTICIPANT_ROLES.PLAYER,
+              isReady: false,
+            },
+          });
+        }
+
+        await tx.roomMessage.create({
           data: {
-            leftAt: null,
-            isReady: false,
-            updatedAt: new Date(),
-          },
-        });
-      } else {
-        // Brand new participant
-        await tx.roomParticipant.create({
-          data: {
             roomId: currentRoom.id,
-            userId,
-            role: ROOM_PARTICIPANT_ROLES.PLAYER,
-            isReady: false,
+            senderId: userId,
+            message: `${userName} connected to the room.`,
           },
         });
+
+        if (currentRoom.status === ROOM_STATUS.READY_TO_START) {
+          await tx.room.update({
+            where: { id: currentRoom.id },
+            data: { status: ROOM_STATUS.WAITING },
+          });
+        }
+
+        return { isNewJoin: true };
+      },
+      {
+        maxWait: 5000,
+        timeout: 10000,
       }
+    );
 
-      // System announcement message
-      await tx.roomMessage.create({
-        data: {
-          roomId: currentRoom.id,
-          senderId: userId,
-          message: `${userName} connected to the room.`,
-        },
-      });
+    // Hydrate the expensive room snapshot only after the write transaction
+    // commits, keeping relations and chat history out of the critical section.
+    const fullRoom = await this.findRoomWithRelations({ id: existingRoom.id });
+    if (!fullRoom) throw new NotFoundError('Room not found after joining');
 
-      // Recalculate room status if it was READY_TO_START
-      if (currentRoom.status === ROOM_STATUS.READY_TO_START) {
-        await tx.room.update({
-          where: { id: currentRoom.id },
-          data: { status: ROOM_STATUS.WAITING },
-        });
-      }
-
-      const full = await this.findRoomWithRelations({ id: currentRoom.id }, tx);
-      return {
-        room: this.formatRoomSnapshot(full),
-        isNewJoin: true,
-      };
-    });
+    return {
+      room: this.formatRoomSnapshot(fullRoom),
+      isNewJoin: transactionResult.isNewJoin,
+    };
   }
 
   /**
@@ -697,85 +695,93 @@ export class RoomsService {
       return null;
     }
 
-    return prisma.$transaction(async (tx) => {
-      // 1. Mark participant as left
-      await tx.roomParticipant.update({
-        where: { id: participant.id },
-        data: { leftAt: new Date(), isReady: false },
-      });
-
-      // 2. Remove any active game votes from this user in this room
-      await tx.gameVote.deleteMany({
-        where: { roomId: room.id, userId },
-      });
-
-      // 3. System message
-      const playerName = participant.user.displayName || 'Player';
-      await tx.roomMessage.create({
-        data: {
-          roomId: room.id,
-          senderId: userId,
-          message: `${playerName} left the room.`,
-        },
-      });
-
-      // 4. Check remaining active participants
-      const remaining = await tx.roomParticipant.findMany({
-        where: { roomId: room.id, leftAt: null },
-        orderBy: { joinedAt: 'asc' },
-        include: { user: true },
-      });
-
-      let hostChanged = false;
-      let newHostId: string | null = null;
-      let roomClosed = false;
-
-      if (remaining.length === 0) {
-        // Room is empty -> close it
-        await tx.room.update({
-          where: { id: room.id },
-          data: { status: ROOM_STATUS.CLOSED },
+    const transactionResult = await prisma.$transaction(
+      async (tx) => {
+        const leaveUpdate = await tx.roomParticipant.updateMany({
+          where: { id: participant.id, leftAt: null },
+          data: { leftAt: new Date(), isReady: false },
         });
-        roomClosed = true;
-      } else if (room.hostId === userId) {
-        // Host left -> transfer host responsibility to oldest remaining active player
-        const nextHost = remaining[0];
-        newHostId = nextHost.userId;
-        hostChanged = true;
+        if (leaveUpdate.count === 0) return null;
 
-        await tx.roomParticipant.update({
-          where: { id: nextHost.id },
-          data: { role: ROOM_PARTICIPANT_ROLES.HOST },
+        await tx.gameVote.deleteMany({
+          where: { roomId: room.id, userId },
         });
 
-        await tx.room.update({
-          where: { id: room.id },
-          data: { hostId: newHostId },
-        });
-
+        const playerName = participant.user.displayName || 'Player';
         await tx.roomMessage.create({
           data: {
             roomId: room.id,
-            senderId: newHostId,
-            message: `Host transferred to ${nextHost.user.displayName}.`,
+            senderId: userId,
+            message: `${playerName} left the room.`,
           },
         });
-      }
 
-      // 5. Update room readiness status if needed
-      if (!roomClosed) {
-        await this.recalculateRoomStatus(room.id, tx);
-      }
+        const remaining = await tx.roomParticipant.findMany({
+          where: { roomId: room.id, leftAt: null },
+          orderBy: { joinedAt: 'asc' },
+          include: { user: true },
+        });
 
-      const full = await this.findRoomWithRelations({ id: room.id }, tx);
-      return {
-        room: this.formatRoomSnapshot(full),
-        hostChanged,
-        newHostId,
-        roomClosed,
-        leftUserId: userId,
-      };
-    });
+        let hostChanged = false;
+        let newHostId: string | null = null;
+        let roomClosed = false;
+
+        if (remaining.length === 0) {
+          await tx.room.update({
+            where: { id: room.id },
+            data: { status: ROOM_STATUS.CLOSED },
+          });
+          roomClosed = true;
+        } else if (room.hostId === userId) {
+          const nextHost = remaining[0];
+          newHostId = nextHost.userId;
+          hostChanged = true;
+
+          await tx.roomParticipant.update({
+            where: { id: nextHost.id },
+            data: { role: ROOM_PARTICIPANT_ROLES.HOST },
+          });
+
+          await tx.room.update({
+            where: { id: room.id },
+            data: { hostId: newHostId },
+          });
+
+          await tx.roomMessage.create({
+            data: {
+              roomId: room.id,
+              senderId: newHostId,
+              message: `Host transferred to ${nextHost.user.displayName}.`,
+            },
+          });
+        }
+
+        if (!roomClosed) {
+          await this.recalculateRoomStatus(room.id, tx);
+        }
+
+        return {
+          hostChanged,
+          newHostId,
+          roomClosed,
+          leftUserId: userId,
+        };
+      },
+      {
+        maxWait: 5000,
+        timeout: 10000,
+      }
+    );
+
+    if (!transactionResult) return null;
+
+    const fullRoom = await this.findRoomWithRelations({ id: room.id });
+    if (!fullRoom) throw new NotFoundError('Room not found after leaving');
+
+    return {
+      room: this.formatRoomSnapshot(fullRoom),
+      ...transactionResult,
+    };
   }
 
   /**
@@ -788,16 +794,11 @@ export class RoomsService {
       },
     });
 
-    if (!room) {
-      throw new NotFoundError('Room not found');
-    }
+    if (!room) throw new NotFoundError('Room not found');
 
     const participant = await prisma.roomParticipant.findUnique({
       where: {
-        roomId_userId: {
-          roomId: room.id,
-          userId,
-        },
+        roomId_userId: { roomId: room.id, userId },
       },
     });
 
@@ -807,17 +808,28 @@ export class RoomsService {
 
     const nextReadyState = explicitReady !== undefined ? explicitReady : !participant.isReady;
 
-    return prisma.$transaction(async (tx) => {
-      await tx.roomParticipant.update({
-        where: { id: participant.id },
-        data: { isReady: nextReadyState },
-      });
+    await prisma.$transaction(
+      async (tx) => {
+        const updated = await tx.roomParticipant.updateMany({
+          where: { id: participant.id, leftAt: null },
+          data: { isReady: nextReadyState },
+        });
+        if (updated.count === 0) {
+          throw new ForbiddenError('You are not an active participant in this room');
+        }
 
-      await this.recalculateRoomStatus(room.id, tx);
+        await this.recalculateRoomStatus(room.id, tx);
+      },
+      {
+        maxWait: 5000,
+        timeout: 10000,
+      }
+    );
 
-      const full = await this.findRoomWithRelations({ id: room.id }, tx);
-      return this.formatRoomSnapshot(full);
-    });
+    const fullRoom = await this.findRoomWithRelations({ id: room.id });
+    if (!fullRoom) throw new NotFoundError('Room not found after ready update');
+
+    return this.formatRoomSnapshot(fullRoom);
   }
 
   /**
@@ -830,16 +842,11 @@ export class RoomsService {
       },
     });
 
-    if (!room) {
-      throw new NotFoundError('Room not found');
-    }
+    if (!room) throw new NotFoundError('Room not found');
 
     const participant = await prisma.roomParticipant.findUnique({
       where: {
-        roomId_userId: {
-          roomId: room.id,
-          userId,
-        },
+        roomId_userId: { roomId: room.id, userId },
       },
     });
 
@@ -851,52 +858,49 @@ export class RoomsService {
       throw new AppError(`Game '${gameId}' is not permitted in ${room.mode.toLowerCase()} mode`, 400);
     }
 
-    return prisma.$transaction(async (tx) => {
-      // Upsert user's single vote for this room
-      await tx.gameVote.upsert({
-        where: {
-          roomId_userId: {
-            roomId: room.id,
-            userId,
+    await prisma.$transaction(
+      async (tx) => {
+        await tx.gameVote.upsert({
+          where: {
+            roomId_userId: { roomId: room.id, userId },
           },
-        },
-        create: {
-          roomId: room.id,
-          userId,
-          gameId,
-        },
-        update: {
-          gameId,
-        },
-      });
+          create: { roomId: room.id, userId, gameId },
+          update: { gameId },
+        });
 
-      // Tally all votes in this room to auto-select top candidate
-      const allVotes = await tx.gameVote.findMany({
-        where: { roomId: room.id },
-      });
+        const allVotes = await tx.gameVote.findMany({
+          where: { roomId: room.id },
+        });
 
-      const counts: Record<string, number> = {};
-      for (const v of allVotes) {
-        counts[v.gameId] = (counts[v.gameId] || 0) + 1;
-      }
-
-      let topGame = room.selectedGameId || gameId;
-      let maxVotes = 0;
-      for (const [gId, count] of Object.entries(counts)) {
-        if (count > maxVotes) {
-          maxVotes = count;
-          topGame = gId;
+        const counts: Record<string, number> = {};
+        for (const vote of allVotes) {
+          counts[vote.gameId] = (counts[vote.gameId] || 0) + 1;
         }
+
+        let topGame = room.selectedGameId || gameId;
+        let maxVotes = 0;
+        for (const [candidateGameId, count] of Object.entries(counts)) {
+          if (count > maxVotes) {
+            maxVotes = count;
+            topGame = candidateGameId;
+          }
+        }
+
+        await tx.room.update({
+          where: { id: room.id },
+          data: { selectedGameId: topGame },
+        });
+      },
+      {
+        maxWait: 5000,
+        timeout: 10000,
       }
+    );
 
-      await tx.room.update({
-        where: { id: room.id },
-        data: { selectedGameId: topGame },
-      });
+    const fullRoom = await this.findRoomWithRelations({ id: room.id });
+    if (!fullRoom) throw new NotFoundError('Room not found after voting');
 
-      const full = await this.findRoomWithRelations({ id: room.id }, tx);
-      return this.formatRoomSnapshot(full);
-    });
+    return this.formatRoomSnapshot(fullRoom);
   }
 
   /**
@@ -1009,7 +1013,9 @@ export class RoomsService {
     });
 
     if (!room) throw new NotFoundError('Room not found');
-    if (room.hostId !== currentHostId) throw new ForbiddenError('Only the current host can transfer host ownership');
+    if (room.hostId !== currentHostId) {
+      throw new ForbiddenError('Only the current host can transfer host ownership');
+    }
 
     const targetParticipant = await prisma.roomParticipant.findUnique({
       where: { roomId_userId: { roomId: room.id, userId: newHostId } },
@@ -1020,35 +1026,41 @@ export class RoomsService {
       throw new AppError('Target player is not an active participant in this room', 400);
     }
 
-    return prisma.$transaction(async (tx) => {
-      // Demote current host
-      await tx.roomParticipant.updateMany({
-        where: { roomId: room.id, userId: currentHostId },
-        data: { role: ROOM_PARTICIPANT_ROLES.PLAYER },
-      });
+    await prisma.$transaction(
+      async (tx) => {
+        await tx.roomParticipant.updateMany({
+          where: { roomId: room.id, userId: currentHostId },
+          data: { role: ROOM_PARTICIPANT_ROLES.PLAYER },
+        });
 
-      // Promote new host
-      await tx.roomParticipant.update({
-        where: { id: targetParticipant.id },
-        data: { role: ROOM_PARTICIPANT_ROLES.HOST },
-      });
+        await tx.roomParticipant.update({
+          where: { id: targetParticipant.id },
+          data: { role: ROOM_PARTICIPANT_ROLES.HOST },
+        });
 
-      await tx.room.update({
-        where: { id: room.id },
-        data: { hostId: newHostId },
-      });
+        await tx.room.update({
+          where: { id: room.id },
+          data: { hostId: newHostId },
+        });
 
-      await tx.roomMessage.create({
-        data: {
-          roomId: room.id,
-          senderId: newHostId,
-          message: `Host transferred to ${targetParticipant.user.displayName}.`,
-        },
-      });
+        await tx.roomMessage.create({
+          data: {
+            roomId: room.id,
+            senderId: newHostId,
+            message: `Host transferred to ${targetParticipant.user.displayName}.`,
+          },
+        });
+      },
+      {
+        maxWait: 5000,
+        timeout: 10000,
+      }
+    );
 
-      const full = await this.findRoomWithRelations({ id: room.id }, tx);
-      return this.formatRoomSnapshot(full);
-    });
+    const fullRoom = await this.findRoomWithRelations({ id: room.id });
+    if (!fullRoom) throw new NotFoundError('Room not found after host transfer');
+
+    return this.formatRoomSnapshot(fullRoom);
   }
 
   /**
@@ -1074,32 +1086,43 @@ export class RoomsService {
       throw new AppError('Player is not active in this room', 400);
     }
 
-    return prisma.$transaction(async (tx) => {
-      await tx.roomParticipant.update({
-        where: { id: targetParticipant.id },
-        data: { leftAt: new Date(), isReady: false },
-      });
+    await prisma.$transaction(
+      async (tx) => {
+        const removed = await tx.roomParticipant.updateMany({
+          where: { id: targetParticipant.id, leftAt: null },
+          data: { leftAt: new Date(), isReady: false },
+        });
+        if (removed.count === 0) {
+          throw new AppError('Player is no longer active in this room', 400);
+        }
 
-      await tx.gameVote.deleteMany({
-        where: { roomId: room.id, userId: targetUserId },
-      });
+        await tx.gameVote.deleteMany({
+          where: { roomId: room.id, userId: targetUserId },
+        });
 
-      await tx.roomMessage.create({
-        data: {
-          roomId: room.id,
-          senderId: hostId,
-          message: `${targetParticipant.user.displayName} was removed from the room by the host.`,
-        },
-      });
+        await tx.roomMessage.create({
+          data: {
+            roomId: room.id,
+            senderId: hostId,
+            message: `${targetParticipant.user.displayName} was removed from the room by the host.`,
+          },
+        });
 
-      await this.recalculateRoomStatus(room.id, tx);
+        await this.recalculateRoomStatus(room.id, tx);
+      },
+      {
+        maxWait: 5000,
+        timeout: 10000,
+      }
+    );
 
-      const full = await this.findRoomWithRelations({ id: room.id }, tx);
-      return {
-        room: this.formatRoomSnapshot(full),
-        kickedUserId: targetUserId,
-      };
-    });
+    const fullRoom = await this.findRoomWithRelations({ id: room.id });
+    if (!fullRoom) throw new NotFoundError('Room not found after kicking player');
+
+    return {
+      room: this.formatRoomSnapshot(fullRoom),
+      kickedUserId: targetUserId,
+    };
   }
 
   /**
