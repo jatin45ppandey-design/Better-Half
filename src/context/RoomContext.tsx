@@ -304,6 +304,23 @@ export const RoomProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
     });
 
+    const unsubMembershipRevoked = socketService.on(
+      'room:membership:revoked',
+      ({ roomId, userId, reason }: any) => {
+        if (userId !== user?.id) return;
+        const activeRoom = allRooms[currentRoomCode];
+        if (activeRoom && activeRoom.id !== roomId) return;
+
+        addToast(
+          reason === 'KICKED'
+            ? 'You were removed from this room by the host.'
+            : 'You left this room on another device.',
+          { type: 'info' }
+        );
+        setCurrentRoomCode(null);
+      }
+    );
+
     return () => {
       unsubState();
       unsubJoined();
@@ -315,8 +332,9 @@ export const RoomProvider: React.FC<{ children: React.ReactNode }> = ({ children
       unsubReaction();
       unsubPresence();
       unsubLaunch();
+      unsubMembershipRevoked();
     };
-  }, [currentRoomCode, allRooms, addToast]);
+  }, [currentRoomCode, allRooms, addToast, user?.id]);
 
   const refreshCurrentRoom = useCallback(async () => {
     if (!currentRoomCode) return;
