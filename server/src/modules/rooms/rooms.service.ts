@@ -1076,13 +1076,8 @@ export class RoomsService {
       throw new ForbiddenError('Only the current host can transfer host ownership');
     }
 
-    const targetParticipant = await prisma.roomParticipant.findUnique({
-      where: { roomId_userId: { roomId: room.id, userId: newHostId } },
-      include: { user: true },
-    });
-
-    if (!targetParticipant || targetParticipant.leftAt) {
-      throw new AppError('Target player is not an active participant in this room', 400);
+    if (newHostId === currentHostId) {
+      throw new AppError('The current host already owns this room.', 400);
     }
 
     await prisma.$transaction(
@@ -1100,15 +1095,41 @@ export class RoomsService {
           throw new AppError('Host transfer is only available in the room lobby.', 400);
         }
 
-        await tx.roomParticipant.updateMany({
-          where: { roomId: room.id, userId: currentHostId },
+        // Re-read the target after locking the room. A pre-transaction lookup
+        // alone allows a concurrent leave to turn an inactive user into host.
+        const [currentHostParticipant, targetParticipant] = await Promise.all([
+          tx.roomParticipant.findUnique({
+            where: { roomId_userId: { roomId: room.id, userId: currentHostId } },
+            select: { id: true, leftAt: true },
+          }),
+          tx.roomParticipant.findUnique({
+            where: { roomId_userId: { roomId: room.id, userId: newHostId } },
+            include: { user: { select: { displayName: true } } },
+          }),
+        ]);
+
+        if (!currentHostParticipant || currentHostParticipant.leftAt) {
+          throw new ForbiddenError('The current host is no longer an active participant.');
+        }
+        if (!targetParticipant || targetParticipant.leftAt) {
+          throw new AppError('Target player is not an active participant in this room', 400);
+        }
+
+        const demoted = await tx.roomParticipant.updateMany({
+          where: { id: currentHostParticipant.id, leftAt: null },
           data: { role: ROOM_PARTICIPANT_ROLES.PLAYER },
         });
+        if (demoted.count !== 1) {
+          throw new AppError('The current host changed while ownership was being transferred.', 409);
+        }
 
-        await tx.roomParticipant.update({
-          where: { id: targetParticipant.id },
+        const promoted = await tx.roomParticipant.updateMany({
+          where: { id: targetParticipant.id, leftAt: null },
           data: { role: ROOM_PARTICIPANT_ROLES.HOST },
         });
+        if (promoted.count !== 1) {
+          throw new AppError('Target player left while host ownership was being transferred.', 409);
+        }
 
         await tx.room.update({
           where: { id: room.id },
@@ -1119,7 +1140,7 @@ export class RoomsService {
           data: {
             roomId: room.id,
             senderId: newHostId,
-            message: `Host transferred to ${targetParticipant.user.displayName}.`,
+            message: `Host transferred to ${targetParticipant.user.displayName || 'the selected player'}.`,
           },
         });
       },
