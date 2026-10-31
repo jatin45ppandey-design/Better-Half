@@ -354,7 +354,7 @@ export const BetweenUsGame: React.FC<BetweenUsProps> = ({
             />
 
             <div className="flex items-center justify-between gap-3">
-              <Button variant="ghost" size="sm" onClick={handleSkipPrompt} className="text-xs text-gray-500">
+              <Button variant="ghost" size="sm" onClick={handleSkipPrompt} disabled={isMultiplayer} className="text-xs text-gray-500">
                 Skip Prompt
               </Button>
               <Button
