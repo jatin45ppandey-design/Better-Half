@@ -293,36 +293,62 @@ describe('PlaySpace Wave 2 — B2 Durable Game Sessions & Concurrency Safety', (
       ).rejects.toThrow('Question database unreachable');
     });
 
-    it('rejects createSession inside the transaction if concurrent active session exists', async () => {
-      vi.spyOn(prisma.room, 'findFirst').mockResolvedValue({
+    it('reuses an active session if a concurrent start wins before transaction commit', async () => {
+      const roomRecord = {
         id: 'room-atomic-1',
         code: 'ATOM01',
         hostId: userA.id,
         mode: 'COUPLE',
         status: 'READY_TO_START',
+        expiresAt: new Date(Date.now() + 60_000),
         participants: [
           { userId: userA.id, leftAt: null, isReady: true, user: userA },
           { userId: userB.id, leftAt: null, isReady: true, user: userB },
         ],
-      } as any);
-
+      };
+      vi.spyOn(prisma.room, 'findFirst').mockResolvedValue(roomRecord as any);
       vi.spyOn(prisma.gameConfiguration, 'findUnique').mockResolvedValue(null);
-      // Pre-check finds nothing:
+      // The ordinary pre-check finds no active session. A concurrent request
+      // wins while this request is waiting for the room-row lock.
       vi.spyOn(prisma.gameSession, 'findFirst').mockResolvedValue(null);
 
-      // But transaction check catches concurrent session:
-      vi.spyOn(prisma, '$transaction').mockImplementation(async (cb: any) => {
-        return cb({
-          gameSession: {
-            findFirst: vi.fn().mockResolvedValue({ id: 'sess-race-won', status: 'ACTIVE' }),
-          },
-          room: { update: vi.fn() },
-        });
-      });
+      const activeContext: GameEngineContext = {
+        sessionId: 'sess-race-won',
+        roomId: roomRecord.id,
+        gameId: 'tic-tac-toe',
+        mode: 'couple',
+        participants: [
+          { userId: userA.id, name: userA.displayName, seatIndex: 0, isHost: true },
+          { userId: userB.id, name: userB.displayName, seatIndex: 1, isHost: false },
+        ],
+        state: {},
+        privateStates: {},
+        version: 1,
+        isPaused: false,
+        status: 'ACTIVE',
+        scores: {},
+      };
+      gameStateService.setSession(activeContext.sessionId, activeContext);
 
-      await expect(
-        gameSessionService.createSession('room-atomic-1', 'tic-tac-toe', userA.id)
-      ).rejects.toThrow('An active game session already exists for this room.');
-    });
+      const tx = {
+        $queryRaw: vi.fn().mockResolvedValue([{ id: roomRecord.id }]),
+        room: { findUnique: vi.fn().mockResolvedValue(roomRecord) },
+        gameSession: {
+          findFirst: vi.fn().mockResolvedValue({
+            id: activeContext.sessionId,
+            gameId: activeContext.gameId,
+            status: 'ACTIVE',
+          }),
+        },
+      };
+      vi.spyOn(prisma, '$transaction').mockImplementationOnce(
+        async (callback: any) => callback(tx)
+      );
+
+      const result = await gameSessionService.createSession('room-atomic-1', 'tic-tac-toe', userA.id);
+      expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+      expect(result.created).toBe(false);
+      expect(result.session.sessionId).toBe(activeContext.sessionId);
+    });;
   });
 });
