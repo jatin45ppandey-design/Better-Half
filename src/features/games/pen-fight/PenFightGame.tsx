@@ -188,7 +188,7 @@ export const PenFightGame: React.FC<PenFightProps> = ({
   }, [isMultiplayer, sessionState?.simulationFrames, sessionState?.pens, players]);
 
   const activePlayer = players[currentTurnIdx] || players[0];
-  const activePen = pens.find((p) => p.id === activePlayer.id);
+  const activePen = pens.find((p: Pen) => p.id === activePlayer.id);
 
   // Check round victory
   const checkRoundStatus = useCallback((currentPens: Pen[]) => {
