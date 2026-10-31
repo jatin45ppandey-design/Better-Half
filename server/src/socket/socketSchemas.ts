@@ -134,6 +134,7 @@ const gameActionPayloadSchema = z.discriminatedUnion('type', [
     category: z.string().trim().min(1).max(50).optional(),
     intensity: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5)]).optional(),
   }).strict(),
+  z.object({ type: z.literal('FINISH_SESSION') }).strict(),
 ]);
 
 export const gameActionSchema = z
