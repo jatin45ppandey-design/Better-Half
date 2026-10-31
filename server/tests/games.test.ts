@@ -121,6 +121,7 @@ describe('PlaySpace Phase 3 — All 11 Server Game Engines & Real-time Integrati
           create: vi.fn().mockResolvedValue({ id: 'session-created' }),
           updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         },
+        gameConfiguration: { findUnique: vi.fn().mockResolvedValue(null) },
         gameAction: { create: vi.fn().mockResolvedValue({}) },
         gameSessionParticipant: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
         match: { findUnique: vi.fn().mockResolvedValue(null), create: vi.fn().mockResolvedValue({ id: 'm-1' }) },
