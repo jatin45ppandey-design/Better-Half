@@ -58,7 +58,7 @@ const GameArenaContent: React.FC<GameArenaContentProps> = ({
 
   // Authoritative completion listener
   useEffect(() => {
-    if (session?.winnerUserId !== undefined && session.winnerUserId !== null && !showResults) {
+    if (session?.sessionStatus === 'COMPLETED' && !showResults) {
       const winner = session.participants.find((p) => p.userId === session.winnerUserId);
       const playerScores: PlayerScoreSummary[] = session.participants.map((p) => ({
         playerId: p.userId,
@@ -70,12 +70,12 @@ const GameArenaContent: React.FC<GameArenaContentProps> = ({
       }));
 
       setMatchResults({
-        winnerName: winner ? winner.name : 'Tie / Draw',
+        winnerName: winner ? winner.name : 'Tie / Cooperative Result',
         playerScores,
       });
       setShowResults(true);
     }
-  }, [session?.winnerUserId, session?.participants, session?.scores, showResults]);
+  }, [session?.sessionStatus, session?.winnerUserId, session?.participants, session?.scores, showResults]);
 
   if (!game) return null;
 
