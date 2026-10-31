@@ -108,9 +108,13 @@ export class SnatchTheFriesEngine
       if (context.state.matchOver) {
         return { valid: false, error: 'Match has concluded.' };
       }
-      // If waiting, false start is allowed as a game action (will incur penalty)
+      // One false-start penalty per waiting cycle. Further taps are rejected
+      // until the host advances to the next server-timed drop.
       if (context.state.dropState === 'SNATCHED') {
         return { valid: false, error: 'Fry was already snatched.' };
+      }
+      if (context.state.dropState === 'FALSE_START') {
+        return { valid: false, error: 'A false start was already recorded. Wait for the next drop.' };
       }
       return { valid: true };
     }
