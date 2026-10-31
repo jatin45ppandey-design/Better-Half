@@ -25,6 +25,10 @@ interface OriginalCardGameProps {
   players: { id: string; name: string; avatarInitials: string; avatarColor: string }[];
   onFinishMatch: (results: { winnerName?: string; playerScores: PlayerScoreSummary[] }) => void;
   onUpdateTurn?: (playerName: string, roundInfo: string) => void;
+  sessionState?: any;
+  sessionPrivateState?: any;
+  onSendAction?: (action: any) => Promise<{ success: boolean; error?: string }>;
+  currentUserId?: string;
 }
 
 // Color theme styles
@@ -40,6 +44,10 @@ export const OriginalCardGame: React.FC<OriginalCardGameProps> = ({
   players,
   onFinishMatch,
   onUpdateTurn,
+  sessionState,
+  sessionPrivateState,
+  onSendAction,
+  currentUserId,
 }) => {
   const activePlayers = players.length >= 2 ? players : [
     { id: 'p1', name: 'Alex', avatarInitials: 'AR', avatarColor: 'bg-[#9670E8]' },
@@ -85,16 +93,28 @@ export const OriginalCardGame: React.FC<OriginalCardGameProps> = ({
   const [discardPile, setDiscardPile] = useState<GameCard[]>([
     { id: 'start-card', color: 'purple', value: '5', label: '5' }
   ]);
-  const [activeColor, setActiveColor] = useState<CardColor>('purple');
-  const [currentTurnIndex, setCurrentTurnIndex] = useState(0);
+  const [localActiveColor, setActiveColor] = useState<CardColor>('purple');
+  const [localCurrentTurnIndex, setCurrentTurnIndex] = useState(0);
+  const isMultiplayer = Boolean(sessionState && onSendAction);
+  const currentTurnIndex = isMultiplayer
+    ? Math.max(0, activePlayers.findIndex((player) => player.id === sessionState.currentTurnUserId))
+    : localCurrentTurnIndex;
+  const activePlayer = activePlayers[currentTurnIndex] || activePlayers[0];
+  const playerHand: GameCard[] = isMultiplayer ? sessionPrivateState?.hand || [] : hands[activePlayer.id] || [];
+  const topDiscard: GameCard = isMultiplayer ? sessionState.topDiscard : discardPile[discardPile.length - 1];
+  const activeColor: CardColor = isMultiplayer ? sessionState.activeColor : localActiveColor;
+  const cardCounts: Record<string, number> = isMultiplayer
+    ? sessionState.cardCounts || {}
+    : Object.fromEntries(activePlayers.map((player) => [player.id, (hands[player.id] || []).length]));
+  const hasDrawnThisTurn = Boolean(isMultiplayer && sessionState.hasDrawnThisTurn);
+  const isMyTurn = !isMultiplayer || sessionState.currentTurnUserId === currentUserId;
   const [turnDirection, setTurnDirection] = useState<1 | -1>(1);
   const [showWildModal, setShowWildModal] = useState(false);
   const [pendingCard, setPendingCard] = useState<GameCard | null>(null);
   const [callLastCardAlert, setCallLastCardAlert] = useState<string | null>(null);
 
-  const activePlayer = activePlayers[currentTurnIndex];
-  const topDiscard = discardPile[discardPile.length - 1];
-  const playerHand = hands[activePlayer.id] || [];
+  // Online opponents expose only their hand sizes; the current player's actual
+  // hand comes from the authenticated private session projection.
 
   useEffect(() => {
     if (onUpdateTurn) {
@@ -118,7 +138,7 @@ export const OriginalCardGame: React.FC<OriginalCardGameProps> = ({
   };
 
   const handleCardClick = (card: GameCard) => {
-    if (!isCardLegal(card)) return;
+    if (!isCardLegal(card) || !isMyTurn) return;
 
     if (card.color === 'wild') {
       setPendingCard(card);
@@ -130,6 +150,16 @@ export const OriginalCardGame: React.FC<OriginalCardGameProps> = ({
   };
 
   const executePlayCard = (card: GameCard, chosenColor: CardColor) => {
+    if (isMultiplayer) {
+      void onSendAction?.({
+        type: 'PLAY_CARD',
+        cardId: card.id,
+        ...(card.color === 'wild' ? { chosenColor } : {}),
+      });
+      setPendingCard(null);
+      setShowWildModal(false);
+      return;
+    }
     // Remove card from hand
     const updatedHand = playerHand.filter((c) => c.id !== card.id);
     setHands((prev) => ({ ...prev, [activePlayer.id]: updatedHand }));
@@ -192,6 +222,10 @@ export const OriginalCardGame: React.FC<OriginalCardGameProps> = ({
   };
 
   const handleDrawCard = () => {
+    if (isMultiplayer) {
+      if (isMyTurn && !hasDrawnThisTurn) void onSendAction?.({ type: 'DRAW_CARD' });
+      return;
+    }
     if (deck.length === 0) {
       // Reshuffle discard pile
       const newD = generateDeck();
@@ -205,6 +239,14 @@ export const OriginalCardGame: React.FC<OriginalCardGameProps> = ({
     }));
 
     advanceTurn(1);
+  };
+
+  const handlePassTurn = () => {
+    if (isMultiplayer) {
+      if (isMyTurn && hasDrawnThisTurn) void onSendAction?.({ type: 'PASS_TURN' });
+      return;
+    }
+    handleDrawCard();
   };
 
   const handleSelectWildColor = (col: CardColor) => {
@@ -227,8 +269,8 @@ export const OriginalCardGame: React.FC<OriginalCardGameProps> = ({
       {/* Opponents Hands Bar */}
       <div className="flex flex-wrap items-center justify-center gap-4">
         {activePlayers.map((player, idx) => {
-          const isTurn = idx === currentTurnIndex;
-          const handSize = (hands[player.id] || []).length;
+          const isTurn = player.id === activePlayer.id;
+          const handSize = cardCounts[player.id] || 0;
 
           return (
             <div
@@ -258,6 +300,7 @@ export const OriginalCardGame: React.FC<OriginalCardGameProps> = ({
         <button
           type="button"
           onClick={handleDrawCard}
+          disabled={!isMyTurn || hasDrawnThisTurn}
           className="w-24 h-36 rounded-2xl border-2 border-[#593B91] bg-gradient-to-br from-[#3B2368] to-[#593B91] text-white flex flex-col items-center justify-center gap-2 shadow-lg hover:scale-105 active:scale-95 transition-all cursor-pointer group"
         >
           <Layers className="w-6 h-6 text-purple-200 group-hover:rotate-12 transition-transform" />
@@ -291,15 +334,21 @@ export const OriginalCardGame: React.FC<OriginalCardGameProps> = ({
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="text-xs font-extrabold text-[#211A2D]">
-              {activePlayer.name}'s Hand ({playerHand.length} Cards)
+              {isMultiplayer ? 'Your Hand' : `${activePlayer.name}'s Hand`} ({playerHand.length} Cards)
             </span>
             <Badge variant="subtle" size="sm">
               Click legal card to play
             </Badge>
           </div>
 
-          <Button variant="outline" size="sm" onClick={handleDrawCard} className="text-xs">
-            Pass & Draw 1
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={hasDrawnThisTurn ? handlePassTurn : handleDrawCard}
+            disabled={!isMyTurn}
+            className="text-xs"
+          >
+            {hasDrawnThisTurn ? 'Pass Turn' : 'Draw 1 Card'}
           </Button>
         </div>
 
@@ -311,7 +360,7 @@ export const OriginalCardGame: React.FC<OriginalCardGameProps> = ({
               <button
                 key={card.id}
                 type="button"
-                disabled={!legal}
+                disabled={!legal || !isMyTurn}
                 onClick={() => handleCardClick(card)}
                 className={`w-20 h-32 rounded-xl border-2 flex flex-col justify-between p-2.5 shrink-0 transition-all cursor-pointer ${
                   COLOR_CLASSES[card.color].bg
