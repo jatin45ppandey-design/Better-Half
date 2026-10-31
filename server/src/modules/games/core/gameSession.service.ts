@@ -223,6 +223,21 @@ export class GameSessionService {
           throw new AppError('The selected game changed while the session was starting. Please retry.', 409);
         }
 
+        const lockedGameConfig = await tx.gameConfiguration.findUnique({
+          where: { gameId },
+        });
+        if (lockedGameConfig) {
+          if (!lockedGameConfig.isEnabled) {
+            throw new AppError(`Game "${gameId}" is currently disabled by administrators.`, 400);
+          }
+          if (mode === 'friend' && !lockedGameConfig.friendEnabled) {
+            throw new AppError(`Game "${gameId}" is disabled in Friend Mode.`, 400);
+          }
+          if (mode === 'couple' && !lockedGameConfig.coupleEnabled) {
+            throw new AppError(`Game "${gameId}" is disabled in Couple Mode.`, 400);
+          }
+        }
+
         const currentParticipantIds = currentRoom.participants.map((participant) => participant.userId);
         const preparedParticipantIds = participants.map((participant) => participant.userId);
         if (
