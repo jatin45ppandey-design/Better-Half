@@ -13,6 +13,9 @@ interface BasketballProps {
   players: { id: string; name: string; avatarInitials: string; avatarColor: string }[];
   onFinishMatch: (results: { winnerName?: string; playerScores: PlayerScoreSummary[] }) => void;
   isPaused?: boolean;
+  sessionState?: any;
+  onSendAction?: (action: any) => Promise<{ success: boolean; error?: string }>;
+  currentUserId?: string;
 }
 
 const TOTAL_SHOTS_PER_PLAYER = 5;
@@ -27,21 +30,31 @@ export const BasketballRivalryGame: React.FC<BasketballProps> = ({
   players,
   onFinishMatch,
   isPaused = false,
+  sessionState,
+  onSendAction,
+  currentUserId,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // Player scores & stats
-  const [scores, setScores] = useState<{ [id: string]: number }>({});
-  const [shotsTaken, setShotsTaken] = useState<{ [id: string]: number }>({});
-  const [streaks, setStreaks] = useState<{ [id: string]: number }>({});
-
-  const [currentTurnIdx, setCurrentTurnIdx] = useState(0);
+  const [localScores, setScores] = useState<{ [id: string]: number }>({});
+  const [localShotsTaken, setShotsTaken] = useState<{ [id: string]: number }>({});
+  const [localStreaks, setStreaks] = useState<{ [id: string]: number }>({});
+  const [localCurrentTurnIdx, setCurrentTurnIdx] = useState(0);
+  const isMultiplayer = Boolean(sessionState && onSendAction);
+  const scores = isMultiplayer ? sessionState.scores || {} : localScores;
+  const shotsTaken = isMultiplayer ? sessionState.shotsTaken || {} : localShotsTaken;
+  const streaks = isMultiplayer ? sessionState.streaks || {} : localStreaks;
+  const currentTurnIdx = isMultiplayer
+    ? Math.max(0, players.findIndex((player) => player.id === sessionState.currentTurnUserId))
+    : localCurrentTurnIdx;
+  const isMyTurn = !isMultiplayer || sessionState.currentTurnUserId === currentUserId;
   const [angle, setAngle] = useState(52); // degrees
   const [power, setPower] = useState(70); // 30 - 100
   const [isPowerPulsing, setIsPowerPulsing] = useState(false);
 
   // Ball physics state
-  const [ballState, setBallState] = useState<{
+  const [localBallState, setBallState] = useState<{
     x: number;
     y: number;
     vx: number;
@@ -54,16 +67,46 @@ export const BasketballRivalryGame: React.FC<BasketballProps> = ({
     vy: 0,
     inFlight: false,
   });
-
-  const [lastShotResult, setLastShotResult] = useState<{
-    type: 'SWISH' | 'BANK' | 'MISS' | null;
-    points: number;
-    text: string;
-  }>({ type: null, points: 0, text: '' });
+  const [serverBallState, setServerBallState] = useState({
+    x: BALL_START_X, y: BALL_START_Y, vx: 0, vy: 0, inFlight: false,
+  });
+  const localLastShotResult = useRef<any>(null);
+  const ballState = isMultiplayer ? serverBallState : localBallState;
+  const lastShotResult = isMultiplayer
+    ? sessionState.lastShotResult || { type: null, points: 0, text: '' }
+    : localLastShotResult.current?.local || { type: null, points: 0, text: '' };
 
   const activePlayer = players[currentTurnIdx % players.length];
   const activeShots = shotsTaken[activePlayer.id] || 0;
   const activeStreak = streaks[activePlayer.id] || 0;
+
+  // The server returns the completed trajectory and shot verdict. Clients only
+  // animate those coordinates; they never decide points or whether a shot scored.
+  useEffect(() => {
+    if (!isMultiplayer) return;
+    const result = sessionState.lastShotResult;
+    const trajectory = result?.trajectory;
+    if (!Array.isArray(trajectory) || trajectory.length === 0) return;
+
+    let index = 0;
+    let frameId = 0;
+    const renderFrame = () => {
+      const point = trajectory[index];
+      if (point) {
+        setServerBallState({
+          x: point.x,
+          y: point.y,
+          vx: 0,
+          vy: 0,
+          inFlight: index < trajectory.length - 1,
+        });
+        index += 1;
+      }
+      if (index < trajectory.length) frameId = requestAnimationFrame(renderFrame);
+    };
+    frameId = requestAnimationFrame(renderFrame);
+    return () => cancelAnimationFrame(frameId);
+  }, [isMultiplayer, sessionState?.version, sessionState?.lastShotResult]);
 
   // Power pulsing oscillation for arcade feel
   useEffect(() => {
@@ -79,7 +122,7 @@ export const BasketballRivalryGame: React.FC<BasketballProps> = ({
 
   // Main Ball Flight Physics Loop
   useEffect(() => {
-    if (!ballState.inFlight || isPaused) return;
+    if (isMultiplayer || !ballState.inFlight || isPaused) return;
 
     let animId: number;
     const gravity = 0.42;
@@ -129,6 +172,7 @@ export const BasketballRivalryGame: React.FC<BasketballProps> = ({
   }, [ballState.inFlight, isPaused]);
 
   const handleShotResult = (type: 'SWISH' | 'BANK' | 'MISS', pts: number, text: string) => {
+    if (isMultiplayer) return;
     const isScore = type !== 'MISS';
     const bonus = isScore && activeStreak >= 2 ? 1 : 0; // On-fire bonus
     const totalPts = pts + bonus;
@@ -193,7 +237,11 @@ export const BasketballRivalryGame: React.FC<BasketballProps> = ({
   };
 
   const handleShoot = () => {
-    if (ballState.inFlight || isPaused || activeShots >= TOTAL_SHOTS_PER_PLAYER) return;
+    if (ballState.inFlight || isPaused || !isMyTurn || activeShots >= TOTAL_SHOTS_PER_PLAYER) return;
+    if (isMultiplayer) {
+      void onSendAction?.({ type: 'SHOOT', angle, power });
+      return;
+    }
 
     // Convert angle to radians
     const rad = (angle * Math.PI) / 180;
@@ -429,7 +477,7 @@ export const BasketballRivalryGame: React.FC<BasketballProps> = ({
                 min="35"
                 max="75"
                 value={angle}
-                disabled={ballState.inFlight}
+                disabled={ballState.inFlight || (isMultiplayer && !isMyTurn)}
                 onChange={(e) => setAngle(Number(e.target.value))}
                 className="w-full accent-primary-600 cursor-pointer"
               />
@@ -448,7 +496,7 @@ export const BasketballRivalryGame: React.FC<BasketballProps> = ({
                 min="40"
                 max="95"
                 value={power}
-                disabled={ballState.inFlight}
+                disabled={ballState.inFlight || (isMultiplayer && !isMyTurn)}
                 onChange={(e) => setPower(Number(e.target.value))}
                 className="w-full accent-orange-500 cursor-pointer"
               />
@@ -461,7 +509,7 @@ export const BasketballRivalryGame: React.FC<BasketballProps> = ({
               variant="outline"
               size="sm"
               onClick={() => setIsPowerPulsing(!isPowerPulsing)}
-              disabled={ballState.inFlight}
+              disabled={isMultiplayer || ballState.inFlight}
               className="text-xs text-gray-700"
             >
               {isPowerPulsing ? '⏸ Lock Meter' : '⚡ Auto-Pulse Meter'}
@@ -470,7 +518,7 @@ export const BasketballRivalryGame: React.FC<BasketballProps> = ({
             <Button
               size="lg"
               onClick={handleShoot}
-              disabled={ballState.inFlight || activeShots >= TOTAL_SHOTS_PER_PLAYER}
+              disabled={ballState.inFlight || !isMyTurn || activeShots >= TOTAL_SHOTS_PER_PLAYER}
               className="flex-1 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-black text-base shadow-lg shadow-orange-500/30 flex items-center justify-center gap-2"
             >
               <Trophy className="w-5 h-5" />
