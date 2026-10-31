@@ -88,11 +88,18 @@ export class SnatchTheFriesEngine
   validateAction(
     action: SnatchTheFriesAction,
     context: GameEngineContext<SnatchTheFriesState>,
-    _actorUserId: string
+    actorUserId: string
   ): { valid: boolean; error?: string } {
     if (action.type === 'SPAWN_DROP') {
       if (context.state.matchOver) {
         return { valid: false, error: 'Match has concluded.' };
+      }
+      const actor = context.participants.find((participant) => participant.userId === actorUserId);
+      if (!actor?.isHost) {
+        return { valid: false, error: 'Only the room host may schedule a fry drop.' };
+      }
+      if (context.state.dropState === 'DROPPED') {
+        return { valid: false, error: 'A fry is already waiting to be snatched.' };
       }
       return { valid: true };
     }
