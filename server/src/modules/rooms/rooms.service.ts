@@ -1086,6 +1086,10 @@ export class RoomsService {
       return { canStart: false, reason: 'This room has been closed.' };
     }
 
+    if (room.status === ROOM_STATUS.COMPLETED) {
+      return { canStart: false, reason: 'This room has already completed its game session.' };
+    }
+
     if (room.status === ROOM_STATUS.EXPIRED || room.expiresAt <= new Date()) {
       return { canStart: false, reason: 'This room has expired.' };
     }
