@@ -148,6 +148,11 @@ class SocketService {
       console.log('[Socket] Disconnected:', reason);
     });
 
+    socket.on('room:membership:revoked', (data: { roomId?: string }) => {
+      if (!data?.roomId) return;
+      this.joinedRooms.delete(data.roomId.trim().toUpperCase());
+    });
+
     // Re-attach registered custom listeners to a newly created socket.
     for (const [event, callbacks] of this.listeners.entries()) {
       for (const callback of callbacks) {
