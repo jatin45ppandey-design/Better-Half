@@ -9,6 +9,7 @@ import { gameStateService } from '../modules/games/core/gameState.service.js';
 import { gameActionService } from '../modules/games/core/gameAction.service.js';
 import { gameSessionService } from '../modules/games/core/gameSession.service.js';
 import { presenceManager } from './presence.js';
+import { prisma } from '../config/prisma.js';
 import { safeSocketError } from './safeError.js';
 import type { GameActionEnvelope } from '../modules/games/core/gameEngine.types.js';
 import {
@@ -20,6 +21,115 @@ import {
   gameSessionLeaveSchema,
   validateSocketPayload,
 } from './socketSchemas.js';
+
+type SnatchDropTimer = {
+  timer: ReturnType<typeof setTimeout>;
+  dropState: string;
+  version: number;
+};
+
+const snatchDropTimers = new Map<string, SnatchDropTimer>();
+
+/**
+ * Server-owned Snatch The Fries drop scheduler. It is started when a participant
+ * joins a session and after each game action, so no host browser/tab is required
+ * to keep the match moving.
+ */
+async function scheduleServerSnatchDrop(
+  io: Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>,
+  sessionId: string
+): Promise<void> {
+  const session = gameStateService.getSession(sessionId)
+    || await gameSessionService.getOrRestoreSession(sessionId);
+
+  if (!session || session.gameId !== 'snatch-the-fries' || session.status !== 'ACTIVE') {
+    const existing = snatchDropTimers.get(sessionId);
+    if (existing) clearTimeout(existing.timer);
+    snatchDropTimers.delete(sessionId);
+    return;
+  }
+
+  const state = session.state as {
+    dropState?: string;
+    matchOver?: boolean;
+  };
+
+  const existing = snatchDropTimers.get(sessionId);
+  if (state.matchOver || state.dropState === 'DROPPED') {
+    if (existing) clearTimeout(existing.timer);
+    snatchDropTimers.delete(sessionId);
+    return;
+  }
+
+  const dropState = state.dropState || 'WAITING';
+  if (
+    existing &&
+    existing.dropState === dropState &&
+    existing.version === session.version
+  ) {
+    return;
+  }
+  if (existing) clearTimeout(existing.timer);
+
+  const delay = dropState === 'FALSE_START'
+    ? 1500
+    : dropState === 'SNATCHED'
+    ? 1400
+    : Math.floor(Math.random() * 2600) + 1400;
+
+  const timer = setTimeout(async () => {
+    snatchDropTimers.delete(sessionId);
+
+    try {
+      const latestSession = gameStateService.getSession(sessionId)
+        || await gameSessionService.getOrRestoreSession(sessionId);
+      if (!latestSession || latestSession.status !== 'ACTIVE') return;
+
+      const latestState = latestSession.state as { dropState?: string; matchOver?: boolean };
+      if (latestState.matchOver || latestState.dropState === 'DROPPED') return;
+
+      const room = latestSession.roomId
+        ? await prisma.room.findUnique({
+            where: { id: latestSession.roomId },
+            select: { hostId: true, status: true },
+          })
+        : null;
+
+      if (!room || room.status !== 'IN_PROGRESS') return;
+      if (!latestSession.participants.some((participant) => participant.userId === room.hostId)) return;
+
+      const result = await gameActionService.applyAction(
+        {
+          sessionId,
+          actionId: `server-fries-drop-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+          expectedVersion: latestSession.version,
+          action: { type: 'SPAWN_DROP' },
+        },
+        room.hostId
+      );
+
+      if (result.success) {
+        if (result.publicState) {
+          io.to(`session:${sessionId}`).emit('game:state', { publicState: result.publicState });
+        }
+        result.events?.forEach((event) => {
+          io.to(`session:${sessionId}`).emit('game:event', {
+            type: event.type,
+            payload: event.payload,
+          });
+        });
+      } else if (result.error?.toLowerCase().includes('version conflict')) {
+        // An unrelated accepted action won the version race. Re-read current
+        // state and only schedule again when the game still needs a drop.
+        await scheduleServerSnatchDrop(io, sessionId);
+      }
+    } catch (error: any) {
+      console.warn('[Snatch The Fries] Server drop scheduler failed:', error?.message || error);
+    }
+  }, delay);
+
+  snatchDropTimers.set(sessionId, { timer, dropState, version: session.version });
+}
 
 export function registerGameHandlers(
   io: Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>,
@@ -66,6 +176,10 @@ export function registerGameHandlers(
 
       // Join socket room for this game session
       socket.join(`session:${sessionId}`);
+
+      if (session.gameId === 'snatch-the-fries') {
+        void scheduleServerSnatchDrop(io, sessionId);
+      }
 
       const publicState = gameStateService.getPublicProjection(sessionId) || {};
       const privateState = gameStateService.getPrivateProjection(sessionId, userId);
@@ -154,6 +268,12 @@ export function registerGameHandlers(
             });
           }
         });
+      }
+
+      // Schedule the next server-owned fry drop after SNATCH/FALSE_START.
+      // SPAWN_DROP moves the state to DROPPED, which clears any pending timer.
+      if (session?.gameId === 'snatch-the-fries') {
+        void scheduleServerSnatchDrop(io, payload.sessionId);
       }
 
       // Broadcast game completion
