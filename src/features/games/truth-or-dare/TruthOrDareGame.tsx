@@ -14,6 +14,8 @@ import { Input } from '../../../components/ui/Input';
 import { PassDeviceScreen } from '../../../components/game-ui/PassDeviceScreen';
 import type { PlayerScoreSummary } from '../../../components/game-ui/GameResultsModal';
 
+type TruthDareHistoryEntry = { player: string; type: string; text: string };
+
 interface TruthOrDareGameProps {
   players: { id: string; name: string; avatarInitials: string; avatarColor: string }[];
   onFinishMatch: (results: { winnerName?: string; playerScores: PlayerScoreSummary[] }) => void;
@@ -41,7 +43,7 @@ export const TruthOrDareGame: React.FC<TruthOrDareGameProps> = ({
   const [category, setCategory] = useState<'Romantic' | 'Funny' | 'Personal' | 'Challenging'>('Romantic');
   const [localSkipsUsed, setSkipsUsed] = useState<{ [playerId: string]: number }>({ [p1.id]: 0, [p2.id]: 0 });
   const [localCompletedCount, setCompletedCount] = useState<{ [playerId: string]: number }>({ [p1.id]: 0, [p2.id]: 0 });
-  const [localHistory, setHistory] = useState<{ player: string; type: string; text: string }[]>([]);
+  const [localHistory, setHistory] = useState<TruthDareHistoryEntry[]>([]);
   const [showCustomModal, setShowCustomModal] = useState(false);
   const [customText, setCustomText] = useState('');
   const [showPassDevice, setShowPassDevice] = useState(false);
@@ -51,8 +53,8 @@ export const TruthOrDareGame: React.FC<TruthOrDareGameProps> = ({
   const currentPrompt: TruthOrDareItem | null = isMultiplayer ? sessionState.currentPrompt : localCurrentPrompt;
   const skipsUsed = isMultiplayer ? sessionState.skipsUsed || {} : localSkipsUsed;
   const completedCount = isMultiplayer ? sessionState.completedCount || {} : localCompletedCount;
-  const history = isMultiplayer
-    ? (sessionState.history || []).map((entry: any) => ({
+  const history: TruthDareHistoryEntry[] = isMultiplayer
+    ? (sessionState.history || []).map((entry: any): TruthDareHistoryEntry => ({
         player: entry.userName || players.find((player) => player.id === entry.userId)?.name || 'Player',
         type: entry.type,
         text: entry.text,
