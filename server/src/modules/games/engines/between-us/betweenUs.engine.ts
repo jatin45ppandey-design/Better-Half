@@ -1,5 +1,6 @@
 import {
   BETWEEN_US_QUESTIONS,
+  BETWEEN_US_CATEGORIES,
   type BetweenUsQuestion,
 } from '../../../../data/questions/betweenUsQuestions.js';
 import type {
@@ -107,8 +108,12 @@ export class BetweenUsEngine
     }
 
     if (action.type === 'SET_SETTINGS') {
-      if (action.category !== undefined && (typeof action.category !== 'string' || action.category.trim().length === 0 || action.category.length > 50)) {
-        return { valid: false, error: 'Category must be a non-empty value of at most 50 characters.' };
+      if (
+        action.category !== undefined &&
+        action.category !== 'All' &&
+        !BETWEEN_US_CATEGORIES.includes(action.category as (typeof BETWEEN_US_CATEGORIES)[number])
+      ) {
+        return { valid: false, error: 'Invalid BETWEEN US category.' };
       }
       if (action.intensity !== undefined && ![1, 2, 3, 4, 5].includes(action.intensity)) {
         return { valid: false, error: 'Intensity must be between 1 and 5.' };
