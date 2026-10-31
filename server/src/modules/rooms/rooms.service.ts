@@ -124,6 +124,26 @@ export class RoomsService {
     if (rows.length === 0) throw new NotFoundError('Room not found');
   }
 
+  /** Enforce admin game availability on every server mutation path. Missing
+   * config rows retain the existing default-enabled behavior used by admin service. */
+  private async assertGameEnabledForMode(
+    gameId: string,
+    mode: RoomMode,
+    db: Prisma.TransactionClient | typeof prisma = prisma
+  ): Promise<void> {
+    const config = await db.gameConfiguration.findUnique({ where: { gameId } });
+    if (!config) return;
+    if (!config.isEnabled) {
+      throw new AppError(`Game "${gameId}" is currently disabled by administrators.`, 400);
+    }
+    if (mode === 'couple' && !config.coupleEnabled) {
+      throw new AppError(`Game "${gameId}" is disabled in Couple Mode.`, 400);
+    }
+    if (mode === 'friend' && !config.friendEnabled) {
+      throw new AppError(`Game "${gameId}" is disabled in Friend Mode.`, 400);
+    }
+  }
+
   /**
    * Resolve either a database room ID or a public room code to the canonical
    * database ID. Socket.IO room channels and presence keys must always use
@@ -290,6 +310,7 @@ export class RoomsService {
     if (!isGamePermittedForMode(selectedGameId, mode)) {
       throw new AppError(`Selected game '${selectedGameId}' is not allowed in ${mode} mode`, 400);
     }
+    await this.assertGameEnabledForMode(selectedGameId, mode);
 
     // Generate unique code with collision safety
     let code = generateRoomCode();
@@ -933,6 +954,11 @@ export class RoomsService {
         if (!activeParticipant || activeParticipant.leftAt) {
           throw new ForbiddenError('You are not an active participant in this room');
         }
+        await this.assertGameEnabledForMode(
+          canonicalGameId,
+          currentRoom.mode.toLowerCase() as RoomMode,
+          tx
+        );
 
         await tx.gameVote.upsert({
           where: {
@@ -1013,6 +1039,11 @@ export class RoomsService {
         if (!isGamePermittedForMode(canonicalGameId, currentRoom.mode)) {
           throw new AppError(`Game '${gameId}' is not permitted in ${currentRoom.mode.toLowerCase()} mode`, 400);
         }
+        await this.assertGameEnabledForMode(
+          canonicalGameId,
+          currentRoom.mode.toLowerCase() as RoomMode,
+          tx
+        );
 
         await tx.room.update({
           where: { id: room.id },
