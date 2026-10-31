@@ -4,6 +4,7 @@ import { isOriginAllowed } from '../config/cors.js';
 import { socketAuthMiddleware } from './authMiddleware.js';
 import { registerRoomHandlers } from './roomHandlers.js';
 import { registerGameHandlers } from './gameHandlers.js';
+import { setRealtimeServer } from './realtime.js';
 import type {
   ClientToServerEvents,
   ServerToClientEvents,
@@ -32,6 +33,8 @@ export function createSocketServer(httpServer: http.Server) {
     pingTimeout: 5000,
     maxHttpBufferSize: 1e5, // 100 KB payload limit to prevent buffer exhaustion
   });
+
+  setRealtimeServer(io);
 
   const MAX_CONNECTIONS = 5000;
   io.use((socket, next) => {
