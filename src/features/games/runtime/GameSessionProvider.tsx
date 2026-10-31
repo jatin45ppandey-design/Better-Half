@@ -64,7 +64,7 @@ export const GameSessionProvider: React.FC<GameSessionProviderProps> = ({
             versionRef.current = Math.max(versionRef.current, initialVersion);
             setVersion(versionRef.current);
             setIsPaused(!!sessionData.publicState.isPaused);
-            setSessionStatus(sessionData.publicState.status || sessionData.status || 'ACTIVE');
+            setSessionStatus(sessionData.publicState.status || 'ACTIVE');
             setScores(sessionData.publicState.scores || {});
             setWinnerUserId(sessionData.publicState.winnerUserId || null);
             if (sessionData.publicState.participants) {
