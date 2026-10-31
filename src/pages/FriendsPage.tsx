@@ -446,7 +446,7 @@ export const FriendsPage: React.FC = () => {
           setPlayerSearchQuery('');
         }}
         title="Find & Add Friends"
-        description="Search for players by their PlaySpace username or display name."
+        description="Search for players by their Better-Half username or display name."
         maxWidth="md"
       >
         <div className="space-y-4 pt-2">
@@ -514,7 +514,7 @@ export const FriendsPage: React.FC = () => {
               </p>
             ) : (
               <p className="text-xs text-[#756D82] text-center py-4">
-                Enter a username above to find other players on PlaySpace.
+                Enter a username above to find other players on Better-Half.
               </p>
             )}
           </div>

@@ -1,11 +1,11 @@
 {
-  "name": "PlaySpace — Social Multiplayer Gaming",
-  "short_name": "PlaySpace",
-  "description": "Playful social multiplayer gaming platform for couples and groups of friends.",
+  "name": "Better-Half — Good games. Better company.",
+  "short_name": "Better-Half",
+  "description": "Play together with your partner or friends. 11 original multiplayer games, instant browser play, and warm lavender aesthetics.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#FCFAFF",
-  "theme_color": "#593B91",
+  "background_color": "#FAF6FD",
+  "theme_color": "#7C3AED",
   "icons": [
     {
       "src": "/favicon.svg",

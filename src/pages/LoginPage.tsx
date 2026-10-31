@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { Gamepad2, AlertCircle } from 'lucide-react';
+import { AlertCircle, ArrowLeft } from 'lucide-react';
 import { Button } from '../components/ui/Button';
+import { BetterHalfLogo } from '../components/ui/BetterHalfLogo';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 
@@ -48,33 +49,36 @@ export const LoginPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen flex flex-col justify-center items-center py-12 px-4 sm:px-6 lg:px-8 bg-gradient-to-b from-[#FCFAFF] via-[#F8F4FF] to-[#FCFAFF]">
-      {/* Brand Header */}
-      <div className="w-full max-w-md mx-auto text-center mb-8">
+    <div className="min-h-screen flex flex-col justify-center items-center py-12 px-4 sm:px-6 lg:px-8 bg-gradient-to-b from-[#FAF6FD] via-[#F4ECFB]/60 to-[#FAF6FD]">
+      {/* Back to Home Link */}
+      <div className="w-full max-w-md mx-auto mb-6">
         <Link
           to="/"
-          className="inline-flex items-center gap-2.5 p-1 rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#9670E8]"
+          className="inline-flex items-center gap-1.5 text-xs font-bold text-[#6B5E82] hover:text-[#7C3AED] transition-colors"
         >
-          <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-[#9670E8] to-[#593B91] flex items-center justify-center text-white shadow-md shadow-[#593B91]/15">
-            <Gamepad2 className="w-6 h-6" />
-          </div>
-          <span className="font-extrabold text-2xl tracking-tight text-[#211A2D]">
-            Play<span className="text-[#9670E8]">Space</span>
-          </span>
+          <ArrowLeft className="w-3.5 h-3.5" />
+          <span>Back to Home</span>
         </Link>
-        <h1 className="mt-4 text-2xl sm:text-3xl font-extrabold tracking-tight text-[#211A2D]">
-          Welcome to PlaySpace
+      </div>
+
+      {/* Brand Header */}
+      <div className="w-full max-w-md mx-auto text-center mb-8">
+        <div className="flex justify-center mb-4">
+          <BetterHalfLogo size="lg" />
+        </div>
+        <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-[#1E1035] font-heading">
+          Welcome to Better-Half
         </h1>
-        <p className="mt-1.5 text-xs sm:text-sm text-[#756D82]">
-          Sign in to access couple duels and friend game lobbies
+        <p className="mt-1.5 text-xs sm:text-sm text-[#6B5E82] font-sans">
+          Sign in to host or join multiplayer rooms with your people
         </p>
       </div>
 
       {/* Main Card */}
-      <div className="w-full max-w-md bg-white rounded-3xl border border-[#EAE3F3] shadow-xl shadow-[#593B91]/5 p-6 sm:p-8">
+      <div className="w-full max-w-md bg-white rounded-3xl border border-[#E8DEF8] shadow-xl shadow-purple-950/5 p-6 sm:p-8">
         {/* Error Banner */}
         {errorMessage && (
-          <div className="mb-5 p-3.5 rounded-2xl bg-[#FDF0F2] border border-[#F8D2D9] flex items-center gap-2.5 text-xs text-[#D94C65] font-medium">
+          <div className="mb-5 p-3.5 rounded-2xl bg-[#FEF2F2] border border-[#FCA5A5] flex items-center gap-2.5 text-xs text-[#DC2626] font-medium">
             <AlertCircle className="w-4 h-4 shrink-0" />
             <span>{errorMessage}</span>
           </div>
@@ -87,7 +91,7 @@ export const LoginPage: React.FC = () => {
             variant="primary"
             size="lg"
             isLoading={isSubmitting}
-            className="w-full font-bold flex items-center justify-center gap-3 py-3.5 shadow-md shadow-[#593B91]/15"
+            className="w-full font-bold flex items-center justify-center gap-3 py-3.5 rounded-2xl shadow-md shadow-purple-900/20"
             onClick={handleGoogleSignIn}
           >
             <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24">
@@ -111,21 +115,23 @@ export const LoginPage: React.FC = () => {
             <span>Continue with Google</span>
           </Button>
 
-          <p className="text-[11px] text-[#756D82] text-center px-4 leading-relaxed">
-            By signing in with Google, you agree to PlaySpace community guidelines and privacy standards.
+          <p className="text-[11px] text-[#6B5E82] text-center px-4 leading-relaxed">
+            Instant passwordless sign-in with your Google account. We securely create or restore your player profile.
           </p>
         </div>
 
-        {/* Link to Signup */}
-        <p className="mt-8 text-center text-xs text-[#756D82] border-t border-[#EAE3F3] pt-5">
-          New to PlaySpace?{' '}
-          <Link
-            to="/signup"
-            className="font-bold text-[#593B91] hover:text-[#9670E8] transition-colors"
-          >
-            Create free account
-          </Link>
-        </p>
+        {/* Footer Link to Signup */}
+        <div className="mt-6 pt-5 border-t border-[#F2EBF9] text-center">
+          <p className="text-xs text-[#6B5E82]">
+            New to Better-Half?{' '}
+            <Link
+              to="/signup"
+              className="font-bold text-[#7C3AED] hover:text-[#6D28D9] transition-colors"
+            >
+              Get Started
+            </Link>
+          </p>
+        </div>
       </div>
     </div>
   );

@@ -1,32 +1,32 @@
 import React, { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import {
-  Gamepad2,
-  Heart,
   Users,
+  Mail,
+  History,
+  Swords,
+  Settings,
+  ShieldAlert,
   LogOut,
   ChevronDown,
-  ExternalLink,
-  ShieldCheck,
+  User as UserIcon,
+  Sparkles,
 } from 'lucide-react';
 import { Avatar } from '../ui/Avatar';
+import { BetterHalfLogo } from '../ui/BetterHalfLogo';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { api } from '../../services/api';
+import { soundService } from '../../services/soundService';
 
-interface DashboardHeaderProps {
-  activeMode: 'couple' | 'friend';
-  onModeChange: (mode: 'couple' | 'friend') => void;
-}
-
-export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
-  activeMode,
-  onModeChange,
-}) => {
+export const DashboardHeader: React.FC = () => {
   const { user, logout } = useAuth();
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
   const [canAccessAdmin, setCanAccessAdmin] = useState(false);
+  const [pendingInvitesCount, setPendingInvitesCount] = useState(0);
+
   const navigate = useNavigate();
+  const location = useLocation();
   const { addToast } = useToast();
 
   useEffect(() => {
@@ -42,227 +42,177 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
         if (active) setCanAccessAdmin(false);
       });
 
+    void api.roomInvitations.getReceived()
+      .then((response) => {
+        if (active) setPendingInvitesCount(response.invitations.length);
+      })
+      .catch(() => {
+        if (active) setPendingInvitesCount(0);
+      });
+
     return () => { active = false; };
-  }, [user?.id]);
+  }, [user?.id, location.pathname]);
+
+  const isCurrent = (path: string) => location.pathname === path;
 
   const handleLogout = async () => {
+    soundService.playClick();
     await logout();
     setProfileDropdownOpen(false);
-    addToast('Signed out of PlaySpace.', { type: 'info' });
+    addToast('Signed out of Better-Half.', { type: 'info' });
     navigate('/login');
   };
 
-  const handleSwitchMode = (mode: 'couple' | 'friend') => {
-    onModeChange(mode);
-    setProfileDropdownOpen(false);
-    addToast(`Switched to ${mode === 'couple' ? 'Couple Mode' : 'Friend Mode'}`, {
-      type: 'success',
-    });
-  };
-
   return (
-    <header className="sticky top-0 z-40 w-full bg-white/95 backdrop-blur-md border-b border-[#EAE3F3]">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-18 flex items-center justify-between">
-        {/* Brand */}
+    <header className="sticky top-0 z-40 w-full bg-[#130B24]/95 backdrop-blur-md border-b border-[#2C1A48] text-white transition-all">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+        {/* Brand Logo */}
         <div className="flex items-center gap-6">
           <Link
-            to="/"
-            className="flex items-center gap-2.5 group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#9670E8] rounded-xl p-1"
+            to="/dashboard"
+            onClick={() => soundService.playClick()}
+            className="flex items-center gap-2 group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8B5CF6] rounded-xl p-1"
           >
-            <div className="w-9 h-9 rounded-xl bg-[#593B91] flex items-center justify-center text-white shadow-xs">
-              <Gamepad2 className="w-5 h-5" />
-            </div>
-            <div className="flex flex-col">
-              <span className="font-extrabold text-lg tracking-tight text-[#211A2D]">
-                Play<span className="text-[#9670E8]">Space</span>
-              </span>
-              <span className="text-[9px] font-semibold tracking-wider text-[#756D82] uppercase -mt-1">
-                Dashboard
-              </span>
-            </div>
+            <BetterHalfLogo size="md" variant="dark" />
           </Link>
 
           {/* Quick Nav Links */}
-          <nav className="hidden md:flex items-center gap-1 pl-4 border-l border-[#EAE3F3]">
+          <nav className="hidden md:flex items-center gap-1 pl-4 border-l border-[#2C1A48]">
             <Link
-              to="/"
-              className="px-3 py-1.5 text-xs font-semibold text-[#756D82] hover:text-[#593B91] rounded-lg transition-colors flex items-center gap-1"
+              to="/dashboard"
+              onClick={() => soundService.playClick()}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-xl transition-colors ${
+                isCurrent('/dashboard')
+                  ? 'bg-[#29174A] text-[#C084FC]'
+                  : 'text-[#A79BBF] hover:text-white hover:bg-[#201239]'
+              }`}
             >
-              Landing Page
-              <ExternalLink className="w-3 h-3 text-[#9D96A8]" />
+              Games
             </Link>
-            <a
-              href="#game-library"
-              className="px-3 py-1.5 text-xs font-semibold text-[#756D82] hover:text-[#593B91] rounded-lg transition-colors"
+            <Link
+              to="/friends"
+              onClick={() => soundService.playClick()}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-xl transition-colors flex items-center gap-1.5 ${
+                isCurrent('/friends')
+                  ? 'bg-[#29174A] text-[#C084FC]'
+                  : 'text-[#A79BBF] hover:text-white hover:bg-[#201239]'
+              }`}
             >
-              11 Games
-            </a>
+              <Users className="w-3.5 h-3.5" />
+              Friends
+            </Link>
+            <Link
+              to="/invitations"
+              onClick={() => soundService.playClick()}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-xl transition-colors flex items-center gap-1.5 ${
+                isCurrent('/invitations')
+                  ? 'bg-[#29174A] text-[#C084FC]'
+                  : 'text-[#A79BBF] hover:text-white hover:bg-[#201239]'
+              }`}
+            >
+              <Mail className="w-3.5 h-3.5" />
+              Invites
+              {pendingInvitesCount > 0 && (
+                <span className="w-4 h-4 rounded-full bg-[#9333EA] text-white text-[10px] font-bold flex items-center justify-center">
+                  {pendingInvitesCount}
+                </span>
+              )}
+            </Link>
+            <Link
+              to="/history"
+              onClick={() => soundService.playClick()}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-xl transition-colors flex items-center gap-1.5 ${
+                isCurrent('/history')
+                  ? 'bg-[#29174A] text-[#C084FC]'
+                  : 'text-[#A79BBF] hover:text-white hover:bg-[#201239]'
+              }`}
+            >
+              <History className="w-3.5 h-3.5" />
+              History
+            </Link>
+            <Link
+              to="/rivalry"
+              onClick={() => soundService.playClick()}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-xl transition-colors flex items-center gap-1.5 ${
+                isCurrent('/rivalry')
+                  ? 'bg-[#29174A] text-[#C084FC]'
+                  : 'text-[#A79BBF] hover:text-white hover:bg-[#201239]'
+              }`}
+            >
+              <Swords className="w-3.5 h-3.5" />
+              Rivalry
+            </Link>
           </nav>
         </div>
 
-        {/* Center: Active Mode Pill */}
-        <div className="hidden sm:flex items-center gap-1.5 bg-[#F8F4FF] p-1 rounded-full border border-[#EAE3F3]">
-          <button
-            type="button"
-            onClick={() => handleSwitchMode('couple')}
-            className={`flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-full transition-all cursor-pointer ${
-              activeMode === 'couple'
-                ? 'bg-[#FDF2F8] text-[#9D174D] border border-[#FCE7F3] shadow-xs'
-                : 'text-[#756D82] hover:text-[#211A2D]'
-            }`}
-          >
-            <Heart className="w-3.5 h-3.5 fill-current" />
-            Couple (2P)
-          </button>
-          <button
-            type="button"
-            onClick={() => handleSwitchMode('friend')}
-            className={`flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-full transition-all cursor-pointer ${
-              activeMode === 'friend'
-                ? 'bg-[#F1EAFF] text-[#593B91] border border-[#E2D5F8] shadow-xs'
-                : 'text-[#756D82] hover:text-[#211A2D]'
-            }`}
-          >
-            <Users className="w-3.5 h-3.5" />
-            Friends (Up to 4P)
-          </button>
-        </div>
-
-        {/* Right: User Profile & Dropdown */}
+        {/* Right User Avatar & Profile Dropdown */}
         <div className="relative">
           <button
             type="button"
             onClick={() => setProfileDropdownOpen(!profileDropdownOpen)}
-            className="flex items-center gap-2 p-1.5 pr-2.5 rounded-full hover:bg-[#F8F4FF] border border-transparent hover:border-[#EAE3F3] transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#9670E8]"
+            className="flex items-center gap-2.5 p-1.5 rounded-full hover:bg-[#23143D] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8B5CF6] cursor-pointer"
+            aria-expanded={profileDropdownOpen}
           >
-            <Avatar
-              name={user?.name || 'Player'}
-              initials={user?.avatarInitials || 'PL'}
-              size="sm"
-              bgColor={user?.avatarColor || 'bg-[#9670E8]'}
-            />
-            <div className="hidden sm:flex flex-col text-left">
-              <span className="text-xs font-bold text-[#211A2D] leading-tight">
-{user?.name || 'Player'}
-              </span>
-              <span className="text-[10px] text-[#756D82]">
-                {activeMode === 'couple' ? 'Couple Mode' : 'Friend Mode'}
-              </span>
-            </div>
-            <ChevronDown className="w-3.5 h-3.5 text-[#756D82]" />
+            <Avatar name={user?.name || user?.username || 'Player'} initials={user?.avatarInitials} bgColor={user?.avatarColor} size="sm" />
+            <span className="hidden sm:inline text-xs font-bold text-[#E9D5FF] max-w-[120px] truncate">
+              {user?.name || user?.username || 'Player'}
+            </span>
+            <ChevronDown className="w-3.5 h-3.5 text-[#A79BBF]" />
           </button>
 
-          {/* Profile Dropdown Menu */}
           {profileDropdownOpen && (
-            <div className="absolute right-0 mt-2 w-64 bg-white rounded-2xl shadow-xl shadow-[#593B91]/10 border border-[#EAE3F3] p-3 z-50 animate-in fade-in zoom-in-95 duration-150">
-              <div className="p-2.5 rounded-xl bg-[#F8F4FF] border border-[#EAE3F3] mb-2">
-                <p className="text-xs font-bold text-[#211A2D]">{user?.name || 'Player'}</p>
-                <p className="text-[11px] text-[#756D82] truncate">{user?.email || 'Account'}</p>
+            <div className="absolute right-0 mt-2 w-56 rounded-2xl bg-[#1B1130] border border-[#3A245C] shadow-2xl py-2 z-50 text-white animate-in fade-in slide-in-from-top-2 duration-150">
+              <div className="px-4 py-2.5 border-b border-[#2C1A48]">
+                <p className="text-xs font-bold text-white truncate">
+                  {user?.name || user?.username || 'Player'}
+                </p>
+                <p className="text-[11px] text-[#A79BBF] truncate">
+                  @{user?.username || 'player'}
+                </p>
               </div>
 
-              <div className="flex flex-col gap-1 py-1 text-xs">
-                <button
-                  type="button"
-                  onClick={() => handleSwitchMode('couple')}
-                  className={`flex items-center justify-between p-2 rounded-xl text-left transition-colors cursor-pointer ${
-                    activeMode === 'couple' ? 'bg-[#FDF2F8] text-[#9D174D] font-bold' : 'text-[#756D82] hover:bg-[#F8F4FF]'
-                  }`}
+              <div className="py-1">
+                <Link
+                  to="/dashboard"
+                  onClick={() => setProfileDropdownOpen(false)}
+                  className="w-full px-4 py-2 text-xs font-semibold text-[#E9D5FF] hover:bg-[#261543] flex items-center gap-2"
                 >
-                  <span className="flex items-center gap-2">
-                    <Heart className="w-3.5 h-3.5 fill-current" />
-                    Couple Mode (2P)
-                  </span>
-                  {activeMode === 'couple' && <span className="text-[10px]">Active</span>}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleSwitchMode('friend')}
-                  className={`flex items-center justify-between p-2 rounded-xl text-left transition-colors cursor-pointer ${
-                    activeMode === 'friend' ? 'bg-[#F1EAFF] text-[#593B91] font-bold' : 'text-[#756D82] hover:bg-[#F8F4FF]'
-                  }`}
-                >
-                  <span className="flex items-center gap-2">
-                    <Users className="w-3.5 h-3.5" />
-                    Friend Mode (2–4P)
-                  </span>
-                  {activeMode === 'friend' && <span className="text-[10px]">Active</span>}
-                </button>
-              </div>
-
-              <div className="pt-2 mt-1 border-t border-[#EAE3F3] flex flex-col gap-1">
+                  <Sparkles className="w-3.5 h-3.5 text-[#C084FC]" />
+                  Game Hub
+                </Link>
                 <Link
                   to="/profile"
                   onClick={() => setProfileDropdownOpen(false)}
-                  className="flex items-center gap-2 p-2 rounded-xl text-xs text-[#211A2D] font-bold hover:bg-[#F8F4FF] transition-colors"
+                  className="w-full px-4 py-2 text-xs font-semibold text-[#E9D5FF] hover:bg-[#261543] flex items-center gap-2"
                 >
-                  My Player Profile
+                  <UserIcon className="w-3.5 h-3.5 text-[#A79BBF]" />
+                  My Profile
                 </Link>
-
-                <Link
-                  to="/friends"
-                  onClick={() => setProfileDropdownOpen(false)}
-                  className="flex items-center gap-2 p-2 rounded-xl text-xs text-[#756D82] hover:bg-[#F8F4FF] hover:text-[#211A2D] transition-colors"
-                >
-                  Friends & Squad
-                </Link>
-
-                <Link
-                  to="/invitations"
-                  onClick={() => setProfileDropdownOpen(false)}
-                  className="flex items-center gap-2 p-2 rounded-xl text-xs text-[#756D82] hover:bg-[#F8F4FF] hover:text-[#211A2D] transition-colors"
-                >
-                  Lobby Invitations
-                </Link>
-
-                <Link
-                  to="/history"
-                  onClick={() => setProfileDropdownOpen(false)}
-                  className="flex items-center gap-2 p-2 rounded-xl text-xs text-[#756D82] hover:bg-[#F8F4FF] hover:text-[#211A2D] transition-colors"
-                >
-                  Match History
-                </Link>
-
-                <Link
-                  to="/rivalry"
-                  onClick={() => setProfileDropdownOpen(false)}
-                  className="flex items-center gap-2 p-2 rounded-xl text-xs text-[#756D82] hover:bg-[#F8F4FF] hover:text-[#211A2D] transition-colors"
-                >
-                  Rivalry Arena
-                </Link>
-
                 <Link
                   to="/settings"
                   onClick={() => setProfileDropdownOpen(false)}
-                  className="flex items-center gap-2 p-2 rounded-xl text-xs text-[#756D82] hover:bg-[#F8F4FF] hover:text-[#211A2D] transition-colors"
+                  className="w-full px-4 py-2 text-xs font-semibold text-[#E9D5FF] hover:bg-[#261543] flex items-center gap-2"
                 >
-                  Settings & Audio
+                  <Settings className="w-3.5 h-3.5 text-[#A79BBF]" />
+                  Preferences
                 </Link>
-
                 {canAccessAdmin && (
                   <Link
                     to="/admin"
                     onClick={() => setProfileDropdownOpen(false)}
-                    className="flex items-center gap-2 p-2 rounded-xl text-xs text-[#D97706] hover:bg-[#FEF3C7]/40 font-semibold transition-colors"
+                    className="w-full px-4 py-2 text-xs font-semibold text-[#C084FC] hover:bg-[#261543] flex items-center gap-2"
                   >
-                    <ShieldCheck className="w-3.5 h-3.5" />
+                    <ShieldAlert className="w-3.5 h-3.5 text-[#C084FC]" />
                     Admin Console
                   </Link>
                 )}
+              </div>
 
-                <Link
-                  to="/"
-                  onClick={() => setProfileDropdownOpen(false)}
-                  className="flex items-center gap-2 p-2 rounded-xl text-xs text-[#756D82] hover:bg-[#F8F4FF] hover:text-[#211A2D] transition-colors"
-                >
-                  <ExternalLink className="w-3.5 h-3.5" />
-                  View Landing Page
-                </Link>
-
+              <div className="pt-1 border-t border-[#2C1A48]">
                 <button
                   type="button"
-                  onClick={() => void handleLogout()}
-                  className="flex items-center gap-2 p-2 rounded-xl text-xs text-[#D94C65] hover:bg-[#FDF2F4] transition-colors cursor-pointer font-bold"
+                  onClick={handleLogout}
+                  className="w-full px-4 py-2 text-xs font-semibold text-[#F87171] hover:bg-[#341825] flex items-center gap-2 text-left cursor-pointer"
                 >
                   <LogOut className="w-3.5 h-3.5" />
                   Sign Out

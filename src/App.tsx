@@ -31,7 +31,7 @@ const RouteLoadingFallback = () => (
       <div className="w-4 h-4 rounded-full bg-[#593B91]" />
     </div>
     <span className="text-xs font-black uppercase tracking-widest text-[#756D82]">
-      Loading PlaySpace...
+      Loading Better-Half...
     </span>
   </div>
 );

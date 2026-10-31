@@ -456,7 +456,7 @@ export const BetweenUsGame: React.FC<BetweenUsProps> = ({
           <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 flex items-start gap-3">
             <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
             <div className="text-xs text-rose-900 leading-relaxed">
-              Level 5 explores physical romance, sensual intimacy, and uninhibited passion. PlaySpace is committed to safe, healthy connection. Do both of you mutually consent to explore this level tonight?
+              Level 5 explores physical romance, sensual intimacy, and uninhibited passion. Better-Half is committed to safe, healthy connection. Do both of you mutually consent to explore this level tonight?
             </div>
           </div>
 

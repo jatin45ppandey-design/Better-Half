@@ -28,16 +28,10 @@ export const DashboardPage: React.FC = () => {
 
   const handleSelectMode = (mode: 'couple' | 'friend') => {
     setActiveMode(mode);
-    addToast(`${mode === 'couple' ? 'Couple Mode (2P)' : 'Friend Mode (2–4P)'} selected.`, {
+    addToast(`${mode === 'couple' ? 'Couple Mode (2P)' : 'Friend Mode (2–4P)'} active.`, {
       type: 'info',
-      message: 'The game library is filtered for this experience.',
+      message: 'Filtered recommendations updated.',
     });
-  };
-
-  const handleOpenRoomModal = (mode?: 'couple' | 'friend') => {
-    if (mode) setActiveMode(mode);
-    setTargetRoomGame(null);
-    setRoomModalOpen(true);
   };
 
   const handleLaunchGame = (game: GameItem) => {
@@ -48,25 +42,25 @@ export const DashboardPage: React.FC = () => {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#FCFAFF]">
-        <LoadingIndicator label="Loading your PlaySpace dashboard..." size="lg" />
+      <div className="min-h-screen flex items-center justify-center bg-[#0F0A19]">
+        <LoadingIndicator label="Loading your Better-Half dashboard..." size="lg" />
       </div>
     );
   }
 
   if (!isAuthenticated || !user) {
     return (
-      <div className="min-h-screen flex flex-col justify-center items-center px-4 py-16 bg-[#FCFAFF]">
-        <div className="max-w-md w-full bg-white rounded-3xl border border-[#EAE3F3] shadow-lg p-8 text-center flex flex-col items-center gap-4">
-          <div className="w-14 h-14 rounded-2xl bg-[#F1EAFF] text-[#593B91] flex items-center justify-center">
-            <LogIn className="w-7 h-7 text-[#9670E8]" />
+      <div className="min-h-screen flex flex-col justify-center items-center px-4 py-16 bg-[#0F0A19] text-white">
+        <div className="max-w-md w-full bg-[#170E28] rounded-3xl border border-[#2F1E4E] shadow-2xl p-8 text-center flex flex-col items-center gap-4">
+          <div className="w-14 h-14 rounded-2xl bg-[#29174A] text-[#C084FC] flex items-center justify-center border border-[#3E2568]">
+            <LogIn className="w-7 h-7" />
           </div>
-          <h2 className="text-2xl font-bold text-[#211A2D]">Sign in to PlaySpace</h2>
-          <p className="text-sm text-[#756D82] leading-relaxed">
-            Sign in to create a room, join friends and continue your matches.
+          <h2 className="text-2xl font-bold font-heading text-white">Sign in to Better-Half</h2>
+          <p className="text-xs sm:text-sm text-[#A79BBF] leading-relaxed">
+            Sign in to create a room, join friends and continue your multiplayer matches.
           </p>
-          <Link to="/login" className="w-full">
-            <Button variant="primary" size="md" className="w-full font-bold">
+          <Link to="/login" className="w-full mt-2">
+            <Button variant="primary" size="md" className="w-full font-bold rounded-2xl">
               Go to Sign In
             </Button>
           </Link>
@@ -76,17 +70,23 @@ export const DashboardPage: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#FCFAFF]">
-      <DashboardHeader activeMode={activeMode} onModeChange={handleSelectMode} />
+    <div className="min-h-screen flex flex-col bg-[#0F0A19] text-[#F5EEFD]">
+      <DashboardHeader />
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-7 sm:py-9">
-        <DashboardRoomActions activeMode={activeMode} onModeChange={handleSelectMode} />
+        {/* Dynamic Welcome Hero & Fast Room Actions */}
+        <DashboardRoomActions activeMode={activeMode} />
+
+        {/* Recently Played from Real API */}
         <RecentlyPlayedSection />
+
+        {/* ONE Unified Mode Selector */}
         <ModeSelector
           activeMode={activeMode}
           onSelectMode={handleSelectMode}
-          onOpenRoomModal={handleOpenRoomModal}
         />
+
+        {/* ONE Unified Game Library with All 11 Games on the Same Page */}
         <GameLibrary
           activeMode={activeMode}
           onSelectGame={(game) => setSelectedGame(game)}
@@ -101,9 +101,18 @@ export const DashboardPage: React.FC = () => {
 
       <CreateRoomModal
         isOpen={roomModalOpen}
-        onClose={() => setRoomModalOpen(false)}
+        onClose={() => {
+          setRoomModalOpen(false);
+          setTargetRoomGame(null);
+        }}
+        initialMode={
+          targetRoomGame
+            ? targetRoomGame.modes.includes(activeMode)
+              ? activeMode
+              : targetRoomGame.modes[0] || 'couple'
+            : activeMode
+        }
         initialGame={targetRoomGame}
-        initialMode={activeMode}
       />
 
       <Footer />

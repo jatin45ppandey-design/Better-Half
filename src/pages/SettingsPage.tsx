@@ -91,7 +91,7 @@ export const SettingsPage: React.FC = () => {
 
   const handleLogout = async () => {
     await logout();
-    addToast('Signed out of PlaySpace.', { type: 'info' });
+    addToast('Signed out of Better-Half.', { type: 'info' });
     navigate('/login');
   };
 
@@ -100,7 +100,7 @@ export const SettingsPage: React.FC = () => {
     { key: 'allowDirectInvites', title: 'Allow direct invitations', description: 'Allow friends to invite you to their rooms.' },
     { key: 'publicMatchHistory', title: 'Public match history', description: 'Allow your recorded match history on your public profile.' },
     { key: 'ghostMode', title: 'Ghost mode', description: 'Hide your presence from friend discovery.' },
-    { key: 'reducedMotion', title: 'Reduced motion', description: 'Reduce motion effects and animations throughout PlaySpace.' },
+    { key: 'reducedMotion', title: 'Reduced motion', description: 'Reduce motion effects and animations throughout Better-Half.' },
   ];
 
   return (
@@ -113,7 +113,7 @@ export const SettingsPage: React.FC = () => {
               <Settings className="w-6 h-6 text-[#9670E8]" />
               <h1 className="text-2xl sm:text-3xl font-black text-[#211A2D] tracking-tight">Settings & Preferences</h1>
             </div>
-            <p className="text-sm text-[#756D82]">Manage the preferences saved to your PlaySpace account.</p>
+            <p className="text-sm text-[#756D82]">Manage the preferences saved to your Better-Half account.</p>
           </div>
           <Button variant="outline" size="sm" onClick={() => void loadSettings()} disabled={isLoading} leftIcon={<RefreshCw className="w-3.5 h-3.5" />}>
             Refresh
@@ -219,7 +219,7 @@ export const SettingsPage: React.FC = () => {
 
             <section className="bg-white rounded-3xl border border-[#EAE3F3] p-6 shadow-sm">
               <h2 className="text-base font-black text-[#211A2D] mb-1">Account</h2>
-              <p className="text-xs text-[#756D82] mb-4">Signed in as {user?.email || 'your PlaySpace account'}.</p>
+              <p className="text-xs text-[#756D82] mb-4">Signed in as {user?.email || 'your Better-Half account'}.</p>
               <Button variant="danger" size="sm" leftIcon={<LogOut className="w-4 h-4" />} onClick={() => void handleLogout()}>
                 Sign Out
               </Button>

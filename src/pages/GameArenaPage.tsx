@@ -293,7 +293,7 @@ export const GameArenaPage: React.FC = () => {
           <AlertCircle className="w-12 h-12 text-[#9670E8]" />
           <h2 className="text-xl font-bold text-[#211A2D]">Session Required</h2>
           <p className="text-xs text-[#756D82] leading-relaxed">
-            Multiplayer matches in PlaySpace require an active room and session. Direct navigation without a lobby session is not permitted.
+            Multiplayer matches in Better-Half require an active room and session. Direct navigation without a lobby session is not permitted.
           </p>
           <Button
             variant="primary"

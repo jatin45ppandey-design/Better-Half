@@ -13,7 +13,7 @@ export const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ childr
           <div className="w-4 h-4 rounded-full bg-[#593B91]" />
         </div>
         <span className="text-xs font-black uppercase tracking-widest text-[#756D82]">
-          Verifying PlaySpace Session...
+          Verifying Better-Half Session...
         </span>
       </div>
     );

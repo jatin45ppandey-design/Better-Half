@@ -1,11 +1,11 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { History, Play, Heart, Users, RefreshCw } from 'lucide-react';
+import { History, Play, RefreshCw, Trophy } from 'lucide-react';
 import { api } from '../../services/api';
 import { GAMES_DATA } from '../../data/games';
-import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { GameIcon } from '../ui/GameIcon';
 import { CreateRoomModal } from '../modals/CreateRoomModal';
+import { soundService } from '../../services/soundService';
 import type { GameItem } from '../../types/game';
 
 interface RecentMatchItem {
@@ -43,6 +43,7 @@ export const RecentlyPlayedSection: React.FC = () => {
   }, [loadRecentMatches]);
 
   const handleReplayMatch = (match: RecentMatchItem) => {
+    soundService.playClick();
     const game = GAMES_DATA.find((item) => item.id === match.gameId) || null;
     if (!game) return;
     setSelectedGameForRoom(game);
@@ -51,105 +52,112 @@ export const RecentlyPlayedSection: React.FC = () => {
 
   const outcomeLabel = (outcome: string) => {
     switch (outcome) {
-      case 'WIN': return 'Won';
-      case 'LOSS': return 'Lost';
-      case 'DRAW': return 'Draw';
-      case 'COMPLETED': return 'Completed';
-      case 'ABANDONED': return 'Abandoned';
-      default: return 'Recorded';
+      case 'WIN': return { text: 'Won', bg: 'bg-[#14532D] text-[#86EFAC] border-[#22C55E]/40' };
+      case 'LOSS': return { text: 'Lost', bg: 'bg-[#450A0A] text-[#FCA5A5] border-[#EF4444]/40' };
+      case 'DRAW': return { text: 'Draw', bg: 'bg-[#312E81] text-[#C7D2FE] border-[#6366F1]/40' };
+      case 'COMPLETED': return { text: 'Completed', bg: 'bg-[#2E1065] text-[#D8B4FE] border-[#A855F7]/40' };
+      case 'ABANDONED': return { text: 'Abandoned', bg: 'bg-[#27272A] text-[#A1A1AA] border-[#52525B]/40' };
+      default: return { text: 'Recorded', bg: 'bg-[#2E1065] text-[#D8B4FE] border-[#A855F7]/40' };
     }
   };
 
   return (
-    <section className="mb-10" aria-labelledby="recently-played-heading">
-      <div className="flex items-center justify-between mb-4">
+    <section className="mb-8" aria-labelledby="recently-played-heading">
+      <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          <History className="w-4 h-4 text-[#593B91]" />
-          <h2 id="recently-played-heading" className="text-lg font-bold text-[#211A2D]">
+          <History className="w-4 h-4 text-[#C084FC]" />
+          <h2 id="recently-played-heading" className="text-lg font-bold font-heading text-white">
             Recently Played
           </h2>
         </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => void loadRecentMatches()}
+        <button
+          type="button"
+          onClick={() => {
+            soundService.playClick();
+            void loadRecentMatches();
+          }}
           disabled={isLoading}
-          leftIcon={<RefreshCw className="w-3.5 h-3.5" />}
+          className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-semibold text-[#A79BBF] hover:text-white bg-[#1F1336] hover:bg-[#2B1B47] border border-[#3A245C] transition-colors cursor-pointer disabled:opacity-50"
         >
-          Refresh
-        </Button>
+          <RefreshCw className={`w-3 h-3 ${isLoading ? 'animate-spin' : ''}`} />
+          <span>Refresh</span>
+        </button>
       </div>
 
       {isLoading ? (
-        <div className="rounded-2xl border border-[#EAE3F3] bg-white p-6 text-sm text-[#756D82]">
-          Loading your recent matches…
+        <div className="rounded-2xl border border-[#2D1B48] bg-[#160E25] p-6 text-xs text-[#A79BBF]">
+          Loading your recent matches...
         </div>
       ) : error ? (
-        <div className="rounded-2xl border border-[#F8D2D9] bg-white p-6">
-          <p className="text-sm text-[#A52E45]">{error}</p>
-          <Button variant="outline" size="sm" onClick={() => void loadRecentMatches()} className="mt-3">
+        <div className="rounded-2xl border border-[#7F1D1D] bg-[#1C0F17] p-5">
+          <p className="text-xs text-[#FCA5A5]">{error}</p>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void loadRecentMatches()}
+            className="mt-3 text-xs"
+          >
             Try again
           </Button>
         </div>
       ) : matches.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-[#D5C7EE] bg-white p-7 text-center">
-          <History className="w-7 h-7 text-[#B7A5D8] mx-auto mb-2" />
-          <h3 className="font-bold text-[#211A2D]">No matches yet</h3>
-          <p className="text-sm text-[#756D82] mt-1">
-            Completed matches will appear here when you start playing.
+        <div className="rounded-2xl border border-dashed border-[#362157] bg-[#140C22] p-6 text-center">
+          <Trophy className="w-6 h-6 text-[#785E9E] mx-auto mb-2" />
+          <h3 className="font-bold text-sm text-white">No matches recorded yet</h3>
+          <p className="text-xs text-[#A79BBF] mt-1 max-w-sm mx-auto">
+            Host a room or join with friends to start recording match outcomes and rivalries.
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
-          {matches.slice(0, 3).map((match) => {
-            const game = GAMES_DATA.find((item) => item.id === match.gameId);
-            const isCouple = match.mode.toUpperCase() === 'COUPLE';
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {matches.slice(0, 6).map((match) => {
+            const game = GAMES_DATA.find((g) => g.id === match.gameId);
+            const badge = outcomeLabel(match.outcome);
+            const formattedDate = match.completedAt
+              ? new Date(match.completedAt).toLocaleDateString([], {
+                  month: 'short',
+                  day: 'numeric',
+                })
+              : 'Recent';
+
             return (
-              <article key={match.matchId} className="p-4 rounded-2xl bg-white border border-[#EAE3F3] flex flex-col justify-between">
-                <div>
-                  <div className="flex items-center justify-between mb-2.5">
-                    <Badge variant={isCouple ? 'pink' : 'lavender'} size="sm">
-                      <span className="flex items-center gap-1">
-                        {isCouple ? <Heart className="w-3 h-3 fill-current" /> : <Users className="w-3 h-3" />}
-                        {isCouple ? 'Couple Mode' : 'Friend Mode'}
-                      </span>
-                    </Badge>
-                    <span className="text-[11px] text-[#756D82]">
-                      {match.completedAt ? new Date(match.completedAt).toLocaleDateString() : 'Date unavailable'}
-                    </span>
+              <div
+                key={match.matchId}
+                className="rounded-2xl border border-[#2D1B48] bg-[#160E25] p-3.5 flex items-center justify-between gap-3 shadow-md hover:border-[#4B2F73] transition-colors"
+              >
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="w-9 h-9 rounded-xl bg-[#281745] flex items-center justify-center text-[#C084FC] shrink-0 border border-[#3E2563]">
+                    {game ? <GameIcon name={game.iconName} className="w-4 h-4" /> : <History className="w-4 h-4" />}
                   </div>
-                  <div className="flex items-center gap-2.5 mb-2">
-                    {game && (
-                      <div className={`w-8 h-8 rounded-xl flex items-center justify-center border ${game.accentColor.bg} ${game.accentColor.border} ${game.accentColor.text}`}>
-                        <GameIcon name={game.iconName} className="w-4 h-4" />
-                      </div>
-                    )}
-                    <h3 className="text-sm font-bold text-[#211A2D] truncate">
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold text-white truncate">
                       {game?.name || match.gameId}
-                    </h3>
-                  </div>
-                  <p className="text-xs font-semibold text-[#593B91]">{outcomeLabel(match.outcome)}</p>
-                  {match.scoreLabel && <p className="text-[11px] text-[#9D96A8] mt-0.5">{match.scoreLabel}</p>}
-                  {typeof match.durationSeconds === 'number' && (
-                    <p className="text-[11px] text-[#9D96A8] mt-1">
-                      {Math.floor(match.durationSeconds / 60)} min
                     </p>
-                  )}
+                    <div className="flex items-center gap-1.5 text-[10px] text-[#A79BBF] mt-0.5">
+                      <span>{match.mode === 'COUPLE' ? 'Couple' : 'Friend'}</span>
+                      <span>•</span>
+                      <span>{formattedDate}</span>
+                    </div>
+                  </div>
                 </div>
-                <div className="pt-2.5 mt-3 border-t border-[#F4EFFB] flex justify-end">
-                  {game && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleReplayMatch(match)}
-                      className="text-xs text-[#593B91] font-bold p-1 hover:bg-[#F1EAFF]"
-                      rightIcon={<Play className="w-3 h-3 fill-current" />}
-                    >
-                      Play Again
-                    </Button>
-                  )}
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${badge.bg}`}
+                  >
+                    {badge.text}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleReplayMatch(match)}
+                    className="p-1.5 rounded-xl bg-[#261542] hover:bg-[#3B2264] text-[#C084FC] hover:text-white transition-colors cursor-pointer"
+                    title="Play this game again"
+                    aria-label={`Replay ${game?.name || 'game'}`}
+                  >
+                    <Play className="w-3.5 h-3.5 fill-current" />
+                  </button>
                 </div>
-              </article>
+              </div>
             );
           })}
         </div>

@@ -114,7 +114,7 @@ export const ProfilePage: React.FC = () => {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-7">
           <div>
             <h1 className="text-2xl sm:text-3xl font-black text-[#211A2D] tracking-tight">Your Profile</h1>
-            <p className="text-sm text-[#756D82] mt-1">Your PlaySpace account and recorded game activity.</p>
+            <p className="text-sm text-[#756D82] mt-1">Your Better-Half account and recorded game activity.</p>
           </div>
           <Button variant="outline" size="sm" onClick={() => void loadProfileData()} disabled={isLoading} leftIcon={<RefreshCw className="w-3.5 h-3.5" />}>Refresh</Button>
         </div>
@@ -135,7 +135,7 @@ export const ProfilePage: React.FC = () => {
                 <div className="flex-1 text-center sm:text-left min-w-0">
                   <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2">
                     <h2 className="text-2xl font-black text-[#211A2D]">{profile.displayName}</h2>
-                    <Badge variant="purple" size="sm">PlaySpace Player</Badge>
+                    <Badge variant="purple" size="sm">Better-Half Player</Badge>
                   </div>
                   <p className="text-sm text-[#756D82] mt-1">@{profile.username}</p>
                   {profile.bio && <p className="text-sm text-[#756D82] mt-3 max-w-2xl">{profile.bio}</p>}

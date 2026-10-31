@@ -67,7 +67,7 @@ export const JoinRoomModal: React.FC<JoinRoomModalProps> = ({
       hostName: foundRoom?.hostName || 'Room Host',
       mode: (foundRoom?.mode || 'couple') as 'couple' | 'friend',
       gameName: foundRoom?.selectedGameId ? foundRoom.selectedGameId.toUpperCase() : 'Lobby Game',
-      roomName: foundRoom?.name || 'PlaySpace Game Room',
+      roomName: foundRoom?.name || 'Better-Half Game Room',
     };
 
     setJoinedRoom(roomDetails);

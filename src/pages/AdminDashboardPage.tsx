@@ -231,7 +231,7 @@ export const AdminDashboardPage: React.FC = () => {
           </div>
           <h1 className="text-2xl font-black text-[#211A2D] mb-2">Access Denied</h1>
           <p className="text-sm text-[#756D82] leading-relaxed mb-6">
-            Administrator or Moderator privileges are required to view the PlaySpace management center.
+            Administrator or Moderator privileges are required to view the Better-Half management center.
             Your account does not possess the requisite RBAC authorization.
           </p>
           <Button variant="primary" onClick={() => window.location.replace('/dashboard')}>

@@ -346,6 +346,9 @@ describe('PlaySpace Wave 5 — B7 Automated CI, Regression & S5 Security Release
         action: { type: 'MAKE_MOVE', cellIndex: 0 },
       };
 
+      vi.spyOn(prisma.gameAction, 'findFirst').mockResolvedValue(null);
+      vi.spyOn(prisma.gameAction, 'findMany').mockResolvedValue([]);
+
       // Mock session where user-attacker is NOT a participant
       vi.spyOn(prisma.gameSession, 'findUnique').mockResolvedValue({
         id: '550e8400-e29b-41d4-a716-446655440000',

@@ -58,7 +58,7 @@ export const AuthCallbackPage: React.FC = () => {
 
       if (!session?.user?.id) {
         throw new Error(
-          'Google returned to PlaySpace, but no authenticated session was established. Please retry sign-in.'
+          'Google returned to Better-Half, but no authenticated session was established. Please retry sign-in.'
         );
       }
     };

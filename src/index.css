@@ -4,36 +4,38 @@
   --font-heading: "Outfit", sans-serif;
   --font-sans: "Plus Jakarta Sans", sans-serif;
 
-  --color-bg-primary: #FCFAFF;
+  --color-bg-primary: #FAF6FD;
+  --color-bg-dark: #0F0A19;
   --color-surface: #FFFFFF;
-  --color-lavender-surface: #F1EAFF;
-  --color-lavender-subtle: #F8F4FF;
-  --color-lavender-primary: #9670E8;
-  --color-lavender-hover: #865CE3;
-  --color-purple-dark: #593B91;
-  --color-purple-deep: #3B2368;
-  --color-text-main: #211A2D;
-  --color-text-secondary: #756D82;
-  --color-border-main: #EAE3F3;
-  --color-border-subtle: #F4EFFB;
-  --color-status-success: #248A62;
-  --color-status-error: #D94C65;
+  --color-surface-dark: #1A112C;
+  --color-lavender-surface: #F3ECFB;
+  --color-lavender-subtle: #F8F4FD;
+  --color-lavender-primary: #7C3AED;
+  --color-lavender-hover: #6B21A8;
+  --color-purple-dark: #581C87;
+  --color-purple-deep: #1E1035;
+  --color-text-main: #1E1035;
+  --color-text-secondary: #6B5E82;
+  --color-border-main: #E8DEF8;
+  --color-border-subtle: #F2EBF9;
+  --color-status-success: #16A34A;
+  --color-status-error: #DC2626;
 }
 
 :root {
-  --bg-primary: #FCFAFF;
+  --bg-primary: #FAF6FD;
   --surface: #FFFFFF;
-  --lavender-surface: #F1EAFF;
-  --lavender-subtle: #F8F4FF;
-  --lavender-primary: #9670E8;
-  --purple-dark: #593B91;
-  --purple-deep: #3B2368;
-  --text-main: #211A2D;
-  --text-secondary: #756D82;
-  --border-main: #EAE3F3;
-  --border-subtle: #F4EFFB;
-  --status-success: #248A62;
-  --status-error: #D94C65;
+  --lavender-surface: #F3ECFB;
+  --lavender-subtle: #F8F4FD;
+  --lavender-primary: #7C3AED;
+  --purple-dark: #6B21A8;
+  --purple-deep: #581C87;
+  --text-main: #1E1035;
+  --text-secondary: #6B5E82;
+  --border-main: #E8DEF8;
+  --border-subtle: #F2EBF9;
+  --status-success: #16A34A;
+  --status-error: #DC2626;
 }
 
 html {
@@ -57,30 +59,37 @@ h1, h2, h3, h4, h5, h6 {
 
 /* Subtle gaming background pattern */
 .gaming-bg-grid {
-  background-image: radial-gradient(#9670E8 0.75px, transparent 0.75px);
-  background-size: 20px 20px;
+  background-image: radial-gradient(#8B5CF6 0.75px, transparent 0.75px);
+  background-size: 24px 24px;
   background-position: 0 0;
 }
 
-/* Card depth & elevation */
-.gaming-panel {
-  background: #FFFFFF;
-  border: 1px solid #EAE3F3;
-  box-shadow: 0 2px 8px -2px rgba(89, 59, 145, 0.05), 0 1px 3px rgba(33, 26, 45, 0.03);
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+/* Soft atmospheric radial gradient for hero / public pages */
+.hero-glow-soft {
+  background: radial-gradient(circle at 50% 20%, rgba(216, 180, 254, 0.35) 0%, rgba(243, 232, 255, 0.15) 50%, transparent 80%);
 }
 
-.gaming-panel-interactive {
-  background: #FFFFFF;
-  border: 1px solid #EAE3F3;
-  box-shadow: 0 2px 8px -2px rgba(89, 59, 145, 0.05), 0 1px 3px rgba(33, 26, 45, 0.03);
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+/* Dark gaming surface styling */
+.dark-gaming-surface {
+  background-color: #0F0A19;
+  color: #F5EEFD;
 }
 
-.gaming-panel-interactive:hover {
-  transform: translateY(-2px);
-  border-color: #D5C7EE;
-  box-shadow: 0 12px 24px -6px rgba(89, 59, 145, 0.09), 0 4px 8px -2px rgba(89, 59, 145, 0.04);
+.dark-gaming-card {
+  background-color: #170E28;
+  border: 1px solid #2D1B4A;
+  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.45);
+}
+
+.dark-gaming-card-hover {
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.dark-gaming-card-hover:hover {
+  transform: translateY(-3px);
+  background-color: #1F1336;
+  border-color: #4C2E7D;
+  box-shadow: 0 14px 28px -4px rgba(124, 58, 237, 0.2);
 }
 
 /* Custom soft scrollbar */
@@ -90,16 +99,16 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 ::-webkit-scrollbar-track {
-  background: #F8F4FF;
+  background: #F4ECFB;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #D9CAFA;
+  background: #C4B5FD;
   border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #9670E8;
+  background: #8B5CF6;
 }
 
 /* Reduced motion preference */
@@ -112,7 +121,6 @@ h1, h2, h3, h4, h5, h6 {
   }
 }
 
-/* User manual reduced motion preference */
 html.reduce-motion *, html.reduce-motion ::before, html.reduce-motion ::after {
   animation-duration: 0.01ms !important;
   animation-iteration-count: 1 !important;

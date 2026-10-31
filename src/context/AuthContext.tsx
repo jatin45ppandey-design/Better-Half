@@ -27,8 +27,8 @@ function createSessionFallbackUser(supabaseUser: SupabaseUserLike): User {
     metadata.full_name ||
     metadata.name ||
     supabaseUser.email?.split('@')[0] ||
-    'PlaySpace Player';
-  const name = String(rawName).trim() || 'PlaySpace Player';
+    'Better-Half Player';
+  const name = String(rawName).trim() || 'Better-Half Player';
   const initials =
     name
       .split(/\s+/)
