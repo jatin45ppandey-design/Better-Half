@@ -319,6 +319,7 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
 
       // Initialize authoritative Phase 3 Game Session
       let sessionId = '';
+      let startedGameId = room.selectedGameId;
       try {
         const { session } = await gameSessionService.createSession(
           roomId,
@@ -326,6 +327,7 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
           userId
         );
         sessionId = session.sessionId;
+        startedGameId = session.gameId;
       } catch (err: any) {
         callback?.({ success: false, error: safeSocketError(err, 'Failed to create game session') });
         return;
@@ -334,12 +336,12 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
       const roomChannel = `room:${roomId}`;
       io.to(roomChannel).emit('game:session:started', {
         sessionId,
-        gameId: room.selectedGameId,
+        gameId: startedGameId,
         roomCode: room.code,
       });
 
       io.to(roomChannel).emit('room:start:launch', {
-        gameId: room.selectedGameId,
+        gameId: startedGameId,
         launchedAt: new Date().toISOString(),
       });
 
