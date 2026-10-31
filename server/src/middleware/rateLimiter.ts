@@ -49,6 +49,11 @@ export class MemoryRateLimitStore implements IRateLimitStore {
 }
 
 export function getClientIp(req: Request): string {
+  // When 'trust proxy' is configured in Express, req.ip authoritatively resolves
+  // the client IP through the trusted reverse proxy without trusting spoofed headers.
+  if (req.ip) {
+    return req.ip;
+  }
   const forwarded = req.headers ? req.headers['x-forwarded-for'] : undefined;
   if (typeof forwarded === 'string') {
     return forwarded.split(',')[0].trim();

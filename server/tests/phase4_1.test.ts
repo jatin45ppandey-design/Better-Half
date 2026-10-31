@@ -66,6 +66,7 @@ describe('PlaySpace Phase 4.1 — Production Correctness & Reliability Remediati
 
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.spyOn(prisma.gameSession, 'findFirst').mockResolvedValue(null);
   });
 
   // =========================================================================

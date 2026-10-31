@@ -190,7 +190,9 @@ export const Navbar: React.FC = () => {
                   soundService.playClick();
                   setProfileDropdownOpen(!profileDropdownOpen);
                 }}
-                className="flex items-center gap-2 p-1 pl-1.5 pr-2.5 rounded-full hover:bg-[#F8F4FF] border border-transparent hover:border-[#EAE3F3] transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#9670E8]"
+                aria-label="User profile options"
+                aria-expanded={profileDropdownOpen}
+                className="flex items-center gap-2 min-h-[44px] p-1 pl-1.5 pr-2.5 rounded-full hover:bg-[#F8F4FF] border border-transparent hover:border-[#EAE3F3] transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#9670E8]"
               >
                 <Avatar
                   name={user.name}
@@ -309,7 +311,8 @@ export const Navbar: React.FC = () => {
               setMobileMenuOpen(!mobileMenuOpen);
             }}
             aria-label={mobileMenuOpen ? 'Close menu' : 'Open menu'}
-            className="p-2 rounded-xl text-[#593B91] hover:bg-[#F1EAFF] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#9670E8]"
+            aria-expanded={mobileMenuOpen}
+            className="min-h-[44px] min-w-[44px] flex items-center justify-center p-2 rounded-xl text-[#593B91] hover:bg-[#F1EAFF] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#9670E8]"
           >
             {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
           </button>

@@ -372,6 +372,7 @@ describe('PlaySpace Phase 4 — Match History, Stats, Rivalry, RBAC & Admin Suit
       ] as any);
 
       const upsertSpy = vi.spyOn(prisma.userGameStats, 'upsert').mockResolvedValue({} as any);
+      vi.spyOn(prisma.userGameStats, 'updateMany').mockResolvedValue({ count: 0 } as any);
       const res = await statsService.reconcileUserStats(normalUserA.id);
       expect(res.reconciledGames).toBe(1);
       expect(upsertSpy).toHaveBeenCalledTimes(1);
@@ -539,6 +540,8 @@ describe('PlaySpace Phase 4 — Match History, Stats, Rivalry, RBAC & Admin Suit
       vi.spyOn(prisma.match, 'count').mockResolvedValue(450);
       vi.spyOn(prisma.gameConfiguration, 'count').mockResolvedValue(11);
       vi.spyOn(prisma.questionEntry, 'count').mockResolvedValue(300);
+      vi.spyOn(prisma.matchParticipant, 'findMany').mockResolvedValue([]);
+      vi.spyOn(prisma.roomParticipant, 'findMany').mockResolvedValue([]);
 
       const res = await request(app)
         .get('/api/v1/admin/overview')
