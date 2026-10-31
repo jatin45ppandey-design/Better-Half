@@ -419,7 +419,7 @@ describe('PlaySpace Phase 2 — Real Multiplayer Rooms & Socket.IO Test Suite', 
       });
 
       const ack = await new Promise<any>((resolve) => {
-        clientB.emit('room:ready:update', { roomId: 'room-realtime-1', isReady: true }, (res) =>
+        clientB.emit('room:ready:update', { roomId: 'LIVE77', isReady: true }, (res) =>
           resolve(res)
         );
       });
