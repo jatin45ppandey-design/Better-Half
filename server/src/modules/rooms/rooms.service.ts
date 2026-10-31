@@ -509,7 +509,7 @@ export class RoomsService {
       throw new AppError(`Room "${cleanCode}" has expired.`, 400);
     }
 
-    // Check block list between user and host
+    // Check block list between user and host before starting the transaction.
     const block = await prisma.blockedUser.findFirst({
       where: {
         OR: [
@@ -523,104 +523,122 @@ export class RoomsService {
       throw new ForbiddenError('You are blocked from entering this room.');
     }
 
-    // Atomic transaction for concurrency-safe join
-    return prisma.$transaction(async (tx) => {
-      // Re-read room inside transaction to ensure fresh status and expiry check
-      const currentRoom = await tx.room.findUnique({
-        where: { id: existingRoom.id },
-      });
-
-      if (!currentRoom || currentRoom.status === ROOM_STATUS.CLOSED || currentRoom.status === ROOM_STATUS.EXPIRED) {
-        throw new AppError(`Room "${cleanCode}" is no longer active.`, 400);
-      }
-
-      if (new Date() > currentRoom.expiresAt) {
-        await tx.room.update({
-          where: { id: currentRoom.id },
-          data: { status: ROOM_STATUS.EXPIRED },
+    // Keep only the reads and writes required for an atomic join in this
+    // transaction. The full relation snapshot is intentionally fetched after
+    // commit so chat/history relations cannot exhaust the interactive timeout.
+    const joinResult = await prisma.$transaction(
+      async (tx) => {
+        const currentRoom = await tx.room.findUnique({
+          where: { id: existingRoom.id },
         });
-        throw new AppError(`Room "${cleanCode}" has expired.`, 400);
-      }
 
-      // Re-fetch active count inside transaction
-      const activeCount = await tx.roomParticipant.count({
-        where: { roomId: currentRoom.id, leftAt: null },
-      });
+        if (!currentRoom || currentRoom.status === ROOM_STATUS.CLOSED || currentRoom.status === ROOM_STATUS.EXPIRED) {
+          throw new AppError(`Room "${cleanCode}" is no longer active.`, 400);
+        }
 
-      const existingParticipant = await tx.roomParticipant.findUnique({
-        where: {
-          roomId_userId: {
-            roomId: currentRoom.id,
-            userId,
+        if (new Date() > currentRoom.expiresAt) {
+          await tx.room.update({
+            where: { id: currentRoom.id },
+            data: { status: ROOM_STATUS.EXPIRED },
+          });
+          throw new AppError(`Room "${cleanCode}" has expired.`, 400);
+        }
+
+        const activeCount = await tx.roomParticipant.count({
+          where: { roomId: currentRoom.id, leftAt: null },
+        });
+
+        const existingParticipant = await tx.roomParticipant.findUnique({
+          where: {
+            roomId_userId: {
+              roomId: currentRoom.id,
+              userId,
+            },
           },
-        },
-      });
+        });
 
-      const userProfile = await tx.userProfile.findUnique({ where: { id: userId } });
-      const userName = userProfile?.displayName || 'Player';
+        // An active member can re-enter idempotently without creating another
+        // participant or message. Snapshot loading happens after commit below.
+        if (existingParticipant && !existingParticipant.leftAt) {
+          return {
+            roomId: currentRoom.id,
+            isNewJoin: false,
+          };
+        }
 
-      if (existingParticipant && !existingParticipant.leftAt) {
-        // User is already active in the room; idempotent return
-        const full = await this.findRoomWithRelations({ id: currentRoom.id }, tx);
+        if (activeCount >= currentRoom.maxPlayers) {
+          throw new AppError(
+            `Room ${cleanCode} is full (Maximum ${currentRoom.maxPlayers} players allowed for ${currentRoom.mode.toLowerCase()} mode).`,
+            400
+          );
+        }
+
+        const userProfile = await tx.userProfile.findUnique({ where: { id: userId } });
+        const userName = userProfile?.displayName || 'Player';
+
+        if (existingParticipant && existingParticipant.leftAt) {
+          // Reactivate a previous participant without creating a duplicate row.
+          await tx.roomParticipant.update({
+            where: { id: existingParticipant.id },
+            data: {
+              leftAt: null,
+              isReady: false,
+              updatedAt: new Date(),
+            },
+          });
+        } else {
+          await tx.roomParticipant.create({
+            data: {
+              roomId: currentRoom.id,
+              userId,
+              role: ROOM_PARTICIPANT_ROLES.PLAYER,
+              isReady: false,
+            },
+          });
+        }
+
+        await tx.roomMessage.create({
+          data: {
+            roomId: currentRoom.id,
+            senderId: userId,
+            message: `${userName} connected to the room.`,
+          },
+        });
+
+        if (currentRoom.status === ROOM_STATUS.READY_TO_START) {
+          await tx.room.update({
+            where: { id: currentRoom.id },
+            data: { status: ROOM_STATUS.WAITING },
+          });
+        }
+
         return {
-          room: this.formatRoomSnapshot(full),
-          isNewJoin: false,
-        };
-      }
-
-      // Check room capacity against current active count
-      if (activeCount >= currentRoom.maxPlayers) {
-        throw new AppError(
-          `Room ${cleanCode} is full (Maximum ${currentRoom.maxPlayers} players allowed for ${currentRoom.mode.toLowerCase()} mode).`,
-          400
-        );
-      }
-
-      if (existingParticipant && existingParticipant.leftAt) {
-        // Re-activating a player who previously left
-        await tx.roomParticipant.update({
-          where: { id: existingParticipant.id },
-          data: {
-            leftAt: null,
-            isReady: false,
-            updatedAt: new Date(),
-          },
-        });
-      } else {
-        // Brand new participant
-        await tx.roomParticipant.create({
-          data: {
-            roomId: currentRoom.id,
-            userId,
-            role: ROOM_PARTICIPANT_ROLES.PLAYER,
-            isReady: false,
-          },
-        });
-      }
-
-      // System announcement message
-      await tx.roomMessage.create({
-        data: {
           roomId: currentRoom.id,
-          senderId: userId,
-          message: `${userName} connected to the room.`,
-        },
-      });
-
-      // Recalculate room status if it was READY_TO_START
-      if (currentRoom.status === ROOM_STATUS.READY_TO_START) {
-        await tx.room.update({
-          where: { id: currentRoom.id },
-          data: { status: ROOM_STATUS.WAITING },
-        });
+          isNewJoin: true,
+        };
+      },
+      {
+        maxWait: 5000,
+        timeout: 10000,
       }
+    );
 
-      const full = await this.findRoomWithRelations({ id: currentRoom.id }, tx);
-      return {
-        room: this.formatRoomSnapshot(full),
-        isNewJoin: true,
-      };
-    });
+    // Fetch the full snapshot only after the interactive transaction has
+    // successfully committed. Never pass the transaction client here.
+    const fullRoom = await this.findRoomWithRelations({ id: joinResult.roomId });
+    if (!fullRoom) {
+      throw new NotFoundError('Room was joined, but its latest details could not be loaded.');
+    }
+
+    const room = this.formatRoomSnapshot(fullRoom);
+    if (!room) {
+      throw new NotFoundError('Room was joined, but its latest details could not be formatted.');
+    }
+
+    return {
+      room,
+      isNewJoin: joinResult.isNewJoin,
+    };
   }
 
   /**
