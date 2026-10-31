@@ -86,12 +86,12 @@ export async function joinRoom(req: Request, res: Response, next: NextFunction):
 export async function leaveRoom(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const userId = req.user!.id;
-    const roomId = getParam(req.params.id);
-    const result = await roomsService.leaveRoom(roomId, userId);
+    const roomIdentifier = getParam(req.params.id);
+    const canonicalRoomId = await roomsService.getCanonicalRoomId(roomIdentifier);
+    const result = await roomsService.leaveRoom(canonicalRoomId, userId);
     const realtimeServer = getRealtimeServer();
 
-    if (realtimeServer && result?.room?.id) {
-      const canonicalRoomId = result.room.id;
+    if (realtimeServer) {
       const roomChannel = `room:${canonicalRoomId}`;
       const onlineUserIds = await revokeRoomMembership(
         realtimeServer,
@@ -100,12 +100,14 @@ export async function leaveRoom(req: Request, res: Response, next: NextFunction)
         'LEFT'
       );
 
-      realtimeServer.to(roomChannel).emit('room:player:left', {
-        userId,
-        ...(result.newHostId ? { newHostId: result.newHostId } : {}),
-        roomClosed: result.roomClosed,
-      });
-      realtimeServer.to(roomChannel).emit('room:state', result.room);
+      if (result?.room) {
+        realtimeServer.to(roomChannel).emit('room:player:left', {
+          userId,
+          ...(result.newHostId ? { newHostId: result.newHostId } : {}),
+          roomClosed: result.roomClosed,
+        });
+        realtimeServer.to(roomChannel).emit('room:state', result.room);
+      }
       realtimeServer.to(roomChannel).emit('room:presence:update', { onlineUserIds });
     }
 
