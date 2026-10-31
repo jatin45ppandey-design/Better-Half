@@ -72,6 +72,7 @@ describe('PlaySpace Wave 2 — B3 Rooms, Realtime, Invitations, Chat & Presence 
 
       vi.spyOn(prisma, '$transaction').mockImplementation(async (callback: any) => {
         const tx = {
+          $queryRaw: vi.fn().mockResolvedValue([{ id: mockRoomRecord.id }]),
           room: {
             findUnique: vi.fn().mockResolvedValue(mockRoomRecord),
           },
@@ -123,6 +124,7 @@ describe('PlaySpace Wave 2 — B3 Rooms, Realtime, Invitations, Chat & Presence 
 
       vi.spyOn(prisma, '$transaction').mockImplementation(async (callback: any) => {
         const tx = {
+          $queryRaw: vi.fn().mockResolvedValue([{ id: mockRoom.id }]),
           room: {
             findUnique: vi.fn().mockResolvedValue(mockRoom),
           },
@@ -157,7 +159,7 @@ describe('PlaySpace Wave 2 — B3 Rooms, Realtime, Invitations, Chat & Presence 
       vi.spyOn(prisma.room, 'findFirst').mockResolvedValue(expiredRoom as any);
 
       await expect(roomsService.joinRoom('user-b3-2', 'B3EXPD')).rejects.toThrow(
-        /is no longer active/
+        /not accepting new participants/
       );
 
       const check = await roomsService.canStartGame('room-b3-expired', 'user-b3-1');
