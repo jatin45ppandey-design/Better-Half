@@ -159,7 +159,10 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
       const userSocketIds = presenceManager.getUserSockets(userId);
       for (const socketId of userSocketIds) {
         const userSocket = io.sockets.sockets.get(socketId);
-        if (userSocket) await userSocket.leave(roomChannel);
+        if (userSocket) {
+          userSocket.emit('room:membership:revoked', { roomId, userId, reason: 'LEFT' });
+          await userSocket.leave(roomChannel);
+        }
       }
       await socket.leave(roomChannel);
       presenceManager.leaveRoom(roomId, userId);
@@ -405,6 +408,11 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
       for (const sId of targetSockets) {
         const s = io.sockets.sockets.get(sId);
         if (s) {
+          s.emit('room:membership:revoked', {
+            roomId,
+            userId: targetUserId,
+            reason: 'KICKED',
+          });
           s.leave(roomChannel);
           s.emit('room:player:kicked', { targetUserId, roomId });
         }
