@@ -134,6 +134,13 @@ export class BetweenUsEngine
       return { valid: true };
     }
 
+    if (action.type === 'FINISH_SESSION') {
+      if (context.state.phase !== 'REVEAL' || context.state.questionsAnsweredCount < 1) {
+        return { valid: false, error: 'Complete at least one shared prompt before wrapping up.' };
+      }
+      return { valid: true };
+    }
+
     return { valid: false, error: 'Invalid action type.' };
   }
 
@@ -151,6 +158,21 @@ export class BetweenUsEngine
       state.adultConsentUserIds = Array.from(
         new Set([...state.adultConsentUserIds, actorUserId])
       );
+
+      // Level 5 is enabled only after every active participant explicitly opts in.
+      const everyoneConsented = participants.every((participant) =>
+        state.adultConsentUserIds.includes(participant.userId)
+      );
+      if (everyoneConsented) {
+        state.intensity = 5;
+        const pool = this.getEligibleQuestions(
+          state.category,
+          state.intensity,
+          (state as any).questionsPool
+        );
+        state.currentQuestion = pool[state.questionIndex % pool.length];
+      }
+
       return {
         success: true,
         newState: state,
@@ -236,6 +258,23 @@ export class BetweenUsEngine
         success: true,
         newState: state,
         newPrivateStates: privateStates,
+      };
+    }
+
+    if (action.type === 'FINISH_SESSION') {
+      return {
+        success: true,
+        newState: state,
+        newPrivateStates: privateStates,
+        scores,
+        isCompleted: true,
+        winnerUserId: null,
+        events: [
+          {
+            type: 'betweenUs:sessionCompleted',
+            payload: { questionsAnsweredCount: state.questionsAnsweredCount },
+          },
+        ],
       };
     }
 
