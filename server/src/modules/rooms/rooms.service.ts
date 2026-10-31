@@ -604,6 +604,10 @@ export class RoomsService {
         const userProfile = await tx.userProfile.findUnique({ where: { id: userId } });
         const userName = userProfile?.displayName || 'Player';
 
+        if (existingParticipant?.kickedAt) {
+          throw new ForbiddenError('You have been removed from this room by the host.');
+        }
+
         if (existingParticipant && !existingParticipant.leftAt) {
           return { isNewJoin: false };
         }
@@ -1088,9 +1092,10 @@ export class RoomsService {
 
     await prisma.$transaction(
       async (tx) => {
+        const kickedAt = new Date();
         const removed = await tx.roomParticipant.updateMany({
           where: { id: targetParticipant.id, leftAt: null },
-          data: { leftAt: new Date(), isReady: false },
+          data: { leftAt: kickedAt, kickedAt, isReady: false },
         });
         if (removed.count === 0) {
           throw new AppError('Player is no longer active in this room', 400);
