@@ -60,18 +60,91 @@ export const gameSessionJoinSchema = z.object({
   sessionId: z.string().trim().min(1, 'sessionId is required'),
 });
 
+const gameActionPayloadSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('CHOOSE_TYPE'),
+    promptType: z.enum(['truth', 'dare']),
+    category: z.enum(['Romantic', 'Funny', 'Personal', 'Challenging']).optional(),
+    intensity: z.enum(['Soft', 'Spicy', 'Wild']).optional(),
+  }).strict(),
+  z.object({ type: z.literal('SKIP') }).strict(),
+  z.object({ type: z.literal('COMPLETE') }).strict(),
+  z.object({
+    type: z.literal('SUBMIT_CHOICE'),
+    choice: z.enum(['A', 'B']),
+  }).strict(),
+  z.object({ type: z.literal('NEXT_QUESTION') }).strict(),
+  z.object({
+    type: z.literal('PLACE_ITEM'),
+    slotIndex: z.number().int().min(0).max(4),
+  }).strict(),
+  z.object({ type: z.literal('NEXT_CATEGORY') }).strict(),
+  z.object({
+    type: z.literal('PLAY_CARD'),
+    cardId: z.string().trim().min(1).max(100),
+    chosenColor: z.enum(['purple', 'lavender', 'amber', 'emerald']).optional(),
+  }).strict(),
+  z.object({ type: z.literal('DRAW_CARD') }).strict(),
+  z.object({ type: z.literal('PASS_TURN') }).strict(),
+  z.object({
+    type: z.literal('MAKE_MOVE'),
+    cellIndex: z.number().int().min(0).max(8),
+  }).strict(),
+  z.object({ type: z.literal('START_NEXT_ROUND') }).strict(),
+  z.object({
+    type: z.literal('SET_SERIES_FORMAT'),
+    format: z.union([z.literal(1), z.literal(3), z.literal(5)]),
+  }).strict(),
+  z.object({
+    type: z.literal('FLICK_PEN'),
+    dx: z.number().finite().min(-640).max(640),
+    dy: z.number().finite().min(-440).max(440),
+    power: z.number().finite().min(5).max(100),
+  }).strict(),
+  z.object({
+    type: z.literal('CLAIM_CELL'),
+    row: z.number().int().min(0).max(5),
+    col: z.number().int().min(0).max(5),
+  }).strict(),
+  z.object({
+    type: z.literal('SHOOT'),
+    angle: z.number().finite().min(30).max(85),
+    power: z.number().finite().min(20).max(100),
+  }).strict(),
+  z.object({
+    type: z.literal('SPAWN_DROP'),
+    forcedType: z.enum(['GOLDEN', 'SPICY', 'SOGGY_TRAP', 'REGULAR']).optional(),
+  }).strict(),
+  z.object({
+    type: z.literal('SNATCH'),
+    dropId: z.string().trim().min(1).max(100),
+  }).strict(),
+  z.object({
+    type: z.literal('STROKE'),
+    angle: z.number().finite().min(0).max(360),
+    power: z.number().finite().min(2).max(100),
+  }).strict(),
+  z.object({
+    type: z.literal('SUBMIT_ANSWER'),
+    answer: z.string().trim().min(1).max(1000),
+  }).strict(),
+  z.object({ type: z.literal('GRANT_ADULT_CONSENT') }).strict(),
+  z.object({
+    type: z.literal('SET_SETTINGS'),
+    category: z.string().trim().min(1).max(50).optional(),
+    intensity: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5)]).optional(),
+  }).strict(),
+]);
+
 export const gameActionSchema = z
   .object({
-    sessionId: z.string().trim().min(1, 'sessionId is required'),
-    actionId: z.string().trim().min(1, 'actionId is required'),
+    sessionId: z.string().trim().min(1).max(100),
+    actionId: z.string().trim().min(1).max(100),
     version: z.number().int().min(1).optional(),
     expectedVersion: z.number().int().min(1).optional(),
-    action: z
-      .object({
-        type: z.string().trim().min(1, 'action type is required'),
-      })
-      .passthrough(),
+    action: gameActionPayloadSchema,
   })
+  .strict()
   .refine((data) => data.version !== undefined || data.expectedVersion !== undefined, {
     message: 'Either version or expectedVersion is required',
   })
