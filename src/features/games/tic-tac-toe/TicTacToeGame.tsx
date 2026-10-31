@@ -421,7 +421,7 @@ export const TicTacToeGame: React.FC<TicTacToeProps> = ({
               Tic Tac Toe is strictly 2 players on the active board. Non-active friends wait their turn or challenge the winner.
             </p>
             <div className="space-y-2 mt-1">
-              {waitingPlayers.map((p) => (
+              {waitingPlayers.map((p: (typeof players)[number]) => (
                 <div key={p.id} className="flex items-center justify-between p-2.5 rounded-xl bg-gray-50 border border-gray-100">
                   <div className="flex items-center gap-2.5">
                     <div className={`w-8 h-8 rounded-lg ${p.avatarColor} text-white font-bold flex items-center justify-center text-xs`}>
