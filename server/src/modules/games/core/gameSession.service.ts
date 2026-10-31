@@ -516,7 +516,10 @@ export class GameSessionService {
       throw new AppError(`Game "${gameId}" is not allowed in ${room.mode} Mode.`, 400);
     }
 
-    const activeParticipants = room.participants;
+    // Prisma's query filters leftAt:null, but apply the guard again here so
+    // test doubles, alternate data loaders and stale snapshots cannot make a
+    // departed player count toward a rematch.
+    const activeParticipants = room.participants.filter((participant) => !participant.leftAt);
     if (!validatePlayerCount(gameId, activeParticipants.length)) {
       throw new AppError(`Invalid player count (${activeParticipants.length}) for game "${gameId}".`, 400);
     }
