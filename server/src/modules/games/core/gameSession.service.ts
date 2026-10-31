@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { NotFoundError, ForbiddenError, AppError } from '../../../utils/errors.js';
 import { prisma } from '../../../config/prisma.js';
+import { normalizeGameId } from '../../rooms/rooms.constants.js';
 import { isGameEligibleForMode, validatePlayerCount } from './gameRegistry.js';
 import { gameEngineFactory } from './gameEngineFactory.js';
 import { gameStateService } from './gameState.service.js';
@@ -48,9 +49,11 @@ export class GameSessionService {
     }
 
     const mode = room.mode.toLowerCase() as 'couple' | 'friend';
-    const gameId = room.selectedGameId || requestedGameId || 'truth-or-dare';
+    const selectedGameId = room.selectedGameId ? normalizeGameId(room.selectedGameId) : null;
+    const canonicalRequestedGameId = requestedGameId ? normalizeGameId(requestedGameId) : null;
+    const gameId = selectedGameId || canonicalRequestedGameId || 'truth-or-dare';
 
-    if (requestedGameId && room.selectedGameId && requestedGameId !== room.selectedGameId) {
+    if (canonicalRequestedGameId && selectedGameId && canonicalRequestedGameId !== selectedGameId) {
       throw new AppError('The requested game is not the game selected in this room.', 409);
     }
 
@@ -65,7 +68,7 @@ export class GameSessionService {
     });
 
     if (existingActive) {
-      if (existingActive.gameId !== gameId) {
+      if (normalizeGameId(existingActive.gameId) !== gameId) {
         throw new AppError('A different game session is already active in this room.', 409);
       }
       const existingContext = await this.getOrRestoreSession(existingActive.id);
@@ -216,7 +219,7 @@ export class GameSessionService {
           throw new AppError('The room is already in progress without an active session.', 409);
         }
 
-        if (currentRoom.selectedGameId && currentRoom.selectedGameId !== gameId) {
+        if (currentRoom.selectedGameId && normalizeGameId(currentRoom.selectedGameId) !== gameId) {
           throw new AppError('The selected game changed while the session was starting. Please retry.', 409);
         }
 
