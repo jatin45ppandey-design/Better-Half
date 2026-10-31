@@ -9,6 +9,8 @@ import { gameStateService } from './gameState.service.js';
 import type { GameEngineContext, GameParticipant } from './gameEngine.types.js';
 
 export class GameSessionService {
+  private inFlightRestorations = new Map<string, Promise<GameEngineContext | null>>();
+
   async createSession(
     roomId: string,
     requestedGameId: string,
@@ -368,12 +370,17 @@ export class GameSessionService {
       roomId: sessionRecord.roomId,
       startedAt: sessionRecord.startedAt,
     };
+    if (sessionRecord.room) {
+      (context as any).room = sessionRecord.room;
+    }
 
-    // Hydrate action idempotency map from past actions
+    // Hydrate action idempotency map from past actions (bounded to latest 50 actions)
     try {
       const pastActions = await prisma.gameAction.findMany({
         where: { sessionId },
         select: { actionId: true },
+        take: 50,
+        orderBy: { sequenceNumber: 'desc' },
       });
       for (const a of pastActions) {
         gameStateService.markActionProcessed(sessionId, a.actionId);
@@ -389,22 +396,35 @@ export class GameSessionService {
   async getOrRestoreSession(sessionId: string): Promise<GameEngineContext | null> {
     const session = gameStateService.getSession(sessionId);
     if (session) return session;
-    return this.restoreSession(sessionId);
+
+    const inFlight = this.inFlightRestorations.get(sessionId);
+    if (inFlight) return inFlight;
+
+    const promise = this.restoreSession(sessionId).finally(() => {
+      this.inFlightRestorations.delete(sessionId);
+    });
+    this.inFlightRestorations.set(sessionId, promise);
+    return promise;
   }
 
   async restoreActiveSessions(): Promise<number> {
     try {
+      // Bounded startup recovery (at most 50 recent active/paused sessions)
       const activeSessions = await prisma.gameSession.findMany({
         where: {
           status: { in: ['ACTIVE', 'PAUSED'] },
         },
         select: { id: true },
+        take: 50,
+        orderBy: { updatedAt: 'desc' },
       });
 
       let count = 0;
-      for (const s of activeSessions) {
-        const restored = await this.restoreSession(s.id);
-        if (restored) count++;
+      const batchSize = 5;
+      for (let i = 0; i < activeSessions.length; i += batchSize) {
+        const batch = activeSessions.slice(i, i + batchSize);
+        const results = await Promise.all(batch.map((s) => this.restoreSession(s.id)));
+        count += results.filter(Boolean).length;
       }
       return count;
     } catch (err: any) {

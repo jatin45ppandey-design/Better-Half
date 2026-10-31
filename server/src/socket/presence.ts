@@ -16,6 +16,8 @@ export class PresenceManager {
 
   // Default grace period: 15 seconds
   private gracePeriodMs: number;
+  private maxPrivacyEntries = 10000;
+  private privacySweepInterval: NodeJS.Timeout | null = null;
 
   getOnlineCount(): number {
     return this.userSockets.size;
@@ -23,6 +25,13 @@ export class PresenceManager {
 
   constructor(gracePeriodMs = 15000) {
     this.gracePeriodMs = gracePeriodMs;
+
+    this.privacySweepInterval = setInterval(() => {
+      this.pruneStaleUserPrivacy();
+    }, 5 * 60 * 1000);
+    if (typeof this.privacySweepInterval.unref === 'function') {
+      this.privacySweepInterval.unref();
+    }
   }
 
   /**
@@ -64,10 +73,13 @@ export class PresenceManager {
           // Capture affected rooms before removing from presence
           const affectedRooms = this.getUserRooms(userId);
 
-          // Remove from all rooms
-          for (const [, users] of this.roomPresence.entries()) {
+          // Remove from all rooms and prune empty room sets to prevent memory leaks
+          for (const [roomId, users] of this.roomPresence.entries()) {
             if (users.has(userId)) {
               users.delete(userId);
+              if (users.size === 0) {
+                this.roomPresence.delete(roomId);
+              }
             }
           }
 
@@ -116,11 +128,26 @@ export class PresenceManager {
    * Set user privacy settings for presence visibility
    */
   setUserPrivacy(userId: string, privacy: { showOnlineStatus?: boolean; ghostMode?: boolean }): void {
+    if (this.userPrivacy.size >= this.maxPrivacyEntries && !this.userPrivacy.has(userId)) {
+      const oldestKey = this.userPrivacy.keys().next().value;
+      if (oldestKey) this.userPrivacy.delete(oldestKey);
+    }
     const existing = this.userPrivacy.get(userId) || { showOnlineStatus: true, ghostMode: false };
     this.userPrivacy.set(userId, {
       showOnlineStatus: privacy.showOnlineStatus !== undefined ? privacy.showOnlineStatus : existing.showOnlineStatus,
       ghostMode: privacy.ghostMode !== undefined ? privacy.ghostMode : existing.ghostMode,
     });
+  }
+
+  /**
+   * Prune privacy entries for users who are fully offline and not in any rooms
+   */
+  pruneStaleUserPrivacy(): void {
+    for (const userId of this.userPrivacy.keys()) {
+      if (!this.isUserOnline(userId) && this.getUserRooms(userId).length === 0) {
+        this.userPrivacy.delete(userId);
+      }
+    }
   }
 
   /**
@@ -170,13 +197,24 @@ export class PresenceManager {
   }
 
   /**
-   * Clean up all state (for tests)
+   * Graceful shutdown of presence timers
    */
-  reset(): void {
+  shutdown(): void {
     for (const timer of this.disconnectTimers.values()) {
       clearTimeout(timer);
     }
     this.disconnectTimers.clear();
+    if (this.privacySweepInterval) {
+      clearInterval(this.privacySweepInterval);
+      this.privacySweepInterval = null;
+    }
+  }
+
+  /**
+   * Clean up all state (for tests)
+   */
+  reset(): void {
+    this.shutdown();
     this.userSockets.clear();
     this.roomPresence.clear();
     this.userPrivacy.clear();

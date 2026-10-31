@@ -30,6 +30,21 @@ type SnatchDropTimer = {
 
 const snatchDropTimers = new Map<string, SnatchDropTimer>();
 
+export function cancelSnatchTimer(sessionId: string): void {
+  const existing = snatchDropTimers.get(sessionId);
+  if (existing) {
+    clearTimeout(existing.timer);
+    snatchDropTimers.delete(sessionId);
+  }
+}
+
+export function cleanupSnatchTimers(): void {
+  for (const [, item] of snatchDropTimers.entries()) {
+    clearTimeout(item.timer);
+  }
+  snatchDropTimers.clear();
+}
+
 /**
  * Server-owned Snatch The Fries drop scheduler. It is started when a participant
  * joins a session and after each game action, so no host browser/tab is required
@@ -291,6 +306,7 @@ export function registerGameHandlers(
 
       // Broadcast game completion
       if (result.isCompleted && session) {
+        cancelSnatchTimer(payload.sessionId);
         io.to(`session:${payload.sessionId}`).emit('game:completed', {
           sessionId: payload.sessionId,
           winnerUserId: result.winnerUserId || null,
@@ -312,6 +328,7 @@ export function registerGameHandlers(
 
     try {
       await gameSessionService.pauseSession(payload.sessionId, userId);
+      cancelSnatchTimer(payload.sessionId);
       const publicState = gameStateService.getPublicProjection(payload.sessionId) || {};
 
       io.to(`session:${payload.sessionId}`).emit('game:paused', {

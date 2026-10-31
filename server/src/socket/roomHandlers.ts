@@ -32,10 +32,30 @@ type AppSocket = Socket<ClientToServerEvents, ServerToClientEvents, InterServerE
 type AppServer = Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
 
 // Transient rate limit for emojis/reactions: userId -> count & resetTime
+const MAX_RATE_LIMIT_ENTRIES = 5000;
 const reactionRateLimits = new Map<string, { count: number; resetAt: number }>();
 
 // Account-level transient rate limit for chat messages: userId -> count & resetTime
 const chatRateLimits = new Map<string, { count: number; resetAt: number }>();
+
+// Periodic sweep to prevent unbounded memory growth in long-running processes
+const rateLimitSweepInterval = setInterval(() => {
+  const now = Date.now();
+  for (const [id, limit] of reactionRateLimits.entries()) {
+    if (now > limit.resetAt) reactionRateLimits.delete(id);
+  }
+  for (const [id, limit] of chatRateLimits.entries()) {
+    if (now > limit.resetAt) chatRateLimits.delete(id);
+  }
+}, 60000);
+if (typeof rateLimitSweepInterval.unref === 'function') {
+  rateLimitSweepInterval.unref();
+}
+
+export function resetSocketRateLimits(): void {
+  reactionRateLimits.clear();
+  chatRateLimits.clear();
+}
 
 export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
   const userId = socket.data.userId;
@@ -434,6 +454,10 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
     } else {
       chatLimit.count++;
     }
+    if (chatRateLimits.size >= MAX_RATE_LIMIT_ENTRIES && !chatRateLimits.has(userId)) {
+      const oldest = chatRateLimits.keys().next().value;
+      if (oldest) chatRateLimits.delete(oldest);
+    }
     chatRateLimits.set(userId, chatLimit);
 
     if (chatLimit.count > 12) {
@@ -490,6 +514,10 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
         limit.resetAt = now + 3000;
       } else {
         limit.count++;
+      }
+      if (reactionRateLimits.size >= MAX_RATE_LIMIT_ENTRIES && !reactionRateLimits.has(userId)) {
+        const oldest = reactionRateLimits.keys().next().value;
+        if (oldest) reactionRateLimits.delete(oldest);
       }
       reactionRateLimits.set(userId, limit);
 

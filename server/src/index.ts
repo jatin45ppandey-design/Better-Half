@@ -5,12 +5,33 @@ import { env } from './config/env.js';
 
 // Fail fast before accepting traffic if mandatory production configuration is missing or invalid
 assertValidEnvironment();
+
+// Single-instance deployment check:
+// PlaySpace uses in-memory presence and room state. Scaling horizontally across multiple
+// Node instances without a distributed Redis adapter would cause split-brain room state.
+if (
+  process.env.CLUSTER_MODE === 'true' ||
+  (process.env.NODE_APP_INSTANCE !== undefined && process.env.NODE_APP_INSTANCE !== '0')
+) {
+  console.warn(
+    '⚠️ [SCALING NOTICE] Multiple Node cluster instances detected without distributed Socket.IO Redis adapter.\n' +
+    '   PlaySpace currently operates authoritatively as a single-instance deployment (e.g. Render Web Service).\n' +
+    '   Horizontal multi-instance scaling requires Redis adapter for Socket.IO and shared session pub/sub.'
+  );
+}
+
 import { prisma } from './config/prisma.js';
 import { createSocketServer } from './socket/index.js';
 import { gameSessionService } from './modules/games/core/gameSession.service.js';
 import { roomsService } from './modules/rooms/rooms.service.js';
 import { adminService } from './modules/admin/admin.service.js';
 import { createShutdownHandler, registerShutdownSignals } from './lifecycle/shutdown.js';
+import { presenceManager } from './socket/presence.js';
+import { cleanupSnatchTimers } from './socket/gameHandlers.js';
+import { gameStateService } from './modules/games/core/gameState.service.js';
+import { resetSocketRateLimits } from './socket/roomHandlers.js';
+import { resetRoomLookupTracker } from './middleware/rateLimiter.js';
+import { markServerShuttingDown } from './modules/health/health.controller.js';
 
 const app = createApp();
 const httpServer = http.createServer(app);
@@ -31,7 +52,7 @@ httpServer.listen(PORT, HOST, () => {
   console.log(`🗄️ Ready:  http://${HOST}:${PORT}/api/v1/ready`);
   console.log(`===============================================`);
 
-  // Restore any active or paused sessions from DB on startup
+  // Restore any active or paused sessions from DB on startup (bounded)
   gameSessionService.restoreActiveSessions().then((count) => {
     if (count > 0) {
       console.log(`🔄 Restored ${count} active/paused game session(s) from database.`);
@@ -71,12 +92,20 @@ httpServer.listen(PORT, HOST, () => {
   cleanupTimer.unref();
 });
 
-// Robust graceful shutdown handling
+// Robust graceful shutdown handling with domain cleanup lifecycle
 const shutdownHandler = createShutdownHandler({
   httpServer,
   io,
   prisma,
   getCleanupTimers: () => [cleanupTimer],
+  cleanupCallbacks: [
+    () => markServerShuttingDown(),
+    () => presenceManager.shutdown(),
+    () => cleanupSnatchTimers(),
+    () => gameStateService.shutdown(),
+    () => resetSocketRateLimits(),
+    () => resetRoomLookupTracker(),
+  ],
   forceTimeoutMs: 10000,
 });
 

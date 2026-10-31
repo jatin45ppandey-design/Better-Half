@@ -1,4 +1,10 @@
 import type { GameActionEnvelope, ActionResult, GameEngineContext } from './gameEngine.types.js';
+
+export type RoomVerifier = (roomId: string) => Promise<{ id: string; hostId: string; status: string; expiresAt?: Date | null } | null>;
+let testRoomVerifier: RoomVerifier | null = null;
+export function setTestRoomVerifier(verifier: RoomVerifier | null): void {
+  testRoomVerifier = verifier;
+}
 import { Prisma } from '@prisma/client';
 import { gameSessionService } from './gameSession.service.js';
 import { gameStateService } from './gameState.service.js';
@@ -116,25 +122,51 @@ export class GameActionService {
       };
     }
 
-    // Verify room state and room host authority for all sessions associated with a room.
-    // Ensure game actions cannot continue inside invalid, expired or closed rooms.
-    if (session.roomId && typeof prisma.room?.findUnique === 'function') {
+    // 3. Check membership first
+    const participant = session.participants.find((p) => p.userId === actorUserId);
+    if (!participant) {
+      return {
+        success: false,
+        error: 'You are not a participant in this game session.',
+        version: session.version,
+      };
+    }
+
+    // 4. Verify room state and room host authority for all sessions associated with a room.
+    // Ensure game actions cannot continue inside invalid, expired or closed rooms (fail-closed).
+    if (session.roomId) {
       try {
-        const room = await prisma.room.findUnique({
-          where: { id: session.roomId },
-          select: { id: true, hostId: true, status: true, expiresAt: true },
-        });
+        let room = testRoomVerifier
+          ? await testRoomVerifier(session.roomId)
+          : (typeof prisma.room?.findUnique === 'function'
+              ? await prisma.room.findUnique({
+                  where: { id: session.roomId },
+                  select: { id: true, hostId: true, status: true, expiresAt: true },
+                })
+              : null);
 
-        if (room) {
-          if (room.status === 'CLOSED' || room.status === 'EXPIRED') {
-            return {
-              success: false,
-              error: `Cannot apply action. Room is ${room.status.toLowerCase()}.`,
-              version: session.version,
-            };
-          }
+        if (!room && (session as any).room) {
+          room = (session as any).room;
+        }
 
-          if (room.expiresAt && room.expiresAt <= new Date()) {
+        if (!room) {
+          return {
+            success: false,
+            error: 'Cannot apply action. Associated room not found.',
+            version: session.version,
+          };
+        }
+
+        if (room.status === 'CLOSED' || room.status === 'EXPIRED' || room.status === 'COMPLETED') {
+          return {
+            success: false,
+            error: `Cannot apply action. Room is ${room.status.toLowerCase()}.`,
+            version: session.version,
+          };
+        }
+
+        if (room.expiresAt && room.expiresAt <= new Date()) {
+          try {
             await prisma.room.updateMany({
               where: { id: room.id, status: { notIn: ['CLOSED', 'EXPIRED'] } },
               data: { status: 'EXPIRED' },
@@ -143,34 +175,31 @@ export class GameActionService {
               where: { id: session.sessionId, status: { in: ['ACTIVE', 'PAUSED'] } },
               data: { status: 'ABANDONED' },
             });
-            session.status = 'ABANDONED';
-            session.isPaused = false;
-            return {
-              success: false,
-              error: 'Cannot apply action. Room has expired.',
-              version: session.version,
-            };
+          } catch {
+            // Best-effort status transition
           }
-
-          session.participants = session.participants.map((gameParticipant) => ({
-            ...gameParticipant,
-            isHost: gameParticipant.userId === room.hostId,
-          }));
+          session.status = 'ABANDONED';
+          session.isPaused = false;
+          return {
+            success: false,
+            error: 'Cannot apply action. Room has expired.',
+            version: session.version,
+          };
         }
-        gameStateService.setSession(sessionId, session);
-      } catch (_err) {
-        // In offline/mocked unit tests, allow operation
-      }
-    }
 
-    // 3. Check membership
-    const participant = session.participants.find((p) => p.userId === actorUserId);
-    if (!participant) {
-      return {
-        success: false,
-        error: 'You are not a participant in this game session.',
-        version: session.version,
-      };
+        session.participants = session.participants.map((gameParticipant) => ({
+          ...gameParticipant,
+          isHost: gameParticipant.userId === room.hostId,
+        }));
+        gameStateService.setSession(sessionId, session);
+      } catch (err: any) {
+        logger.error(`Room verification DB error: ${err?.message || err}`);
+        return {
+          success: false,
+          error: 'Service temporarily unavailable. Could not verify room state.',
+          version: session.version,
+        };
+      }
     }
 
     const engine = gameEngineFactory.getEngine(session.gameId);

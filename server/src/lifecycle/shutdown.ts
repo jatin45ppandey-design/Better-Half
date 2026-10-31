@@ -16,6 +16,7 @@ export interface ShutdownDependencies {
     $disconnect: () => Promise<void>;
   };
   getCleanupTimers?: () => Array<NodeJS.Timeout | null | undefined>;
+  cleanupCallbacks?: Array<() => Promise<void> | void>;
   forceTimeoutMs?: number;
   logger?: ShutdownLogger;
   onExit?: (code: number) => void;
@@ -37,6 +38,7 @@ export function createShutdownHandler(deps: ShutdownDependencies): ShutdownHandl
     io,
     prisma,
     getCleanupTimers,
+    cleanupCallbacks,
     forceTimeoutMs = 10000,
     logger = console,
     onExit = (code: number) => process.exit(code),
@@ -63,7 +65,19 @@ export function createShutdownHandler(deps: ShutdownDependencies): ShutdownHandl
     }
 
     try {
-      // 1. Clear background intervals and scheduled cleanup tasks
+      // 1. Run all registered domain cleanup callbacks (timers, presence, rate-limits)
+      if (cleanupCallbacks && cleanupCallbacks.length > 0) {
+        for (const cb of cleanupCallbacks) {
+          try {
+            await cb();
+          } catch (err) {
+            logger.warn('Error in shutdown cleanup callback:', err);
+          }
+        }
+        logger.info('Registered cleanup callbacks executed.');
+      }
+
+      // 2. Clear background intervals and scheduled cleanup tasks
       if (getCleanupTimers) {
         const timers = getCleanupTimers();
         for (const timer of timers) {
@@ -74,7 +88,7 @@ export function createShutdownHandler(deps: ShutdownDependencies): ShutdownHandl
         logger.info('Background cleanup timers cleared.');
       }
 
-      // 2. Notify connected Socket.IO clients and close WebSocket server
+      // 3. Notify connected Socket.IO clients and close WebSocket server
       if (io) {
         try {
           if (typeof io.emit === 'function') {
@@ -96,7 +110,7 @@ export function createShutdownHandler(deps: ShutdownDependencies): ShutdownHandl
         });
       }
 
-      // 3. Stop accepting new HTTP connections and finish in-flight requests
+      // 4. Stop accepting new HTTP connections and finish in-flight requests
       if (httpServer) {
         await new Promise<void>((resolve) => {
           httpServer.close((err) => {
@@ -110,7 +124,7 @@ export function createShutdownHandler(deps: ShutdownDependencies): ShutdownHandl
         });
       }
 
-      // 4. Safely disconnect Prisma database connection pool
+      // 5. Safely disconnect Prisma database connection pool
       if (prisma) {
         try {
           await prisma.$disconnect();

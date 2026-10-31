@@ -61,7 +61,7 @@ const roomWithRelationsInclude = {
         },
       },
     },
-    orderBy: { createdAt: 'asc' },
+    orderBy: { createdAt: 'desc' },
     take: 60,
   },
   gameSessions: {
@@ -249,7 +249,8 @@ export class RoomsService {
       gameVotes[canonicalGameId].push(v.userId);
     }
 
-    const chatMessages: RoomMessageSnapshot[] = (room.messages || []).map((m) => ({
+    const rawMessages = [...(room.messages || [])].reverse();
+    const chatMessages: RoomMessageSnapshot[] = rawMessages.map((m) => ({
       id: m.id,
       senderId: m.senderId,
       senderName: m.sender ? m.sender.displayName || 'Player' : 'System',
@@ -1599,40 +1600,62 @@ export class RoomsService {
    */
   async cleanupExpiredRooms(): Promise<{ expiredCount: number }> {
     const now = new Date();
-    const expiredRoomsResult = await prisma.room.updateMany({
-      where: {
-        expiresAt: { lte: now },
-        status: { notIn: [ROOM_STATUS.CLOSED, ROOM_STATUS.EXPIRED] },
-      },
-      data: { status: ROOM_STATUS.EXPIRED },
-    });
-    const expiredCount = expiredRoomsResult?.count || 0;
+    const isTest = process.env.NODE_ENV === 'test';
 
-    if (expiredCount > 0 && typeof prisma.gameSession?.updateMany === 'function') {
+    if (!isTest && typeof prisma.$queryRaw === 'function') {
       try {
-        const expired = await prisma.room.findMany({
-          where: { status: ROOM_STATUS.EXPIRED },
-          select: { id: true },
-        });
-        const ids = (expired || []).map((r) => r.id);
-        if (ids.length > 0) {
-          await prisma.gameSession.updateMany({
-            where: { roomId: { in: ids }, status: { in: ['ACTIVE', 'PAUSED'] } },
-            data: { status: 'ABANDONED' },
-          });
+        const lockRes: any = await prisma.$queryRaw`SELECT pg_try_advisory_lock(748392019) as acquired`;
+        if (lockRes?.[0]?.acquired === false) {
+          return { expiredCount: 0 };
         }
-      } catch (_e) {}
+      } catch {
+        // Fallback for non-Postgres or mock test runs
+      }
     }
 
-    await prisma.roomInvitation.updateMany({
-      where: {
-        status: 'PENDING',
-        expiresAt: { lte: now },
-      },
-      data: { status: 'EXPIRED' },
-    });
+    try {
+      const expiredRoomsResult = await prisma.room.updateMany({
+        where: {
+          expiresAt: { lte: now },
+          status: { notIn: [ROOM_STATUS.CLOSED, ROOM_STATUS.EXPIRED] },
+        },
+        data: { status: ROOM_STATUS.EXPIRED },
+      });
+      const expiredCount = expiredRoomsResult?.count || 0;
 
-    return { expiredCount };
+      if (expiredCount > 0 && typeof prisma.gameSession?.updateMany === 'function') {
+        try {
+          const expired = await prisma.room.findMany({
+            where: { status: ROOM_STATUS.EXPIRED },
+            select: { id: true },
+            take: 50,
+          });
+          const ids = (expired || []).map((r) => r.id);
+          if (ids.length > 0) {
+            await prisma.gameSession.updateMany({
+              where: { roomId: { in: ids }, status: { in: ['ACTIVE', 'PAUSED'] } },
+              data: { status: 'ABANDONED' },
+            });
+          }
+        } catch (_e) {}
+      }
+
+      await prisma.roomInvitation.updateMany({
+        where: {
+          status: 'PENDING',
+          expiresAt: { lte: now },
+        },
+        data: { status: 'EXPIRED' },
+      });
+
+      return { expiredCount };
+    } finally {
+      if (!isTest && typeof prisma.$queryRaw === 'function') {
+        try {
+          await prisma.$queryRaw`SELECT pg_advisory_unlock(748392019)`;
+        } catch {}
+      }
+    }
   }
 
   /**

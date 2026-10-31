@@ -2,9 +2,9 @@ name: Backend CI & Release Gate
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, 'phase-*', 'release/*' ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, 'phase-*', 'release/*' ]
 
 jobs:
   backend-test-and-build:
@@ -61,9 +61,29 @@ jobs:
       - name: Generate Prisma Client
         run: npm run prisma:generate --prefix server
 
-      - name: Deploy Schema to Isolated Test Database
+      - name: Pre-configure Supabase Roles in PostgreSQL
         run: |
-          cd server && npx prisma db push --skip-generate
+          docker exec ${{ job.services.postgres.id }} psql -U test_user -d playspace_test -c "
+            DO \$\$
+            BEGIN
+              IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'anon') THEN
+                CREATE ROLE anon NOLOGIN;
+              END IF;
+              IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'authenticated') THEN
+                CREATE ROLE authenticated NOLOGIN;
+              END IF;
+            END
+            \$\$;
+          "
+
+      - name: Deploy Migrations to Isolated Test Database
+        run: |
+          cd server && npx prisma migrate deploy
+
+      - name: Security & Dependency Vulnerability Audit
+        run: |
+          npm audit --audit-level=high || true
+          cd server && npm audit --audit-level=high || true
 
       - name: Backend Static Typecheck
         run: npm run typecheck --prefix server
