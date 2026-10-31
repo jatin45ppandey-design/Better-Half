@@ -79,41 +79,50 @@ export const GameSessionProvider: React.FC<GameSessionProviderProps> = ({
         console.warn('[GameSession] REST snapshot fetch failed, falling back to socket:', err.message);
       }
 
-      // 2. Connect socket and join session
-      const socket = await socketService.connect();
-      if (!socket || !mounted) {
-        if (mounted) setIsLoading(false);
-        return;
-      }
-
-      socketService.emit(
-        'game:session:join',
-        { sessionId },
-        (res: any) => {
-          if (!mounted) return;
+      // 2. Connect socket and join session. A room-backed game must not fall
+      // back to its local pass-and-play UI when realtime authorization fails.
+      try {
+        const socket = await socketService.connect();
+        if (!mounted) return;
+        if (!socket) {
+          setError('Unable to connect to the multiplayer server. Check your connection and retry.');
           setIsLoading(false);
-          if (!res?.success) {
-            setError(res?.error || 'Failed to connect to game session.');
-          } else {
-            if (res.publicState) {
-              setPublicState(res.publicState.state || res.publicState);
-              const joinedVersion = res.publicState.version || 1;
-              versionRef.current = Math.max(versionRef.current, joinedVersion);
-              setVersion(versionRef.current);
-              setIsPaused(!!res.publicState.isPaused);
-              setSessionStatus(res.publicState.status || res.status || 'ACTIVE');
-              setScores(res.publicState.scores || {});
-              setWinnerUserId(res.publicState.winnerUserId || null);
-              if (res.publicState.participants) {
-                setParticipants(res.publicState.participants);
+          return;
+        }
+
+        socketService.emit(
+          'game:session:join',
+          { sessionId },
+          (res: any) => {
+            if (!mounted) return;
+            setIsLoading(false);
+            if (!res?.success) {
+              setError(res?.error || 'Failed to connect to game session.');
+            } else {
+              if (res.publicState) {
+                setPublicState(res.publicState.state || res.publicState);
+                const joinedVersion = res.publicState.version || 1;
+                versionRef.current = Math.max(versionRef.current, joinedVersion);
+                setVersion(versionRef.current);
+                setIsPaused(!!res.publicState.isPaused);
+                setSessionStatus(res.publicState.status || res.status || 'ACTIVE');
+                setScores(res.publicState.scores || {});
+                setWinnerUserId(res.publicState.winnerUserId || null);
+                if (res.publicState.participants) {
+                  setParticipants(res.publicState.participants);
+                }
+              }
+              if (res.privateState) {
+                setPrivateState(res.privateState);
               }
             }
-            if (res.privateState) {
-              setPrivateState(res.privateState);
-            }
           }
-        }
-      );
+        );
+      } catch (socketError: any) {
+        if (!mounted) return;
+        setError(socketError?.message || 'Unable to connect to the multiplayer server.');
+        setIsLoading(false);
+      }
     }
 
     initSession();
