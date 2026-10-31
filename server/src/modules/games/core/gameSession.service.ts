@@ -209,7 +209,7 @@ export class GameSessionService {
         });
 
         if (activeInTransaction) {
-          if (activeInTransaction.gameId !== gameId) {
+          if (normalizeGameId(activeInTransaction.gameId) !== gameId) {
             throw new AppError('A different game session is already active in this room.', 409);
           }
           return { sessionId: activeInTransaction.id, created: false };
