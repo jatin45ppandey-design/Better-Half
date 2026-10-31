@@ -224,6 +224,7 @@ export const GameArenaPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const { currentRoom } = useRoom();
+  const { user } = useAuth();
 
   const game = gameId ? getGameById(gameId) : undefined;
   const roomCode = searchParams.get('room') || currentRoom?.code;
@@ -231,34 +232,69 @@ export const GameArenaPage: React.FC = () => {
 
   const [activeSessionId, setActiveSessionId] = useState<string | null>(urlSessionId);
   const [isInitializing, setIsInitializing] = useState<boolean>(!urlSessionId && !!roomCode);
+  const [initializationError, setInitializationError] = useState<string | null>(null);
   const [gameKey, setGameKey] = useState(0);
 
-  // Auto-initialize session if roomCode is provided but session query param is missing
+  // Prefer the room's existing active session. Only the host may create a new
+  // session, so a guest opening a URL without a session ID cannot accidentally
+  // attempt to create a second session.
   useEffect(() => {
-    if (!activeSessionId && roomCode && currentRoom && game) {
-      let mounted = true;
+    if (activeSessionId || !roomCode || !game) return;
+
+    let mounted = true;
+
+    const initializeSession = async () => {
       setIsInitializing(true);
+      setInitializationError(null);
 
-      const rId = currentRoom.id || currentRoom.code;
-      api.games
-        .start(rId, game.id)
-        .then((res) => {
-          if (!mounted) return;
-          setActiveSessionId(res.sessionId);
-          setSearchParams({ room: roomCode, session: res.sessionId });
-          setIsInitializing(false);
-        })
-        .catch((err) => {
-          if (!mounted) return;
-          console.warn('[GameArena] Auto-start returned error:', err.message);
-          setIsInitializing(false);
-        });
+      try {
+        let roomSnapshot: any =
+          currentRoom?.code === roomCode ? currentRoom : null;
 
-      return () => {
-        mounted = false;
-      };
-    }
-  }, [activeSessionId, roomCode, currentRoom, game, setSearchParams]);
+        if (!roomSnapshot?.activeSessionId) {
+          const latestSnapshot = await api.rooms.getByCode(roomCode);
+          roomSnapshot = latestSnapshot.room || latestSnapshot;
+        }
+
+        if (!mounted) return;
+
+        const existingSessionId = roomSnapshot?.activeSessionId;
+        if (existingSessionId) {
+          setActiveSessionId(existingSessionId);
+          setSearchParams({ room: roomCode, session: existingSessionId });
+          setIsInitializing(false);
+          return;
+        }
+
+        if (!roomSnapshot?.id || roomSnapshot.hostId !== user?.id) {
+          throw new Error('The room host has not started this game session yet.');
+        }
+
+        if (roomSnapshot.selectedGameId && roomSnapshot.selectedGameId !== game.id) {
+          throw new Error('This room has selected a different game. Return to the lobby.');
+        }
+
+        const response = await api.games.start(roomSnapshot.id, game.id);
+        if (!mounted) return;
+
+        setActiveSessionId(response.sessionId);
+        setSearchParams({ room: roomCode, session: response.sessionId });
+        setIsInitializing(false);
+      } catch (err: any) {
+        if (!mounted) return;
+        const message = err?.message || 'Unable to initialize the multiplayer session.';
+        console.warn('[GameArena] Session initialization failed:', message);
+        setInitializationError(message);
+        setIsInitializing(false);
+      }
+    };
+
+    void initializeSession();
+
+    return () => {
+      mounted = false;
+    };
+  }, [activeSessionId, roomCode, currentRoom, game, user?.id, setSearchParams]);
 
   const handleReturnToLobby = () => {
     if (roomCode) {
@@ -267,6 +303,21 @@ export const GameArenaPage: React.FC = () => {
       navigate('/dashboard');
     }
   };
+
+  if (initializationError) {
+    return (
+      <div className="min-h-screen bg-[#FCFAFF] flex items-center justify-center p-4">
+        <div className="max-w-md rounded-3xl border border-[#EAE3F3] bg-white p-8 text-center shadow-xl">
+          <AlertCircle className="mx-auto h-10 w-10 text-amber-500" />
+          <h2 className="mt-4 text-xl font-bold text-[#211A2D]">Unable to open multiplayer session</h2>
+          <p className="mt-2 text-sm text-[#756D82]">{initializationError}</p>
+          <Button variant="primary" onClick={handleReturnToLobby} className="mt-5">
+            Return to Room Lobby
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   if (!game) {
     return (
