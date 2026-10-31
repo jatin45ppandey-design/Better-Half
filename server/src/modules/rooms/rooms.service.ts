@@ -158,15 +158,29 @@ export class RoomsService {
    */
   async getActiveRoomIdForUser(roomIdOrCode: string, userId: string): Promise<string> {
     const roomId = await this.getCanonicalRoomId(roomIdOrCode);
-    const participant = await prisma.roomParticipant.findUnique({
-      where: {
-        roomId_userId: { roomId, userId },
-      },
-      select: { leftAt: true },
-    });
+    const [participant, room] = await Promise.all([
+      prisma.roomParticipant.findUnique({
+        where: {
+          roomId_userId: { roomId, userId },
+        },
+        select: { leftAt: true },
+      }),
+      prisma.room.findUnique({
+        where: { id: roomId },
+        select: { status: true, expiresAt: true },
+      }),
+    ]);
 
     if (!participant || participant.leftAt) {
       throw new ForbiddenError('You are not an active participant in this room');
+    }
+    if (
+      !room ||
+      room.status === ROOM_STATUS.CLOSED ||
+      room.status === ROOM_STATUS.EXPIRED ||
+      room.expiresAt <= new Date()
+    ) {
+      throw new AppError('This room is no longer active.', 400);
     }
 
     return roomId;
