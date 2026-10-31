@@ -121,9 +121,11 @@ export const GameSessionProvider: React.FC<GameSessionProviderProps> = ({
     const unsubState = socketService.on('game:state', (data: any) => {
       if (!mounted || !data?.publicState) return;
       const pub = data.publicState;
-      setPublicState(pub.state || pub);
+      if (pub.sessionId && pub.sessionId !== sessionId) return;
       const incomingVersion = pub.version || 1;
-      versionRef.current = Math.max(versionRef.current, incomingVersion);
+      if (incomingVersion < versionRef.current) return;
+      versionRef.current = incomingVersion;
+      setPublicState(pub.state || pub);
       setVersion(versionRef.current);
       setIsPaused(!!pub.isPaused);
       setSessionStatus(pub.status || 'ACTIVE');
@@ -135,29 +137,29 @@ export const GameSessionProvider: React.FC<GameSessionProviderProps> = ({
     });
 
     const unsubPrivate = socketService.on('game:state:private', (data: any) => {
-      if (!mounted) return;
+      if (!mounted || data?.sessionId !== sessionId) return;
       setPrivateState(data.privateState);
     });
 
     const unsubEvent = socketService.on('game:event', (evt: any) => {
-      if (!mounted) return;
+      if (!mounted || (evt?.sessionId && evt.sessionId !== sessionId)) return;
       setLastEvent(evt);
     });
 
-    const unsubPaused = socketService.on('game:paused', () => {
-      if (!mounted) return;
+    const unsubPaused = socketService.on('game:paused', (data: any) => {
+      if (!mounted || data?.sessionId !== sessionId) return;
       setIsPaused(true);
       setSessionStatus('PAUSED');
     });
 
-    const unsubResumed = socketService.on('game:resumed', () => {
-      if (!mounted) return;
+    const unsubResumed = socketService.on('game:resumed', (data: any) => {
+      if (!mounted || data?.sessionId !== sessionId) return;
       setIsPaused(false);
       setSessionStatus('ACTIVE');
     });
 
     const unsubCompleted = socketService.on('game:completed', (data: any) => {
-      if (!mounted) return;
+      if (!mounted || data?.sessionId !== sessionId) return;
       setWinnerUserId(data.winnerUserId ?? null);
       setSessionStatus('COMPLETED');
       if (data.scores) setScores(data.scores);
@@ -175,17 +177,26 @@ export const GameSessionProvider: React.FC<GameSessionProviderProps> = ({
     };
   }, [sessionId]);
 
+  const actionQueueRef = useRef<Promise<void>>(Promise.resolve());
+
   const sendAction = useCallback(
-    async (action: any): Promise<{ success: boolean; error?: string }> => {
-      const res = await sendGameAction(sessionId, versionRef.current, action);
-      if (!res.success) {
-        return { success: false, error: res.error || 'Action rejected.' };
-      }
-      if (typeof res.version === 'number' && Number.isFinite(res.version)) {
-        versionRef.current = Math.max(versionRef.current, res.version);
-        setVersion(versionRef.current);
-      }
-      return { success: true };
+    (action: any): Promise<{ success: boolean; error?: string }> => {
+      // Serialize actions from this tab so rapid consecutive input uses the
+      // version acknowledged by the previous action instead of a stale render.
+      const request = actionQueueRef.current.then(async () => {
+        const res = await sendGameAction(sessionId, versionRef.current, action);
+        if (!res.success) {
+          return { success: false, error: res.error || 'Action rejected.' };
+        }
+        if (typeof res.version === 'number' && Number.isFinite(res.version)) {
+          versionRef.current = Math.max(versionRef.current, res.version);
+          setVersion(versionRef.current);
+        }
+        return { success: true };
+      });
+
+      actionQueueRef.current = request.then(() => undefined, () => undefined);
+      return request;
     },
     [sessionId]
   );
