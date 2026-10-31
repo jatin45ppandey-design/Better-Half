@@ -195,7 +195,7 @@ export class BetweenUsEngine
     }
 
     if (action.type === 'SUBMIT_ANSWER') {
-      // Store in volatile memory only
+      // Persist the pending answer in the participant-private session state.
       privateStates[actorUserId] = { pendingAnswer: action.answer.trim() };
       const submitted = Array.from(new Set([...state.submittedUserIds, actorUserId]));
       state.submittedUserIds = submitted;
@@ -207,7 +207,7 @@ export class BetweenUsEngine
         const revealed: Record<string, string> = {};
         participants.forEach((p) => {
           revealed[p.userId] = privateStates[p.userId]?.pendingAnswer || '';
-          // Wipe volatile answer buffer immediately after copying to single ephemeral reveal
+          // Clear the private buffer after copying answers into the shared reveal.
           privateStates[p.userId] = { pendingAnswer: null };
         });
 
