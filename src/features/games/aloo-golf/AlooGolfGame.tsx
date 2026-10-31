@@ -134,11 +134,11 @@ export const AlooGolfGame: React.FC<AlooGolfProps> = ({
   const [serverBall, setServerBall] = useState<any>(null);
   const activePlayer = players[currentTurnIdx % players.length];
   const isMyTurn = !isMultiplayer || sessionState.currentTurnUserId === currentUserId;
-  const myServerBall = isMultiplayer ? sessionState.balls?.[currentUserId] : null;
+  const activeServerBall = isMultiplayer ? sessionState.balls?.[activePlayer.id] : null;
   const ball = isMultiplayer
     ? serverBall || {
-        x: myServerBall?.x ?? currentHole.startX,
-        y: myServerBall?.y ?? currentHole.startY,
+        x: activeServerBall?.x ?? currentHole.startX,
+        y: activeServerBall?.y ?? currentHole.startY,
         vx: 0,
         vy: 0,
         inMotion: false,
@@ -353,7 +353,7 @@ export const AlooGolfGame: React.FC<AlooGolfProps> = ({
   }, [activePlayer, currentHole, currentHoleIdx, holeStrokes, completedPlayersThisHole, players, onFinishMatch, activeStrokes]);
 
   const handlePutt = () => {
-    if (ball.inMotion || isPaused || !isMyTurn || (isMultiplayer && (myServerBall?.sunk || sessionState.matchOver))) return;
+    if (ball.inMotion || isPaused || !isMyTurn || (isMultiplayer && (activeServerBall?.sunk || sessionState.matchOver))) return;
     if (isMultiplayer) {
       void onSendAction?.({ type: 'STROKE', angle: aimAngle, power: shotPower });
       return;
@@ -407,7 +407,7 @@ export const AlooGolfGame: React.FC<AlooGolfProps> = ({
       if (index < trajectory.length) {
         frameId = requestAnimationFrame(renderFrame);
       } else {
-        const latestBall = sessionState.balls?.[currentUserId];
+        const latestBall = sessionState.balls?.[activePlayer.id];
         setServerBall({
           x: latestBall?.x ?? currentHole.startX,
           y: latestBall?.y ?? currentHole.startY,
@@ -421,7 +421,7 @@ export const AlooGolfGame: React.FC<AlooGolfProps> = ({
 
     frameId = requestAnimationFrame(renderFrame);
     return () => cancelAnimationFrame(frameId);
-  }, [isMultiplayer, sessionState?.version, sessionState?.lastTrajectory, sessionState?.balls, currentUserId, currentHole.startX, currentHole.startY]);
+  }, [isMultiplayer, sessionState?.version, sessionState?.lastTrajectory, sessionState?.balls, currentUserId, activePlayer.id, currentHole.startX, currentHole.startY]);
 
   // Canvas render mini golf course
   useEffect(() => {
