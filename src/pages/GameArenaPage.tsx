@@ -466,6 +466,7 @@ export const GameArenaPage: React.FC = () => {
       roomCode={roomCode}
       gameKey={gameKey}
       onRematchLocal={() => setGameKey((k) => k + 1)}
+      onReplaceSession={() => undefined}
       onReturnToLobby={handleReturnToLobby}
     />
   );
