@@ -439,10 +439,11 @@ export const TicTacToeGame: React.FC<TicTacToeProps> = ({
               variant="outline"
               size="sm"
               onClick={handleRotateDuelist}
+              disabled={isMultiplayer}
               className="mt-2 w-full text-xs flex items-center justify-center gap-1.5"
             >
               <Swords className="w-3.5 h-3.5" />
-              Swap Duelist O with Queue
+              {isMultiplayer ? 'Queue rotation at next session' : 'Swap Duelist O with Queue'}
             </Button>
           </div>
         )}
