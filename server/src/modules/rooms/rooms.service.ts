@@ -764,6 +764,20 @@ export class RoomsService {
         });
         if (!currentRoom) throw new NotFoundError('Room not found');
 
+        // A room-level leave must not orphan an in-progress game session.
+        // Until an explicit forfeit/abandon flow exists, the match must finish
+        // before a participant can leave the room.
+        const activeSession = await tx.gameSession.findFirst({
+          where: { roomId: room.id, status: { in: ['ACTIVE', 'PAUSED'] } },
+          select: { id: true },
+        });
+        if (currentRoom.status === 'IN_PROGRESS' || activeSession) {
+          throw new AppError(
+            'Cannot leave the room while a game is in progress. Finish the match before leaving.',
+            409
+          );
+        }
+
         const leaveUpdate = await tx.roomParticipant.updateMany({
           where: { id: participant.id, leftAt: null },
           data: { leftAt: new Date(), isReady: false },
