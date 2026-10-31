@@ -56,8 +56,12 @@ export const SnatchTheFriesGame: React.FC<SnatchTheFriesProps> = ({
 
   const isMultiplayer = Boolean(sessionState && onSendAction);
   const dropRound = isMultiplayer ? sessionState.dropRound : localDropRound;
-  const scores = isMultiplayer ? sessionState.scores || {} : localScores;
-  const reactionTimes = isMultiplayer ? sessionState.reactionTimes || {} : localReactionTimes;
+  const scores: Record<string, number> = isMultiplayer
+    ? (sessionState.scores as Record<string, number> | undefined) || {}
+    : localScores;
+  const reactionTimes: Record<string, number[]> = isMultiplayer
+    ? (sessionState.reactionTimes as Record<string, number[]> | undefined) || {}
+    : localReactionTimes;
   const currentFry: FryItem | null = isMultiplayer
     ? sessionState.currentDrop
       ? {
