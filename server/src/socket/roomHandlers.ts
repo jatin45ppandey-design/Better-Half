@@ -188,7 +188,9 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
         (p: { userId: string }) => p.userId === userId
       );
 
-      const roomChannel = `room:${roomId}`;
+      // Sockets join rooms using the database room ID, while clients may send the room code.
+      // Always broadcast to the canonical ID returned by the persisted room snapshot.
+      const roomChannel = `room:${updatedRoom.id}`;
       io.to(roomChannel).emit('room:player:ready', {
         userId,
         isReady: participant ? participant.isReady : (isReady ?? false),
