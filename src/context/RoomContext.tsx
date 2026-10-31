@@ -78,6 +78,8 @@ function formatSnapshotToRoomSession(snapshot: any): RoomSession {
         : snapshot.status === 'COMPLETED'
         ? 'results'
         : 'lobby',
+    activeSessionId: snapshot.activeSessionId || null,
+    activeSessionStatus: snapshot.activeSessionStatus || null,
     createdAt:
       typeof snapshot.createdAt === 'string'
         ? snapshot.createdAt
