@@ -16,6 +16,7 @@ class SocketService {
   // Socket.IO room membership is connection-scoped. Keep the rooms this client
   // has joined so they can be re-authorized and rejoined after reconnect.
   private joinedRooms: Map<string, RoomJoinPayload> = new Map();
+  private joinedSessions: Set<string> = new Set();
 
   /**
    * Initialize or retrieve an authenticated socket connection.
@@ -100,15 +101,30 @@ class SocketService {
     socket.on('connect', () => {
       console.log('[Socket] Connected with ID:', socket.id);
 
-      // A reconnect creates a new server-side socket with no room memberships.
-      // Rejoin through the normal server handler so membership is revalidated.
+      // A reconnect creates a new server-side socket with no room/session
+      // memberships. Rejoin through normal handlers so authorization is rechecked.
       for (const [key, payload] of this.joinedRooms.entries()) {
-        socket.emit('room:join', payload, (response: any) => {
-          if (!response?.success) {
-            console.warn('[Socket] Room rejoin failed:', key, response?.error);
-            this.joinedRooms.delete(key);
+        socket.timeout(ACK_TIMEOUT_MS).emit('room:join', payload, (error: Error | null, response: any) => {
+          if (error || !response?.success) {
+            console.warn('[Socket] Room rejoin failed:', key, response?.error || error?.message);
           }
         });
+      }
+
+      for (const sessionId of this.joinedSessions) {
+        socket.timeout(ACK_TIMEOUT_MS).emit(
+          'game:session:join',
+          { sessionId },
+          (error: Error | null, response: any) => {
+            if (error || !response?.success) {
+              console.warn(
+                '[Socket] Game session rejoin failed:',
+                sessionId,
+                response?.error || error?.message
+              );
+            }
+          }
+        );
       }
     });
 
@@ -140,6 +156,7 @@ class SocketService {
    */
   disconnect(): void {
     this.joinedRooms.clear();
+    this.joinedSessions.clear();
     if (this.socket) {
       this.socket.disconnect();
       this.socket = null;
@@ -181,7 +198,14 @@ class SocketService {
   emit(event: string, payload?: any, callback?: (response: any) => void): void {
     const isRoomJoin = event === 'room:join';
     const isRoomLeave = event === 'room:leave';
+    const isSessionJoin = event === 'game:session:join';
+    const isSessionLeave = event === 'game:session:leave';
     const roomPayload = payload as RoomJoinPayload | undefined;
+    const sessionId = typeof payload?.sessionId === 'string' ? payload.sessionId : null;
+
+    if (isSessionLeave && sessionId) {
+      this.joinedSessions.delete(sessionId);
+    }
 
     if (isRoomLeave) {
       const key = this.roomKey(roomPayload);
@@ -195,7 +219,7 @@ class SocketService {
         return;
       }
 
-      const shouldAck = typeof callback === 'function' || isRoomJoin;
+      const shouldAck = typeof callback === 'function' || isRoomJoin || isSessionJoin;
       if (!shouldAck) {
         socket.emit(event, payload);
         return;
@@ -215,6 +239,10 @@ class SocketService {
             if (key && response?.success) {
               this.joinedRooms.set(key, roomPayload || {});
             }
+          }
+
+          if (isSessionJoin && sessionId && response?.success) {
+            this.joinedSessions.add(sessionId);
           }
 
           callback?.(response ?? { success: false, error: 'No acknowledgement received' });
