@@ -114,6 +114,7 @@ async function scheduleServerSnatchDrop(
         }
         result.events?.forEach((event) => {
           io.to(`session:${sessionId}`).emit('game:event', {
+            sessionId,
             type: event.type,
             payload: event.payload,
           });
@@ -187,7 +188,7 @@ export function registerGameHandlers(
       // Emit initial projections
       socket.emit('game:state', { publicState });
       if (privateState) {
-        socket.emit('game:state:private', { privateState });
+        socket.emit('game:state:private', { sessionId, privateState });
       }
 
       callback?.({
@@ -247,7 +248,12 @@ export function registerGameHandlers(
           if (pState) {
             const userSockets = presenceManager.getUserSockets(p.userId);
             userSockets.forEach((sId) => {
-              io.to(sId).emit('game:state:private', { privateState: pState });
+              const targetSocket = io.sockets.sockets.get(sId);
+              if (!targetSocket?.rooms.has(`session:${payload.sessionId}`)) return;
+              io.to(sId).emit('game:state:private', {
+                sessionId: payload.sessionId,
+                privateState: pState,
+              });
             });
           }
         });
@@ -259,10 +265,17 @@ export function registerGameHandlers(
           if (evt.targetUserId) {
             const targetSockets = presenceManager.getUserSockets(evt.targetUserId);
             targetSockets.forEach((sId) => {
-              io.to(sId).emit('game:event', { type: evt.type, payload: evt.payload });
+              const targetSocket = io.sockets.sockets.get(sId);
+              if (!targetSocket?.rooms.has(`session:${payload.sessionId}`)) return;
+              io.to(sId).emit('game:event', {
+                sessionId: payload.sessionId,
+                type: evt.type,
+                payload: evt.payload,
+              });
             });
           } else {
             io.to(`session:${payload.sessionId}`).emit('game:event', {
+              sessionId: payload.sessionId,
               type: evt.type,
               payload: evt.payload,
             });
