@@ -31,6 +31,7 @@ interface GameArenaContentProps {
   roomCode?: string;
   gameKey: number;
   onRematchLocal: () => void;
+  onReplaceSession: (sessionId: string) => void;
   onReturnToLobby: () => void;
 }
 
@@ -39,6 +40,7 @@ const GameArenaContent: React.FC<GameArenaContentProps> = ({
   roomCode,
   gameKey,
   onRematchLocal,
+  onReplaceSession,
   onReturnToLobby,
 }) => {
   const session = useGameSession();
@@ -52,9 +54,18 @@ const GameArenaContent: React.FC<GameArenaContentProps> = ({
     winnerName?: string;
     playerScores: PlayerScoreSummary[];
   } | null>(null);
+  const [rematchError, setRematchError] = useState<string | null>(null);
 
   // Authoritative pause synchronization
   const isPaused = session ? session.isPaused : localPaused;
+
+  // Both participants switch to the new authoritative session when the host
+  // successfully creates a rematch on the previous session channel.
+  useEffect(() => {
+    if (session?.replacementSessionId) {
+      onReplaceSession(session.replacementSessionId);
+    }
+  }, [session?.replacementSessionId, onReplaceSession]);
 
   // Authoritative completion listener
   useEffect(() => {
@@ -144,14 +155,19 @@ const GameArenaContent: React.FC<GameArenaContentProps> = ({
     setShowResults(true);
   };
 
-  const handleRematch = () => {
-    setShowResults(false);
-    setMatchResults(null);
+  const handleRematch = async () => {
+    setRematchError(null);
     if (session) {
-      session.requestRematch();
+      const result = await session.requestRematch();
+      if (!result.success) {
+        setRematchError(result.error || 'Unable to start rematch.');
+        return;
+      }
     } else {
       onRematchLocal();
     }
+    setShowResults(false);
+    setMatchResults(null);
   };
 
   const handleTogglePause = () => {
@@ -220,6 +236,12 @@ const GameArenaContent: React.FC<GameArenaContentProps> = ({
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">
         {renderGameComponent()}
       </main>
+
+      {rematchError && (
+        <div role="alert" className="fixed bottom-4 left-1/2 z-50 w-[min(92vw,420px)] -translate-x-1/2 rounded-xl border border-rose-200 bg-white px-4 py-3 text-sm text-rose-700 shadow-lg">
+          {rematchError}
+        </div>
+      )}
 
       <GameInstructionsModal
         isOpen={showInstructions}
@@ -421,12 +443,17 @@ export const GameArenaPage: React.FC = () => {
 
   if (activeSessionId) {
     return (
-      <GameSessionProvider sessionId={activeSessionId} initialGameId={game.id}>
+      <GameSessionProvider key={activeSessionId} sessionId={activeSessionId} initialGameId={game.id}>
         <GameArenaContent
           game={game}
           roomCode={roomCode}
           gameKey={gameKey}
           onRematchLocal={() => setGameKey((k) => k + 1)}
+          onReplaceSession={(nextSessionId) => {
+            setActiveSessionId(nextSessionId);
+            setSearchParams({ room: roomCode || '', session: nextSessionId });
+            setGameKey((key) => key + 1);
+          }}
           onReturnToLobby={handleReturnToLobby}
         />
       </GameSessionProvider>
