@@ -154,9 +154,7 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
         });
 
         if (result.room) {
-          if (result.room) {
-        io.to(roomChannel).emit('room:state', result.room);
-      }
+          io.to(roomChannel).emit('room:state', result.room);
         }
 
         const onlineUserIds = presenceManager.getRoomOnlineUsers(roomId);
@@ -382,11 +380,11 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
         const s = io.sockets.sockets.get(sId);
         if (s) {
           s.leave(roomChannel);
-          s.emit('room:player:kicked', { targetUserId });
+          s.emit('room:player:kicked', { targetUserId, roomId });
         }
       }
 
-      io.to(roomChannel).emit('room:player:kicked', { targetUserId });
+      io.to(roomChannel).emit('room:player:kicked', { targetUserId, roomId });
       if (result.room) {
         io.to(roomChannel).emit('room:state', result.room);
       }
@@ -514,9 +512,9 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
 
               if (updatedRoom) {
                 io.to(roomChannel).emit('room:host:changed', {
-                hostId: candidate.userId,
-                hostName: updatedRoom.hostName,
-              });
+                  hostId: candidate.userId,
+                  hostName: updatedRoom.hostName,
+                });
                 io.to(roomChannel).emit('room:state', updatedRoom);
               }
             }
