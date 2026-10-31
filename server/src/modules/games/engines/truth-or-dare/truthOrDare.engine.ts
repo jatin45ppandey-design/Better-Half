@@ -77,8 +77,17 @@ export class TruthOrDareEngine
     }
 
     if (action.type === 'CHOOSE_TYPE') {
+      if (context.state.currentPrompt) {
+        return { valid: false, error: 'Complete or skip the current prompt before choosing another.' };
+      }
       if (action.promptType !== 'truth' && action.promptType !== 'dare') {
         return { valid: false, error: 'Prompt type must be truth or dare.' };
+      }
+      if (action.category !== undefined && !['Romantic', 'Funny', 'Personal', 'Challenging'].includes(action.category)) {
+        return { valid: false, error: 'Invalid Truth or Dare category.' };
+      }
+      if (action.intensity !== undefined && !['Soft', 'Spicy', 'Wild'].includes(action.intensity)) {
+        return { valid: false, error: 'Invalid Truth or Dare intensity.' };
       }
       return { valid: true };
     }
@@ -117,12 +126,18 @@ export class TruthOrDareEngine
     if (action.type === 'CHOOSE_TYPE') {
       const cat = action.category || state.category;
       const int = action.intensity || state.intensity;
-      const baseItems = (state as any).questionsPool || TRUTH_OR_DARE_ITEMS;
+      const customItems = (state as any).questionsPool as typeof TRUTH_OR_DARE_ITEMS | undefined;
+      const baseItems = customItems?.length ? customItems : TRUTH_OR_DARE_ITEMS;
       const pool = baseItems.filter(
         (item: any) => item.type === action.promptType && (item.category === cat || item.intensity === int)
       );
-      const fallback = baseItems.filter((item: any) => item.type === action.promptType);
-      const candidates = pool.length > 0 ? pool : fallback;
+      const customFallback = baseItems.filter((item: any) => item.type === action.promptType);
+      const builtInFallback = TRUTH_OR_DARE_ITEMS.filter((item) => item.type === action.promptType);
+      const candidates = pool.length > 0
+        ? pool
+        : customFallback.length > 0
+        ? customFallback
+        : builtInFallback;
       const chosen = candidates[Math.floor(Math.random() * candidates.length)];
 
       state.selectedType = action.promptType;
