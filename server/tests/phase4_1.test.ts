@@ -412,7 +412,7 @@ describe('PlaySpace Phase 4.1 — Production Correctness & Reliability Remediati
           sessionId,
           actionId: 'act-race-1',
           expectedVersion: 2,
-          action: { type: 'SHOOT', vx: 10, vy: 10 },
+          action: { type: 'SHOOT', angle: 55, power: 70 },
         },
         userHost.id
       );
