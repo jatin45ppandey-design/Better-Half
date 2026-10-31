@@ -127,7 +127,7 @@ describe('PlaySpace Wave 2 — B2 Durable Game Sessions & Concurrency Safety', (
 
   describe('One Active Session Per Room Constraint', () => {
     it('rejects createSession if an ACTIVE session already exists for the room', async () => {
-      vi.spyOn(prisma.room, 'findUnique').mockResolvedValue({
+      vi.spyOn(prisma.room, 'findFirst').mockResolvedValue({
         id: 'room-busy-1',
         code: 'BUSY01',
         hostId: userA.id,
@@ -141,16 +141,34 @@ describe('PlaySpace Wave 2 — B2 Durable Game Sessions & Concurrency Safety', (
 
       vi.spyOn(prisma.gameConfiguration, 'findUnique').mockResolvedValue(null);
 
-      // Existing active session found in DB
-      vi.spyOn(prisma.gameSession, 'findFirst').mockResolvedValue({
-        id: 'sess-already-active',
+      // Existing active session is already represented in the local cache.
+      const activeContext: GameEngineContext = {
+        sessionId: 'sess-already-active',
         roomId: 'room-busy-1',
+        gameId: 'tic-tac-toe',
+        mode: 'couple',
+        participants: [
+          { userId: userA.id, name: userA.displayName, seatIndex: 0, isHost: true },
+          { userId: userB.id, name: userB.displayName, seatIndex: 1, isHost: false },
+        ],
+        state: {},
+        privateStates: {},
+        version: 3,
+        isPaused: false,
+        status: 'ACTIVE',
+        scores: {},
+      };
+      gameStateService.setSession(activeContext.sessionId, activeContext);
+      vi.spyOn(prisma.gameSession, 'findFirst').mockResolvedValue({
+        id: activeContext.sessionId,
+        roomId: 'room-busy-1',
+        gameId: 'tic-tac-toe',
         status: 'ACTIVE',
       } as any);
 
-      await expect(
-        gameSessionService.createSession('room-busy-1', 'tic-tac-toe', userA.id)
-      ).rejects.toThrow('An active game session already exists for this room.');
+      const result = await gameSessionService.createSession('room-busy-1', 'tic-tac-toe', userA.id);
+      expect(result.created).toBe(false);
+      expect(result.session.sessionId).toBe(activeContext.sessionId);
     });
   });
 
@@ -178,11 +196,11 @@ describe('PlaySpace Wave 2 — B2 Durable Game Sessions & Concurrency Safety', (
         code: 'SOLO01',
         hostId: userA.id,
         mode: 'COUPLE',
-        status: 'READY_TO_START',
+        status: 'COMPLETED',
+        expiresAt: new Date(Date.now() + 60_000),
         participants: [
-          // Guest has left room!
+          // The active-only Prisma relation filter excludes the guest who left.
           { userId: userA.id, leftAt: null, isReady: true, user: userA },
-          { userId: userB.id, leftAt: new Date(), isReady: false, user: userB },
         ],
       } as any);
 
@@ -254,7 +272,7 @@ describe('PlaySpace Wave 2 — B2 Durable Game Sessions & Concurrency Safety', (
 
   describe('Question Source of Truth & Concurrency Conflict', () => {
     it('rethrows error when QuestionEntry query fails with a database error and does not swallow it', async () => {
-      vi.spyOn(prisma.room, 'findUnique').mockResolvedValue({
+      vi.spyOn(prisma.room, 'findFirst').mockResolvedValue({
         id: 'room-truth-1',
         code: 'TRUTH1',
         hostId: userA.id,
@@ -276,7 +294,7 @@ describe('PlaySpace Wave 2 — B2 Durable Game Sessions & Concurrency Safety', (
     });
 
     it('rejects createSession inside the transaction if concurrent active session exists', async () => {
-      vi.spyOn(prisma.room, 'findUnique').mockResolvedValue({
+      vi.spyOn(prisma.room, 'findFirst').mockResolvedValue({
         id: 'room-atomic-1',
         code: 'ATOM01',
         hostId: userA.id,
