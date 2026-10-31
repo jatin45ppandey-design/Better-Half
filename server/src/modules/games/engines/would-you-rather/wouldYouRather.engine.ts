@@ -1,3 +1,4 @@
+import { createRng } from '../../../../utils/random.js';
 import {
   WOULD_YOU_RATHER_ITEMS,
 } from '../../../../data/questions/wouldYouRatherQuestions.js';
@@ -53,9 +54,12 @@ export class WouldYouRatherEngine
           }))
         : WOULD_YOU_RATHER_ITEMS;
 
+    const rng = createRng(params.rngSeed || 'wyr-seed');
+    const startIdx = pool.length > 0 ? rng.nextInt(0, pool.length - 1) : 0;
+
     const state: WouldYouRatherPublicState & { questionsPool?: any[] } = {
-      questionIndex: 0,
-      currentQuestion: pool[0],
+      questionIndex: startIdx,
+      currentQuestion: pool[startIdx],
       phase: 'ANSWERING',
       submittedUserIds: [],
       revealedChoices: null,
@@ -81,6 +85,9 @@ export class WouldYouRatherEngine
       if (context.state.phase !== 'ANSWERING') {
         return { valid: false, error: 'Current dilemma is already revealed.' };
       }
+      if (context.participants && !context.participants.some((p) => p.userId === actorUserId)) {
+        return { valid: false, error: 'Only active room participants can submit choices.' };
+      }
       if (action.choice !== 'A' && action.choice !== 'B') {
         return { valid: false, error: 'Choice must be A or B.' };
       }
@@ -93,6 +100,9 @@ export class WouldYouRatherEngine
     if (action.type === 'NEXT_QUESTION') {
       if (context.state.phase !== 'REVEAL') {
         return { valid: false, error: 'Cannot advance until answers are revealed.' };
+      }
+      if (context.state.totalAnswered >= 8) {
+        return { valid: false, error: 'Match is already completed.' };
       }
       return { valid: true };
     }

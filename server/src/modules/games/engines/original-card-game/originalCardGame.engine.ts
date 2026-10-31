@@ -1,3 +1,4 @@
+import { createRng, SeededRandom } from '../../../../utils/random.js';
 import type {
   IGameEngine,
   GameEngineContext,
@@ -17,7 +18,7 @@ export class OriginalCardGameEngine
 {
   readonly gameId = 'uno-style';
 
-  private generateDeck(): GameCard[] {
+  private generateDeck(rng?: SeededRandom): GameCard[] {
     const deck: GameCard[] = [];
     const colors: ('purple' | 'lavender' | 'amber' | 'emerald')[] = [
       'purple',
@@ -25,30 +26,31 @@ export class OriginalCardGameEngine
       'amber',
       'emerald',
     ];
+    const r = rng || createRng('uno-default-seed');
 
     colors.forEach((col) => {
       for (let n = 0; n <= 9; n++) {
         deck.push({
-          id: `${col}-${n}-${Math.random().toString(36).substring(2, 7)}`,
+          id: `${col}-${n}-${r.nextInt(10000, 99999).toString(36)}`,
           color: col,
           value: `${n}` as CardValue,
           label: `${n}`,
         });
       }
       deck.push({
-        id: `${col}-skip-${Math.random().toString(36).substring(2, 7)}`,
+        id: `${col}-skip-${r.nextInt(10000, 99999).toString(36)}`,
         color: col,
         value: 'skip',
         label: 'SKIP',
       });
       deck.push({
-        id: `${col}-rev-${Math.random().toString(36).substring(2, 7)}`,
+        id: `${col}-rev-${r.nextInt(10000, 99999).toString(36)}`,
         color: col,
         value: 'reverse',
         label: 'REV',
       });
       deck.push({
-        id: `${col}-d2-${Math.random().toString(36).substring(2, 7)}`,
+        id: `${col}-d2-${r.nextInt(10000, 99999).toString(36)}`,
         color: col,
         value: 'draw2',
         label: '+2',
@@ -57,22 +59,22 @@ export class OriginalCardGameEngine
 
     for (let w = 0; w < 4; w++) {
       deck.push({
-        id: `wild-${w}-${Math.random().toString(36).substring(2, 7)}`,
+        id: `wild-${w}-${r.nextInt(10000, 99999).toString(36)}`,
         color: 'wild',
         value: 'wild',
         label: 'WILD',
       });
       deck.push({
-        id: `wild-d4-${w}-${Math.random().toString(36).substring(2, 7)}`,
+        id: `wild-d4-${w}-${r.nextInt(10000, 99999).toString(36)}`,
         color: 'wild',
         value: 'draw4',
         label: '+4 WILD',
       });
     }
 
-    // Fisher-Yates shuffle
+    // Deterministic Fisher-Yates shuffle
     for (let i = deck.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
+      const j = r.nextInt(0, i);
       [deck[i], deck[j]] = [deck[j], deck[i]];
     }
     return deck;
@@ -95,7 +97,8 @@ export class OriginalCardGameEngine
     currentTurnUserId: string;
     scores: Record<string, number>;
   } {
-    const deck = this.generateDeck();
+    const rng = createRng(params.rngSeed || 'uno-seed');
+    const deck = this.generateDeck(rng);
     const privateStates: Record<string, UnoPrivateState> = {};
     const cardCounts: Record<string, number> = {};
     const scores: Record<string, number> = {};
@@ -236,9 +239,10 @@ export class OriginalCardGameEngine
 
     if (action.type === 'DRAW_CARD') {
       if (piles.drawPile.length === 0) {
-        // Reshuffle discard pile except top card
+        // Reshuffle discard pile deterministically except top card
         const top = piles.discardPile.pop()!;
-        piles.drawPile = piles.discardPile.sort(() => Math.random() - 0.5);
+        const reshuffleRng = createRng((context.rngSeed || 'uno') + '_draw_' + (context.version || 0));
+        piles.drawPile = reshuffleRng.shuffle([...piles.discardPile]);
         piles.discardPile = [top];
       }
 

@@ -1,3 +1,4 @@
+import { createRng } from '../../../../utils/random.js';
 import {
   BETWEEN_US_QUESTIONS,
   BETWEEN_US_CATEGORIES,
@@ -62,11 +63,14 @@ export class BetweenUsEngine
       scores[p.userId] = 0;
     });
 
+    const rng = createRng(params.rngSeed || 'between-us-seed');
+    const startIdx = pool.length > 0 ? rng.nextInt(0, pool.length - 1) : 0;
+
     const state: BetweenUsPublicState & { questionsPool?: any[] } = {
       category,
       intensity,
-      questionIndex: 0,
-      currentQuestion: pool[0],
+      questionIndex: startIdx,
+      currentQuestion: pool[startIdx],
       phase: 'ANSWERING',
       submittedUserIds: [],
       adultConsentUserIds: [],
@@ -91,6 +95,9 @@ export class BetweenUsEngine
       if (context.state.phase !== 'ANSWERING') {
         return { valid: false, error: 'Current prompt is already revealed.' };
       }
+      if (context.participants && !context.participants.some((p) => p.userId === actorUserId)) {
+        return { valid: false, error: 'Only active room participants can submit answers.' };
+      }
       if (context.state.submittedUserIds.includes(actorUserId)) {
         return { valid: false, error: 'You have already submitted an answer.' };
       }
@@ -104,10 +111,31 @@ export class BetweenUsEngine
     }
 
     if (action.type === 'GRANT_ADULT_CONSENT') {
+      if (context.participants && !context.participants.some((p) => p.userId === actorUserId)) {
+        return { valid: false, error: 'Only active room participants can grant adult consent.' };
+      }
+      if (context.state.submittedUserIds && context.state.submittedUserIds.length > 0) {
+        return { valid: false, error: 'Cannot change adult consent settings while answers are being submitted.' };
+      }
+      if ((action as any).selfAttestation === true && !(action as any).isAgeVerified) {
+        return { valid: false, error: 'Self-attestation cannot be used as verified age.' };
+      }
       return { valid: true };
     }
 
     if (action.type === 'SET_SETTINGS') {
+      if (context.participants && !context.participants.some((p) => p.userId === actorUserId)) {
+        return { valid: false, error: 'Only active room participants can change game settings.' };
+      }
+      if (context.state.phase !== 'ANSWERING' && context.state.phase !== 'REVEAL') {
+        return { valid: false, error: 'Cannot change settings in current phase.' };
+      }
+      if (context.state.submittedUserIds && context.state.submittedUserIds.length > 0) {
+        return { valid: false, error: 'Cannot change prompt or settings while answers are being submitted.' };
+      }
+      if (action.intensity === 5 && (action as any).selfAttestation === true && !(action as any).isAgeVerified) {
+        return { valid: false, error: 'Self-attestation cannot be used as verified age for 18+ content.' };
+      }
       if (
         action.category !== undefined &&
         action.category !== 'All' &&

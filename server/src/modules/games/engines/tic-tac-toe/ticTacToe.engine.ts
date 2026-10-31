@@ -100,6 +100,11 @@ export class TicTacToeEngine
       if (context.state.matchWinnerUserId) {
         return { valid: false, error: 'Match series has already concluded.' };
       }
+      const isDuelist = actorUserId === context.state.duelistXUserId || actorUserId === context.state.duelistOUserId;
+      const isHost = context.participants.find((p) => p.userId === actorUserId)?.isHost;
+      if (!isDuelist && !isHost) {
+        return { valid: false, error: 'Only active duelists or the room host can start the next round.' };
+      }
       return { valid: true };
     }
 
@@ -109,6 +114,11 @@ export class TicTacToeEngine
       }
       if (![1, 3, 5].includes(action.format)) {
         return { valid: false, error: 'Format must be Best of 1, 3, or 5.' };
+      }
+      const isHost = context.participants.find((p) => p.userId === actorUserId)?.isHost;
+      const isDuelistX = actorUserId === context.state.duelistXUserId;
+      if (!isHost && !isDuelistX) {
+        return { valid: false, error: 'Only the host or player 1 can configure the series format.' };
       }
       return { valid: true };
     }

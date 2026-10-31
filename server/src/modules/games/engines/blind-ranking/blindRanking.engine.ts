@@ -1,3 +1,4 @@
+import { createRng } from '../../../../utils/random.js';
 import {
   BLIND_RANKING_CATEGORIES,
 } from '../../../../data/questions/blindRankingItems.js';
@@ -33,7 +34,9 @@ export class BlindRankingEngine
     privateStates: Record<string, BlindRankingPrivateState>;
     scores: Record<string, number>;
   } {
-    const category = BLIND_RANKING_CATEGORIES[0];
+    const rng = createRng(params.rngSeed || 'blind-ranking-seed');
+    const categoryIndex = rng.nextInt(0, BLIND_RANKING_CATEGORIES.length - 1);
+    const category = BLIND_RANKING_CATEGORIES[categoryIndex];
     const privateStates: Record<string, BlindRankingPrivateState> = {};
     const scores: Record<string, number> = {};
 
@@ -43,7 +46,7 @@ export class BlindRankingEngine
     });
 
     const state: BlindRankingPublicState = {
-      categoryIndex: 0,
+      categoryIndex,
       category,
       currentItemIndex: 0,
       currentItem: category.items[0],
@@ -71,6 +74,9 @@ export class BlindRankingEngine
       if (context.state.phase !== 'RANKING') {
         return { valid: false, error: 'Round is in reveal phase.' };
       }
+      if (context.participants && !context.participants.some((p) => p.userId === actorUserId)) {
+        return { valid: false, error: 'Only active room participants can place items.' };
+      }
       if (context.state.submittedCurrentItemUserIds.includes(actorUserId)) {
         return { valid: false, error: 'You have already placed this item.' };
       }
@@ -88,6 +94,9 @@ export class BlindRankingEngine
     if (action.type === 'NEXT_CATEGORY') {
       if (context.state.phase !== 'REVEAL') {
         return { valid: false, error: 'Cannot advance until current round is completed and revealed.' };
+      }
+      if (context.state.round >= BLIND_RANKING_CATEGORIES.length) {
+        return { valid: false, error: 'Match is already completed.' };
       }
       return { valid: true };
     }
