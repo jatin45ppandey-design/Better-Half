@@ -1,0 +1,78 @@
+name: Backend CI & Release Gate
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  backend-test-and-build:
+    name: Backend Test, Validate & Build
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: playspace_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://test_user:test_password@localhost:5432/playspace_test?schema=public
+      DIRECT_URL: postgresql://test_user:test_password@localhost:5432/playspace_test?schema=public
+      SUPABASE_URL: https://ci-isolated-test.supabase.co
+      SUPABASE_PUBLISHABLE_KEY: sb_publishable_ci_mock_key_test_12345
+      FRONTEND_URL: http://localhost:5173
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: 'npm'
+          cache-dependency-path: |
+            package-lock.json
+            server/package-lock.json
+
+      - name: Install Root & Server Dependencies
+        run: |
+          npm ci
+          cd server && npm ci
+
+      - name: Validate Environment Schema Pre-flight
+        run: npm run env:validate --prefix server
+
+      - name: Validate Prisma Schema
+        run: npm run prisma:validate --prefix server
+
+      - name: Generate Prisma Client
+        run: npm run prisma:generate --prefix server
+
+      - name: Deploy Schema to Isolated Test Database
+        run: |
+          cd server && npx prisma db push --skip-generate
+
+      - name: Backend Static Typecheck
+        run: npm run typecheck --prefix server
+
+      - name: Backend Lint Check
+        run: npx oxlint server
+
+      - name: Run Backend Automated Test Suite
+        run: npm test --prefix server
+
+      - name: Backend Production Build
+        run: npm run build --prefix server

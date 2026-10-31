@@ -1,0 +1,40 @@
+name: Frontend CI & Release Gate
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  frontend-test-and-build:
+    name: Frontend Lint, Typecheck & Build
+    runs-on: ubuntu-latest
+
+    env:
+      VITE_API_BASE_URL: http://localhost:4000
+      VITE_SUPABASE_URL: https://ci-isolated-test.supabase.co
+      VITE_SUPABASE_ANON_KEY: mock-ci-anon-key-1234567890
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Frontend Static Typecheck
+        run: npx tsc -b
+
+      - name: Frontend Lint Check
+        run: npm run lint
+
+      - name: Frontend Production Build
+        run: npm run build
