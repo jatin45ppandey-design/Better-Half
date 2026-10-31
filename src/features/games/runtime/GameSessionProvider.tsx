@@ -29,6 +29,7 @@ export const GameSessionProvider: React.FC<GameSessionProviderProps> = ({
   const [privateState, setPrivateState] = useState<any>(null);
   const [version, setVersion] = useState<number>(1);
   const [isPaused, setIsPaused] = useState<boolean>(false);
+  const [sessionStatus, setSessionStatus] = useState<'ACTIVE' | 'PAUSED' | 'COMPLETED' | 'ABANDONED'>('ACTIVE');
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [winnerUserId, setWinnerUserId] = useState<string | null>(null);
@@ -59,6 +60,7 @@ export const GameSessionProvider: React.FC<GameSessionProviderProps> = ({
             setPublicState(sessionData.publicState.state || sessionData.publicState);
             setVersion(sessionData.publicState.version || 1);
             setIsPaused(!!sessionData.publicState.isPaused);
+            setSessionStatus(sessionData.publicState.status || sessionData.status || 'ACTIVE');
             setScores(sessionData.publicState.scores || {});
             setWinnerUserId(sessionData.publicState.winnerUserId || null);
             if (sessionData.publicState.participants) {
@@ -93,6 +95,7 @@ export const GameSessionProvider: React.FC<GameSessionProviderProps> = ({
               setPublicState(res.publicState.state || res.publicState);
               setVersion(res.publicState.version || 1);
               setIsPaused(!!res.publicState.isPaused);
+              setSessionStatus(res.publicState.status || res.status || 'ACTIVE');
               setScores(res.publicState.scores || {});
               setWinnerUserId(res.publicState.winnerUserId || null);
               if (res.publicState.participants) {
@@ -116,6 +119,7 @@ export const GameSessionProvider: React.FC<GameSessionProviderProps> = ({
       setPublicState(pub.state || pub);
       setVersion(pub.version || 1);
       setIsPaused(!!pub.isPaused);
+      setSessionStatus(pub.status || 'ACTIVE');
       setScores(pub.scores || {});
       setWinnerUserId(pub.winnerUserId || null);
       if (pub.participants) {
@@ -136,16 +140,19 @@ export const GameSessionProvider: React.FC<GameSessionProviderProps> = ({
     const unsubPaused = socketService.on('game:paused', () => {
       if (!mounted) return;
       setIsPaused(true);
+      setSessionStatus('PAUSED');
     });
 
     const unsubResumed = socketService.on('game:resumed', () => {
       if (!mounted) return;
       setIsPaused(false);
+      setSessionStatus('ACTIVE');
     });
 
     const unsubCompleted = socketService.on('game:completed', (data: any) => {
       if (!mounted) return;
-      setWinnerUserId(data.winnerUserId);
+      setWinnerUserId(data.winnerUserId ?? null);
+      setSessionStatus('COMPLETED');
       if (data.scores) setScores(data.scores);
     });
 
@@ -194,6 +201,7 @@ export const GameSessionProvider: React.FC<GameSessionProviderProps> = ({
         privateState,
         version,
         isPaused,
+        sessionStatus,
         isLoading,
         error,
         winnerUserId,
