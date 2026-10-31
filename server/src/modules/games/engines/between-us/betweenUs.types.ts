@@ -31,5 +31,8 @@ export type BetweenUsAction =
     }
   | {
       type: 'NEXT_QUESTION';
+    }
+  | {
+      type: 'FINISH_SESSION';
     };
 
