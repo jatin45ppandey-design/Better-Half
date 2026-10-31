@@ -23,7 +23,8 @@ export interface GameSessionContextType {
   participants: GameParticipantInfo[];
   sendAction: (action: any) => Promise<{ success: boolean; error?: string }>;
   togglePause: () => Promise<void>;
-  requestRematch: () => Promise<void>;
+  requestRematch: () => Promise<{ success: boolean; error?: string }>;
+  replacementSessionId: string | null;
   lastEvent: { type: string; payload: any } | null;
 }
 
