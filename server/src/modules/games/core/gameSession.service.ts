@@ -485,60 +485,49 @@ export class GameSessionService {
   ): Promise<GameEngineContext> {
     const prevSession = await this.getOrRestoreSession(sessionId);
     if (!prevSession) throw new NotFoundError('Session not found');
-
+    if (prevSession.status !== 'COMPLETED') {
+      throw new AppError('A rematch is available only after the current match is completed.', 409);
+    }
     if (!prevSession.roomId) {
       throw new AppError('Cannot rematch a session without an associated room.', 400);
     }
 
-    // 1. Fetch and revalidate room
     const room = await prisma.room.findUnique({
       where: { id: prevSession.roomId },
       include: {
         participants: {
+          where: { leftAt: null },
           include: { user: true },
+          orderBy: { joinedAt: 'asc' },
         },
       },
     });
-
-    if (!room) {
-      throw new NotFoundError('Room not found for rematch');
-    }
-
-    if (room.status === 'CLOSED' || room.status === 'EXPIRED') {
+    if (!room) throw new NotFoundError('Room not found for rematch');
+    if (room.status === 'CLOSED' || room.status === 'EXPIRED' || room.expiresAt <= new Date()) {
       throw new AppError('Cannot initiate rematch in a closed or expired room.', 400);
     }
-
-    // 2. Validate host authority
     if (room.hostId !== hostUserId) {
       throw new ForbiddenError('Only the host can initiate a rematch');
     }
 
-    const gameId = prevSession.gameId;
+    const gameId = normalizeGameId(prevSession.gameId);
     const mode = room.mode.toLowerCase() as 'couple' | 'friend';
-
-    // 3. Validate game eligibility for room mode
-    if (mode === 'friend' && ['truth-or-dare', 'would-you-rather', 'between-us'].includes(gameId)) {
-      throw new AppError(`Game "${gameId}" is restricted to Couple Mode only.`, 400);
-    }
-
     if (!isGameEligibleForMode(gameId, mode)) {
       throw new AppError(`Game "${gameId}" is not allowed in ${room.mode} Mode.`, 400);
     }
 
-    // 4. Validate active participants and player count
-    const activeParticipants = room.participants.filter((p) => !p.leftAt);
+    const activeParticipants = room.participants;
     if (!validatePlayerCount(gameId, activeParticipants.length)) {
       throw new AppError(`Invalid player count (${activeParticipants.length}) for game "${gameId}".`, 400);
     }
-
     if (mode === 'couple' && activeParticipants.length !== 2) {
       throw new AppError('Couple Mode requires exactly 2 players to start rematch.', 400);
     }
+    if (activeParticipants.some((participant) => !participant.isReady)) {
+      throw new AppError('All active players must be ready before starting a rematch.', 400);
+    }
 
-    // 5. Enforce GameConfiguration server-side check
-    const gameConfig = await prisma.gameConfiguration.findUnique({
-      where: { gameId },
-    });
+    const gameConfig = await prisma.gameConfiguration.findUnique({ where: { gameId } });
     if (gameConfig) {
       if (!gameConfig.isEnabled) {
         throw new AppError(`Game "${gameId}" is currently disabled by administrators.`, 400);
@@ -551,40 +540,23 @@ export class GameSessionService {
       }
     }
 
-    // 6. Ensure no other active session is currently running for this room
-    const existingActive = await prisma.gameSession.findFirst({
-      where: {
-        roomId: room.id,
-        status: { in: ['ACTIVE', 'PAUSED'] },
-        id: { not: sessionId },
-      },
-    });
-    if (existingActive) {
-      throw new AppError('Another active game session already exists for this room.', 409);
-    }
-
-    // 7. Query active questions from QuestionEntry if applicable
-    let customQuestions: any[] | undefined = undefined;
+    let customQuestions: any[] | undefined;
     if (['truth-or-dare', 'would-you-rather', 'between-us'].includes(gameId)) {
       const dbQuestions = await prisma.questionEntry.findMany({
         where: { gameId, isActive: true },
       });
-      if (dbQuestions && dbQuestions.length > 0) {
-        customQuestions = dbQuestions;
-      }
+      if (dbQuestions.length > 0) customQuestions = dbQuestions;
     }
 
     const engine = gameEngineFactory.getEngine(gameId);
     const newRngSeed = crypto.randomBytes(16).toString('hex');
     const newSessionId = crypto.randomUUID();
-
-    const participants: GameParticipant[] = activeParticipants.map((p, idx) => ({
-      userId: p.userId,
-      name: p.user.displayName || p.user.username,
-      seatIndex: idx,
-      isHost: p.userId === hostUserId,
+    const participants: GameParticipant[] = activeParticipants.map((participant, index) => ({
+      userId: participant.userId,
+      name: participant.user.displayName || participant.user.username,
+      seatIndex: index,
+      isHost: participant.userId === hostUserId,
     }));
-
     const initialState = engine.createInitialState({
       sessionId: newSessionId,
       mode,
@@ -592,7 +564,6 @@ export class GameSessionService {
       rngSeed: newRngSeed,
       customQuestions,
     });
-
     const newContext: GameEngineContext = {
       sessionId: newSessionId,
       gameId,
@@ -610,13 +581,94 @@ export class GameSessionService {
       startedAt: new Date(),
     };
 
-    // 8. Persist rematch session to DB transactionally before registering in memory
-    await prisma.$transaction([
-      prisma.room.update({
-        where: { id: room.id },
+    // Serialize rematch creation on the room row. The previous completed
+    // session, current host, participants, readiness, config and active-session
+    // uniqueness are all revalidated under the same lock as the new insert.
+    await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw<Array<{ id: string }>>`SELECT "id" FROM "Room" WHERE "id" = ${room.id} FOR UPDATE`;
+
+      const [currentRoom, previousRecord, existingActive, lockedConfig] = await Promise.all([
+        tx.room.findUnique({
+          where: { id: room.id },
+          include: {
+            participants: {
+              where: { leftAt: null },
+              include: { user: true },
+              orderBy: { joinedAt: 'asc' },
+            },
+          },
+        }),
+        tx.gameSession.findUnique({
+          where: { id: sessionId },
+          select: { status: true, roomId: true, gameId: true },
+        }),
+        tx.gameSession.findFirst({
+          where: { roomId: room.id, status: { in: ['ACTIVE', 'PAUSED'] } },
+          select: { id: true },
+        }),
+        tx.gameConfiguration.findUnique({ where: { gameId } }),
+      ]);
+
+      if (!currentRoom) throw new NotFoundError('Room not found for rematch');
+      if (
+        currentRoom.status === 'CLOSED' ||
+        currentRoom.status === 'EXPIRED' ||
+        currentRoom.expiresAt <= new Date()
+      ) {
+        throw new AppError('Cannot initiate rematch in a closed or expired room.', 400);
+      }
+      if (currentRoom.status !== 'COMPLETED' && currentRoom.status !== 'IN_PROGRESS') {
+        throw new AppError('The room is not in a completed-match state.', 409);
+      }
+      if (currentRoom.hostId !== hostUserId) {
+        throw new ForbiddenError('Only the current room host can initiate a rematch.');
+      }
+      if (!previousRecord || previousRecord.roomId !== room.id || previousRecord.status !== 'COMPLETED') {
+        throw new AppError('The previous match is no longer eligible for a rematch.', 409);
+      }
+      if (normalizeGameId(previousRecord.gameId) !== gameId) {
+        throw new AppError('The previous game changed. Please return to the lobby.', 409);
+      }
+      if (existingActive) {
+        throw new AppError('Another active game session already exists for this room.', 409);
+      }
+      if (lockedConfig) {
+        if (!lockedConfig.isEnabled) {
+          throw new AppError(`Game "${gameId}" is currently disabled by administrators.`, 400);
+        }
+        if (mode === 'friend' && !lockedConfig.friendEnabled) {
+          throw new AppError(`Game "${gameId}" is disabled in Friend Mode.`, 400);
+        }
+        if (mode === 'couple' && !lockedConfig.coupleEnabled) {
+          throw new AppError(`Game "${gameId}" is disabled in Couple Mode.`, 400);
+        }
+      }
+
+      const currentIds = currentRoom.participants.map((participant) => participant.userId);
+      const preparedIds = participants.map((participant) => participant.userId);
+      if (
+        currentIds.length !== preparedIds.length ||
+        currentIds.some((id, index) => id !== preparedIds[index])
+      ) {
+        throw new AppError('Room participants changed while rematch was starting. Please retry.', 409);
+      }
+      if (currentRoom.participants.some((participant) => !participant.isReady)) {
+        throw new AppError('All active players must be ready before starting a rematch.', 400);
+      }
+
+      const roomUpdate = await tx.room.updateMany({
+        where: {
+          id: room.id,
+          hostId: hostUserId,
+          status: { in: ['COMPLETED', 'IN_PROGRESS'] },
+        },
         data: { status: 'IN_PROGRESS', selectedGameId: gameId },
-      }),
-      prisma.gameSession.create({
+      });
+      if (roomUpdate.count !== 1) {
+        throw new AppError('The room changed while rematch was starting. Please retry.', 409);
+      }
+
+      await tx.gameSession.create({
         data: {
           id: newSessionId,
           roomId: room.id,
@@ -628,23 +680,24 @@ export class GameSessionService {
           publicState: newContext.state as any,
           rngSeed: newRngSeed,
           participants: {
-            create: participants.map((p) => ({
-              userId: p.userId,
-              seatIndex: p.seatIndex,
+            create: participants.map((participant) => ({
+              userId: participant.userId,
+              seatIndex: participant.seatIndex,
               status: 'ACTIVE',
-              score: newContext.scores[p.userId] || 0,
-              // Rematch private state remains isolated per participant.
+              score: newContext.scores[participant.userId] || 0,
               privateState:
-                newContext.privateStates[p.userId] == null
+                newContext.privateStates[participant.userId] == null
                   ? Prisma.DbNull
-                  : (newContext.privateStates[p.userId] as any),
+                  : (newContext.privateStates[participant.userId] as any),
             })),
           },
         },
-      }),
-    ]);
+      });
+    }, {
+      maxWait: 5000,
+      timeout: 15000,
+    });
 
-    // 9. Register in memory ONLY after successful DB persistence
     gameStateService.setSession(newSessionId, newContext);
     return newContext;
   }
