@@ -116,6 +116,24 @@ export class GameActionService {
       };
     }
 
+    // Snatch The Fries uses room host authority to schedule drops. Refresh
+    // that role from PostgreSQL so a lobby host transfer / room host change
+    // cannot leave a stale in-memory isHost flag authorizing the old host.
+    if (session.gameId === 'snatch-the-fries' && session.roomId) {
+      const roomHost = await prisma.room.findUnique({
+        where: { id: session.roomId },
+        select: { hostId: true },
+      });
+      if (!roomHost) {
+        return { success: false, error: 'The game room no longer exists.', version: session.version };
+      }
+      session.participants = session.participants.map((gameParticipant) => ({
+        ...gameParticipant,
+        isHost: gameParticipant.userId === roomHost.hostId,
+      }));
+      gameStateService.setSession(sessionId, session);
+    }
+
     // 3. Check membership
     const participant = session.participants.find((p) => p.userId === actorUserId);
     if (!participant) {
