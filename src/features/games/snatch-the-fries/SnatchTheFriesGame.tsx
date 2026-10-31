@@ -15,8 +15,7 @@ interface SnatchTheFriesProps {
   sessionState?: any;
   onSendAction?: (action: any) => Promise<{ success: boolean; error?: string }>;
   currentUserId?: string;
-  isHost?: boolean;
-}
+ }
 
 interface FryItem {
   type: 'REGULAR' | 'GOLDEN' | 'SPICY' | 'SOGGY_TRAP';
@@ -43,8 +42,7 @@ export const SnatchTheFriesGame: React.FC<SnatchTheFriesProps> = ({
   sessionState,
   onSendAction,
   currentUserId,
-  isHost = false,
-}) => {
+ }) => {
   const [localDropRound, setDropRound] = useState(1);
   const [localScores, setScores] = useState<{ [id: string]: number }>({});
   const [localReactionTimes, setReactionTimes] = useState<{ [id: string]: number[] }>({});
@@ -106,25 +104,6 @@ export const SnatchTheFriesGame: React.FC<SnatchTheFriesProps> = ({
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
     };
   }, [dropRound, dropState, isPaused, currentFry, scheduleNextDrop, isMultiplayer]);
-
-  // The room host schedules drops; all scoring, drop timing and reaction times
-  // are committed by the server engine.
-  useEffect(() => {
-    if (!isMultiplayer || !isHost || isPaused || sessionState.matchOver) return;
-    if (sessionState.dropState === 'DROPPED') return;
-
-    const delay = sessionState.dropState === 'SNATCHED'
-      ? 1400
-      : sessionState.dropState === 'FALSE_START'
-      ? 1500
-      : Math.floor(Math.random() * 2600) + 1400;
-
-    const timer = setTimeout(() => {
-      void onSendAction?.({ type: 'SPAWN_DROP' });
-    }, delay);
-
-    return () => clearTimeout(timer);
-  }, [isMultiplayer, isHost, isPaused, sessionState?.dropState, sessionState?.dropRound, sessionState?.matchOver, onSendAction]);
 
   // Snatch Action
   const handlePlayerSnatch = useCallback((playerIndex: number) => {
