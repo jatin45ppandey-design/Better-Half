@@ -281,7 +281,7 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
 
       const roomChannel = `room:${roomId}`;
       io.to(roomChannel).emit('room:game:selected', {
-        selectedGameId: updatedRoom.selectedGameId,
+        selectedGameId: normalizeGameId(gameId),
       });
 
       io.to(roomChannel).emit('room:state', updatedRoom);
