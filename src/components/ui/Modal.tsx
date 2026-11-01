@@ -11,6 +11,9 @@ export interface ModalProps {
   showCloseButton?: boolean;
 }
 
+const FOCUSABLE_SELECTOR =
+  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
 export const Modal: React.FC<ModalProps> = ({
   isOpen,
   onClose,
@@ -21,23 +24,76 @@ export const Modal: React.FC<ModalProps> = ({
   showCloseButton = true,
 }) => {
   const modalRef = useRef<HTMLDivElement>(null);
+  const previousActiveElementRef = useRef<HTMLElement | null>(null);
 
-  // Close on ESC
+  // Focus trap and keyboard handling
   useEffect(() => {
+    if (!isOpen) return;
+
+    // Store previous active element to restore later
+    previousActiveElementRef.current = document.activeElement as HTMLElement | null;
+
+    // Prevent background scrolling
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    // Focus the first interactive element or modal container
+    const timer = setTimeout(() => {
+      if (modalRef.current) {
+        const focusable = modalRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR);
+        if (focusable.length > 0) {
+          focusable[0].focus();
+        } else {
+          modalRef.current.focus();
+        }
+      }
+    }, 50);
+
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        e.stopPropagation();
         onClose();
+        return;
+      }
+
+      if (e.key === 'Tab' && modalRef.current) {
+        const focusables = Array.from(
+          modalRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)
+        ).filter(
+          (el) => el.getClientRects().length > 0 && window.getComputedStyle(el).visibility !== 'hidden'
+        );
+
+        if (focusables.length === 0) {
+          e.preventDefault();
+          return;
+        }
+
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+
+        if (e.shiftKey) {
+          if (document.activeElement === first || !modalRef.current.contains(document.activeElement)) {
+            e.preventDefault();
+            last.focus();
+          }
+        } else {
+          if (document.activeElement === last || !modalRef.current.contains(document.activeElement)) {
+            e.preventDefault();
+            first.focus();
+          }
+        }
       }
     };
 
-    if (isOpen) {
-      document.addEventListener('keydown', handleKeyDown);
-      document.body.style.overflow = 'hidden';
-    }
+    document.addEventListener('keydown', handleKeyDown);
 
     return () => {
+      clearTimeout(timer);
       document.removeEventListener('keydown', handleKeyDown);
-      document.body.style.overflow = 'unset';
+      document.body.style.overflow = originalOverflow;
+      if (previousActiveElementRef.current && typeof previousActiveElementRef.current.focus === 'function') {
+        previousActiveElementRef.current.focus();
+      }
     };
   }, [isOpen, onClose]);
 
@@ -68,10 +124,11 @@ export const Modal: React.FC<ModalProps> = ({
       {/* Modal Dialog Content */}
       <div
         ref={modalRef}
-        className={`relative w-full ${maxWidthClasses} bg-white rounded-3xl shadow-xl shadow-[#211A2D]/10 border border-[#EAE3F3] p-6 sm:p-7 z-10 transition-all transform duration-200 animate-in fade-in zoom-in-95`}
+        tabIndex={-1}
+        className={`relative w-full ${maxWidthClasses} max-h-[calc(100dvh-2rem)] flex flex-col bg-white rounded-3xl shadow-xl shadow-[#211A2D]/10 border border-[#EAE3F3] p-6 sm:p-7 z-10 transition-all transform duration-200 animate-in fade-in zoom-in-95 outline-none`}
       >
         {/* Header */}
-        <div className="flex items-start justify-between gap-4 mb-4">
+        <div className="flex items-start justify-between gap-4 mb-4 shrink-0">
           <div>
             {title && (
               <h3
@@ -95,15 +152,15 @@ export const Modal: React.FC<ModalProps> = ({
               type="button"
               onClick={onClose}
               aria-label="Close modal"
-              className="text-[#756D82] hover:text-[#593B91] hover:bg-[#F1EAFF] p-2 rounded-xl transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#9670E8]"
+              className="text-[#756D82] hover:text-[#593B91] hover:bg-[#F1EAFF] p-2 rounded-xl transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#9670E8] shrink-0"
             >
               <X className="w-5 h-5" />
             </button>
           )}
         </div>
 
-        {/* Body */}
-        <div>{children}</div>
+        {/* Body (scrollable if content overflows viewport) */}
+        <div className="overflow-y-auto min-h-0 pr-0.5">{children}</div>
       </div>
     </div>
   );

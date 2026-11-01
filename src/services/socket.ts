@@ -220,14 +220,13 @@ class SocketService {
     const roomPayload = payload as RoomJoinPayload | undefined;
     const sessionId = typeof payload?.sessionId === 'string' ? payload.sessionId : null;
 
-    if (isSessionLeave && sessionId) {
-      this.joinedSessions.delete(sessionId);
+    if (isSessionLeave) {
+      if (sessionId) this.joinedSessions.delete(sessionId);
+      else this.joinedSessions.clear();
     }
 
     if (isRoomLeave) {
-      const key = this.roomKey(roomPayload);
-      if (key) this.joinedRooms.delete(key);
-      if (roomPayload?.code) this.joinedRooms.delete(roomPayload.code.trim().toUpperCase());
+      this.joinedRooms.clear();
     }
 
     const send = (socket: Socket | null) => {
@@ -254,11 +253,13 @@ class SocketService {
           if (isRoomJoin) {
             const key = this.roomKey(roomPayload);
             if (key && response?.success) {
+              this.joinedRooms.clear();
               this.joinedRooms.set(key, roomPayload || {});
             }
           }
 
           if (isSessionJoin && sessionId && response?.success) {
+            this.joinedSessions.clear();
             this.joinedSessions.add(sessionId);
           }
 

@@ -37,6 +37,10 @@ export const GameSessionProvider: React.FC<GameSessionProviderProps> = ({
   const [participants, setParticipants] = useState<GameParticipantInfo[]>([]);
   const [lastEvent, setLastEvent] = useState<{ type: string; payload: any } | null>(null);
   const [replacementSessionId, setReplacementSessionId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [isActionPending, setIsActionPending] = useState<boolean>(false);
+
+  const clearActionError = useCallback(() => setActionError(null), []);
 
   const versionRef = useRef(version);
   useEffect(() => {
@@ -197,18 +201,30 @@ export const GameSessionProvider: React.FC<GameSessionProviderProps> = ({
 
   const sendAction = useCallback(
     (action: any): Promise<{ success: boolean; error?: string }> => {
+      setIsActionPending(true);
       // Serialize actions from this tab so rapid consecutive input uses the
       // version acknowledged by the previous action instead of a stale render.
       const request = actionQueueRef.current.then(async () => {
-        const res = await sendGameAction(sessionId, versionRef.current, action);
-        if (!res.success) {
-          return { success: false, error: res.error || 'Action rejected.' };
+        try {
+          const res = await sendGameAction(sessionId, versionRef.current, action);
+          if (!res.success) {
+            const err = res.error || 'Action rejected.';
+            setActionError(err);
+            return { success: false, error: err };
+          }
+          setActionError(null);
+          if (typeof res.version === 'number' && Number.isFinite(res.version)) {
+            versionRef.current = Math.max(versionRef.current, res.version);
+            setVersion(versionRef.current);
+          }
+          return { success: true };
+        } catch (actErr: any) {
+          const err = actErr?.message || 'Gameplay action failed.';
+          setActionError(err);
+          return { success: false, error: err };
+        } finally {
+          setIsActionPending(false);
         }
-        if (typeof res.version === 'number' && Number.isFinite(res.version)) {
-          versionRef.current = Math.max(versionRef.current, res.version);
-          setVersion(versionRef.current);
-        }
-        return { success: true };
       });
 
       actionQueueRef.current = request.then(() => undefined, () => undefined);
@@ -258,6 +274,9 @@ export const GameSessionProvider: React.FC<GameSessionProviderProps> = ({
         scores,
         participants,
         sendAction,
+        actionError,
+        clearActionError,
+        isActionPending,
         togglePause,
         requestRematch,
         replacementSessionId,

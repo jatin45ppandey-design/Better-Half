@@ -15,7 +15,12 @@ export const LoginPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const rawFrom = (location.state as any)?.from?.pathname;
+  const fromState = (location.state as any)?.from;
+  const rawFrom = fromState?.pathname
+    ? `${fromState.pathname}${fromState.search || ''}`
+    : typeof fromState === 'string'
+    ? fromState
+    : null;
   const destination = rawFrom && rawFrom !== '/login' && rawFrom !== '/signup' ? rawFrom : '/dashboard';
 
   useEffect(() => {
@@ -30,6 +35,12 @@ export const LoginPage: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    if (destination && destination !== '/dashboard') {
+      sessionStorage.setItem('auth_redirect_destination', destination);
+    }
+  }, [destination]);
+
+  useEffect(() => {
     if (isAuthenticated) {
       navigate(destination, { replace: true });
     }
@@ -40,6 +51,9 @@ export const LoginPage: React.FC = () => {
     setErrorMessage(null);
 
     try {
+      if (destination && destination !== '/dashboard') {
+        sessionStorage.setItem('auth_redirect_destination', destination);
+      }
       await loginWithGoogle();
       addToast('Redirecting to Google secure authentication...', { type: 'info' });
     } catch (err: any) {
@@ -126,6 +140,7 @@ export const LoginPage: React.FC = () => {
             New to Better-Half?{' '}
             <Link
               to="/signup"
+              state={{ from: destination }}
               className="font-bold text-[#7C3AED] hover:text-[#6D28D9] transition-colors"
             >
               Get Started

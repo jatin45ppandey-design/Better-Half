@@ -33,8 +33,8 @@ export const TruthOrDareGame: React.FC<TruthOrDareGameProps> = ({
   onSendAction,
   currentUserId,
 }) => {
-  const p1 = players[0] || { id: 'p1', name: 'Alex', avatarInitials: 'AR', avatarColor: 'bg-[#9670E8]' };
-  const p2 = players[1] || { id: 'p2', name: 'Sam', avatarInitials: 'SP', avatarColor: 'bg-[#D94C65]' };
+  const p1 = players[0] || { id: 'p1', name: 'Player 1', avatarInitials: 'P1', avatarColor: 'bg-[#9670E8]' };
+  const p2 = players[1] || { id: 'p2', name: 'Player 2', avatarInitials: 'P2', avatarColor: 'bg-[#D94C65]' };
 
   const [activePlayerIndex, setActivePlayerIndex] = useState<0 | 1>(0);
   const [localSelectedType, setSelectedType] = useState<'truth' | 'dare' | null>(null);

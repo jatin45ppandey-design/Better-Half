@@ -12,12 +12,10 @@ import { Button } from '../components/ui/Button';
 import { LoadingIndicator } from '../components/ui/LoadingIndicator';
 import { Footer } from '../components/navigation/Footer';
 import { useAuth } from '../context/AuthContext';
-import { useToast } from '../context/ToastContext';
 import type { GameItem } from '../types/game';
 
 export const DashboardPage: React.FC = () => {
   const { user, isAuthenticated, isLoading } = useAuth();
-  const { addToast } = useToast();
 
   const [activeMode, setActiveMode] = useState<'couple' | 'friend'>(
     () => user?.preferredMode || 'couple'
@@ -28,10 +26,6 @@ export const DashboardPage: React.FC = () => {
 
   const handleSelectMode = (mode: 'couple' | 'friend') => {
     setActiveMode(mode);
-    addToast(`${mode === 'couple' ? 'Couple Mode (2P)' : 'Friend Mode (2–4P)'} active.`, {
-      type: 'info',
-      message: 'Filtered recommendations updated.',
-    });
   };
 
   const handleLaunchGame = (game: GameItem) => {

@@ -30,16 +30,39 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
 
   const url = `${API_V1}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
 
-  const response = await fetch(url, {
-    ...options,
-    headers,
-  });
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), 15_000);
+
+  if (options.signal) {
+    options.signal.addEventListener('abort', () => controller.abort());
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      ...options,
+      headers,
+      signal: controller.signal,
+    });
+  } catch (fetchErr: any) {
+    clearTimeout(timeoutId);
+    if (fetchErr.name === 'AbortError') {
+      throw new ApiError('Request timed out. Please check your connection.', 408);
+    }
+    throw new ApiError(fetchErr?.message || 'Network request failed.', 0);
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   const contentType = response.headers.get('content-type');
   const isJson = contentType && contentType.includes('application/json');
   const data = isJson ? await response.json() : await response.text();
 
   if (!response.ok) {
+    if (response.status === 401) {
+      // Clear expired credentials to prevent stale auth loops
+      void supabase.auth.signOut().catch(() => {});
+    }
     const message = (isJson && (data.message || data.error)) || `HTTP ${response.status}: ${response.statusText}`;
     throw new ApiError(message, response.status, isJson ? data.details : undefined);
   }

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback, useMemo, useEffect } from 'react';
+import React, { createContext, useContext, useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import type { RoomSession, RoomParticipant, ChatMessage } from '../types/game';
 import { isGameEligibleForMode } from '../data/games/registry';
 import { useAuth } from './AuthContext';
@@ -19,7 +19,7 @@ interface RoomContextType {
   roomError: string | null;
   createRoom: (params: CreateRoomParams) => Promise<RoomSession>;
   joinRoom: (code: string) => Promise<{ success: boolean; error?: string; room?: RoomSession }>;
-  leaveRoom: () => Promise<void>;
+  leaveRoom: () => Promise<{ success: boolean; error?: string }>;
   getRoomByCode: (code: string) => RoomSession | undefined;
   fetchRoom: (code: string) => Promise<RoomSession | null>;
   toggleReady: (participantId?: string) => Promise<void>;
@@ -98,22 +98,35 @@ export const RoomProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isRoomLoading, setIsRoomLoading] = useState(false);
   const [roomError, setRoomError] = useState<string | null>(null);
 
+  const currentRoomCodeRef = useRef<string | null>(null);
+  const currentRoomIdRef = useRef<string | null>(null);
+
   const currentRoom = useMemo(
     () => (currentRoomCode ? allRooms[currentRoomCode] || null : null),
     [currentRoomCode, allRooms]
   );
+
+  useEffect(() => {
+    currentRoomCodeRef.current = currentRoomCode;
+    currentRoomIdRef.current = currentRoomCode ? allRooms[currentRoomCode]?.id || null : null;
+  }, [currentRoomCode, allRooms]);
 
   const getRoomByCode = useCallback(
     (code: string) => allRooms[code.toUpperCase()],
     [allRooms]
   );
 
-  // Initialize Socket.IO connection when user is authenticated
+  // Initialize Socket.IO connection when user is authenticated, and cleanly tear down on logout
   useEffect(() => {
     if (user) {
       socketService.connect();
     } else {
       socketService.disconnect();
+      setCurrentRoomCode(null);
+      setAllRooms({});
+      setRoomError(null);
+      currentRoomCodeRef.current = null;
+      currentRoomIdRef.current = null;
     }
   }, [user]);
 
@@ -123,23 +136,38 @@ export const RoomProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // Listen to real-time state updates
     const unsubState = socketService.on('room:state', (snapshot: any) => {
+      if (!snapshot) return;
       const formatted = formatSnapshotToRoomSession(snapshot);
+      const activeCode = currentRoomCodeRef.current;
+      const activeId = currentRoomIdRef.current;
+      if (!activeCode) return;
+      if (formatted.code !== activeCode && formatted.id !== activeId) return;
+
       setAllRooms((prev) => ({ ...prev, [formatted.code]: formatted }));
     });
 
-    const unsubJoined = socketService.on('room:player:joined', ({ participant }: any) => {
+    const unsubJoined = socketService.on('room:player:joined', ({ participant, roomId }: any) => {
+      const activeCode = currentRoomCodeRef.current;
+      const activeId = currentRoomIdRef.current;
+      if (!activeCode || !participant) return;
+      if (roomId && activeId && roomId !== activeId) return;
+
+      const pId = participant.userId || participant.id;
+
       setAllRooms((prev) => {
-        const room = prev[currentRoomCode];
+        const room = prev[activeCode];
         if (!room) return prev;
-        const exists = room.participants.some(
-          (p) => p.id === (participant.userId || participant.id)
-        );
+        const exists = room.participants.some((p) => p.id === pId);
         if (exists) return prev;
 
         const newP: RoomParticipant = {
-          id: participant.userId || participant.id,
+          id: pId,
           name: participant.displayName || participant.name || 'Player',
-          avatarInitials: participant.avatarInitials || 'PL',
+          avatarInitials:
+            participant.avatarInitials ||
+            (participant.displayName || participant.name
+              ? (participant.displayName || participant.name).substring(0, 2).toUpperCase()
+              : 'PL'),
           avatarColor: participant.avatarColor || 'bg-[#9670E8]',
           isHost: participant.role === 'HOST' || participant.isHost,
           isReady: participant.isReady ?? false,
@@ -148,7 +176,7 @@ export const RoomProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         return {
           ...prev,
-          [currentRoomCode]: {
+          [activeCode]: {
             ...room,
             participants: [...room.participants, newP],
           },
@@ -158,23 +186,37 @@ export const RoomProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const unsubLeft = socketService.on(
       'room:player:left',
-      ({ userId, newHostId, roomClosed }: any) => {
-        if (roomClosed) {
-          addToast('The host closed this room.', { type: 'info' });
-          setCurrentRoomCode(null);
-          return;
-        }
+      ({ userId, newHostId, roomClosed, roomId }: any) => {
+        const activeCode = currentRoomCodeRef.current;
+        const activeId = currentRoomIdRef.current;
+        if (!activeCode) return;
+        if (roomId && activeId && roomId !== activeId) return;
 
         setAllRooms((prev) => {
-          const room = prev[currentRoomCode];
+          const room = prev[activeCode];
           if (!room) return prev;
+
+          // If roomId wasn't provided, ensure userId belonged to this room
+          const isParticipant = room.participants.some((p) => p.id === userId);
+          if (!roomId && userId && !isParticipant) return prev;
+
+          if (roomClosed) {
+            // Only close if the leaving user was actually the host of this room
+            if (userId && userId !== room.hostId && !isParticipant) return prev;
+            addToast('The host closed this room.', { type: 'info' });
+            setCurrentRoomCode(null);
+            currentRoomCodeRef.current = null;
+            currentRoomIdRef.current = null;
+            return {};
+          }
+
           const updatedParticipants = room.participants
             .filter((p) => p.id !== userId)
             .map((p) => (newHostId && p.id === newHostId ? { ...p, isHost: true } : p));
 
           return {
             ...prev,
-            [currentRoomCode]: {
+            [activeCode]: {
               ...room,
               hostId: newHostId || room.hostId,
               participants: updatedParticipants,
@@ -186,17 +228,24 @@ export const RoomProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const unsubReady = socketService.on(
       'room:player:ready',
-      ({ userId, isReady, roomStatus }: any) => {
+      ({ userId, isReady, roomStatus, roomId }: any) => {
+        const activeCode = currentRoomCodeRef.current;
+        const activeId = currentRoomIdRef.current;
+        if (!activeCode) return;
+        if (roomId && activeId && roomId !== activeId) return;
+
         setAllRooms((prev) => {
-          const room = prev[currentRoomCode];
+          const room = prev[activeCode];
           if (!room) return prev;
+          if (!roomId && userId && !room.participants.some((p) => p.id === userId)) return prev;
+
           const updatedParticipants = room.participants.map((p) =>
             p.id === userId ? { ...p, isReady } : p
           );
 
           return {
             ...prev,
-            [currentRoomCode]: {
+            [activeCode]: {
               ...room,
               status: roomStatus === 'IN_PROGRESS' ? 'playing' : room.status,
               participants: updatedParticipants,
@@ -206,13 +255,18 @@ export const RoomProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     );
 
-    const unsubVoted = socketService.on('room:game:voted', ({ votes }: any) => {
+    const unsubVoted = socketService.on('room:game:voted', ({ votes, roomId }: any) => {
+      const activeCode = currentRoomCodeRef.current;
+      const activeId = currentRoomIdRef.current;
+      if (!activeCode || !votes) return;
+      if (roomId && activeId && roomId !== activeId) return;
+
       setAllRooms((prev) => {
-        const room = prev[currentRoomCode];
+        const room = prev[activeCode];
         if (!room) return prev;
         return {
           ...prev,
-          [currentRoomCode]: {
+          [activeCode]: {
             ...room,
             gameVotes: votes,
           },
@@ -220,13 +274,18 @@ export const RoomProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
     });
 
-    const unsubSelected = socketService.on('room:game:selected', ({ selectedGameId }: any) => {
+    const unsubSelected = socketService.on('room:game:selected', ({ selectedGameId, roomId }: any) => {
+      const activeCode = currentRoomCodeRef.current;
+      const activeId = currentRoomIdRef.current;
+      if (!activeCode || !selectedGameId) return;
+      if (roomId && activeId && roomId !== activeId) return;
+
       setAllRooms((prev) => {
-        const room = prev[currentRoomCode];
+        const room = prev[activeCode];
         if (!room) return prev;
         return {
           ...prev,
-          [currentRoomCode]: {
+          [activeCode]: {
             ...room,
             selectedGameId,
           },
@@ -235,8 +294,13 @@ export const RoomProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
 
     const unsubChat = socketService.on('room:chat:new', (msg: any) => {
+      const activeCode = currentRoomCodeRef.current;
+      const activeId = currentRoomIdRef.current;
+      if (!activeCode || !msg) return;
+      if (msg.roomId && activeId && msg.roomId !== activeId) return;
+
       setAllRooms((prev) => {
-        const room = prev[currentRoomCode];
+        const room = prev[activeCode];
         if (!room) return prev;
         const newMsg: ChatMessage = {
           id: msg.id || `msg-${Date.now()}`,
@@ -256,7 +320,7 @@ export const RoomProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         return {
           ...prev,
-          [currentRoomCode]: {
+          [activeCode]: {
             ...room,
             chatMessages: [...room.chatMessages, newMsg],
           },
@@ -264,15 +328,30 @@ export const RoomProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
     });
 
-    const unsubReaction = socketService.on('room:reaction:new', ({ senderId, reaction }: any) => {
-      const room = allRooms[currentRoomCode];
-      const sender = room?.participants.find((p) => p.id === senderId);
-      addToast(`${sender?.name || 'Player'} reacted: ${reaction}`, { type: 'info' });
+    const unsubReaction = socketService.on('room:reaction:new', ({ senderId, reaction, roomId }: any) => {
+      const activeCode = currentRoomCodeRef.current;
+      const activeId = currentRoomIdRef.current;
+      if (!activeCode) return;
+      if (roomId && activeId && roomId !== activeId) return;
+
+      setAllRooms((prev) => {
+        const room = prev[activeCode];
+        const sender = room?.participants.find((p) => p.id === senderId);
+        if (sender) {
+          addToast(`${sender.name} reacted: ${reaction}`, { type: 'info' });
+        }
+        return prev;
+      });
     });
 
-    const unsubPresence = socketService.on('room:presence:update', ({ onlineUserIds }: any) => {
+    const unsubPresence = socketService.on('room:presence:update', ({ onlineUserIds, roomId }: any) => {
+      const activeCode = currentRoomCodeRef.current;
+      const activeId = currentRoomIdRef.current;
+      if (!activeCode) return;
+      if (roomId && activeId && roomId !== activeId) return;
+
       setAllRooms((prev) => {
-        const room = prev[currentRoomCode];
+        const room = prev[activeCode];
         if (!room) return prev;
         const onlineSet = new Set(onlineUserIds || []);
         const updated = room.participants.map((p) => ({
@@ -281,7 +360,7 @@ export const RoomProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }));
         return {
           ...prev,
-          [currentRoomCode]: {
+          [activeCode]: {
             ...room,
             participants: updated,
           },
@@ -289,15 +368,20 @@ export const RoomProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
     });
 
-    const unsubLaunch = socketService.on('room:start:launch', ({ gameId }: any) => {
-      addToast(`Launching ${gameId.toUpperCase()}!`, { type: 'success' });
+    const unsubLaunch = socketService.on('room:start:launch', ({ gameId, roomId }: any) => {
+      const activeCode = currentRoomCodeRef.current;
+      const activeId = currentRoomIdRef.current;
+      if (!activeCode) return;
+      if (roomId && activeId && roomId !== activeId) return;
+
       setAllRooms((prev) => {
-        const room = prev[currentRoomCode];
+        const room = prev[activeCode];
         if (!room) return prev;
         return {
           ...prev,
-          [currentRoomCode]: {
+          [activeCode]: {
             ...room,
+            selectedGameId: gameId || room.selectedGameId,
             status: 'playing',
           },
         };
@@ -308,8 +392,8 @@ export const RoomProvider: React.FC<{ children: React.ReactNode }> = ({ children
       'room:membership:revoked',
       ({ roomId, userId, reason }: any) => {
         if (userId !== user?.id) return;
-        const activeRoom = allRooms[currentRoomCode];
-        if (activeRoom && activeRoom.id !== roomId) return;
+        const activeId = currentRoomIdRef.current;
+        if (roomId && activeId && activeId !== roomId) return;
 
         addToast(
           reason === 'KICKED'
@@ -318,6 +402,8 @@ export const RoomProvider: React.FC<{ children: React.ReactNode }> = ({ children
           { type: 'info' }
         );
         setCurrentRoomCode(null);
+        currentRoomCodeRef.current = null;
+        currentRoomIdRef.current = null;
       }
     );
 
@@ -334,7 +420,7 @@ export const RoomProvider: React.FC<{ children: React.ReactNode }> = ({ children
       unsubLaunch();
       unsubMembershipRevoked();
     };
-  }, [currentRoomCode, allRooms, addToast, user?.id]);
+  }, [currentRoomCode, user?.id, addToast]);
 
   const refreshCurrentRoom = useCallback(async () => {
     if (!currentRoomCode) return;
@@ -374,6 +460,12 @@ export const RoomProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setRoomError(null);
 
       try {
+        if (currentRoomCodeRef.current) {
+          const oldRoom = allRooms[currentRoomCodeRef.current];
+          const oldRoomId = oldRoom?.id || currentRoomCodeRef.current;
+          socketService.emit('room:leave', { roomId: oldRoomId });
+        }
+
         const roomName =
           name.trim() || (mode === 'couple' ? 'Cozy Couple Lounge' : 'Game Night Squad');
         const backendSnapshot = await api.rooms.create({
@@ -383,7 +475,7 @@ export const RoomProvider: React.FC<{ children: React.ReactNode }> = ({ children
         });
 
         const formatted = formatSnapshotToRoomSession(backendSnapshot);
-        setAllRooms((prev) => ({ ...prev, [formatted.code]: formatted }));
+        setAllRooms({ [formatted.code]: formatted });
         setCurrentRoomCode(formatted.code);
 
         // Join socket channel
@@ -401,7 +493,7 @@ export const RoomProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setIsRoomLoading(false);
       }
     },
-    [user]
+    [user, allRooms]
   );
 
   const joinRoom = useCallback(
@@ -428,11 +520,17 @@ export const RoomProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setRoomError(null);
 
       try {
+        if (currentRoomCodeRef.current && currentRoomCodeRef.current !== cleanCode) {
+          const oldRoom = allRooms[currentRoomCodeRef.current];
+          const oldRoomId = oldRoom?.id || currentRoomCodeRef.current;
+          socketService.emit('room:leave', { roomId: oldRoomId });
+        }
+
         const backendSnapshot = await api.rooms.join(cleanCode);
         const snapshotData = backendSnapshot.room || backendSnapshot;
         const formatted = formatSnapshotToRoomSession(snapshotData);
 
-        setAllRooms((prev) => ({ ...prev, [formatted.code]: formatted }));
+        setAllRooms({ [formatted.code]: formatted });
         setCurrentRoomCode(formatted.code);
 
         // Join socket channel
@@ -452,26 +550,82 @@ export const RoomProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setIsRoomLoading(false);
       }
     },
-    [user]
+    [user, allRooms]
   );
 
-  const leaveRoom = useCallback(async () => {
-    if (currentRoomCode) {
-      const code = currentRoomCode;
-      const roomId = currentRoom?.id || code;
-      setCurrentRoomCode(null);
+  const isLeavingRef = useRef(false);
 
-      // Socket is the primary realtime write path. REST is used only if the
-      // socket cannot acknowledge the leave, never concurrently with it.
-      socketService.emit('room:leave', { roomId }, (response) => {
-        if (!response?.success) {
-          api.rooms.leave(code).catch((err) => {
-            console.warn('Could not persist room leave:', err);
-          });
-        }
-      });
+  const leaveRoom = useCallback(async (): Promise<{ success: boolean; error?: string }> => {
+    if (isLeavingRef.current) {
+      return { success: false, error: 'Leave room operation is already in progress.' };
     }
-  }, [currentRoom, currentRoomCode]);
+
+    const code = currentRoomCodeRef.current;
+    if (!code) {
+      setCurrentRoomCode(null);
+      setAllRooms({});
+      return { success: true };
+    }
+
+    isLeavingRef.current = true;
+    setIsRoomLoading(true);
+
+    const room = allRooms[code];
+    const roomId = room?.id || code;
+
+    try {
+      // 1. Primary path: Socket acknowledgement with 3.5s bounded timeout
+      let socketSuccess = false;
+      let socketError: string | undefined;
+
+      try {
+        const res = await Promise.race([
+          new Promise<any>((resolve) => {
+            socketService.emit('room:leave', { roomId }, (response: any) => {
+              resolve(response);
+            });
+          }),
+          new Promise<any>((resolve) =>
+            setTimeout(() => resolve({ success: false, error: 'Socket leave timed out' }), 3500)
+          ),
+        ]);
+        socketSuccess = Boolean(res?.success);
+        socketError = res?.error;
+      } catch (sockErr: any) {
+        socketSuccess = false;
+        socketError = sockErr?.message;
+      }
+
+      // 2. REST fallback if socket didn't succeed
+      if (!socketSuccess) {
+        try {
+          await api.rooms.leave(roomId);
+        } catch (restErr: any) {
+          // If room already left / 404 / 400 (not member), consider it successfully cleared
+          if (restErr?.status !== 404 && restErr?.status !== 400) {
+            const errorMsg = restErr?.message || socketError || 'Failed to leave room. Please try again.';
+            setRoomError(errorMsg);
+            return { success: false, error: errorMsg };
+          }
+        }
+      }
+
+      // 3. Clear active room references on confirmed leave
+      setCurrentRoomCode(null);
+      currentRoomCodeRef.current = null;
+      currentRoomIdRef.current = null;
+      setAllRooms({});
+      setRoomError(null);
+      return { success: true };
+    } catch (err: any) {
+      const errorMsg = err?.message || 'Failed to leave room.';
+      setRoomError(errorMsg);
+      return { success: false, error: errorMsg };
+    } finally {
+      isLeavingRef.current = false;
+      setIsRoomLoading(false);
+    }
+  }, [allRooms]);
 
   const toggleReady = useCallback(
     async (participantId?: string) => {

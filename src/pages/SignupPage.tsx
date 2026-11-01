@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { AlertCircle, ArrowLeft } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { BetterHalfLogo } from '../components/ui/BetterHalfLogo';
@@ -13,18 +13,36 @@ export const SignupPage: React.FC = () => {
   const { loginWithGoogle, isAuthenticated } = useAuth();
   const { addToast } = useToast();
   const navigate = useNavigate();
+  const location = useLocation();
+
+  const fromState = (location.state as any)?.from;
+  const rawFrom = fromState?.pathname
+    ? `${fromState.pathname}${fromState.search || ''}`
+    : typeof fromState === 'string'
+    ? fromState
+    : null;
+  const destination = rawFrom && rawFrom !== '/login' && rawFrom !== '/signup' ? rawFrom : '/dashboard';
+
+  useEffect(() => {
+    if (destination && destination !== '/dashboard') {
+      sessionStorage.setItem('auth_redirect_destination', destination);
+    }
+  }, [destination]);
 
   useEffect(() => {
     if (isAuthenticated) {
-      navigate('/dashboard', { replace: true });
+      navigate(destination, { replace: true });
     }
-  }, [isAuthenticated, navigate]);
+  }, [isAuthenticated, navigate, destination]);
 
   const handleGoogleSignUp = async () => {
     setIsSubmitting(true);
     setErrorMessage(null);
 
     try {
+      if (destination && destination !== '/dashboard') {
+        sessionStorage.setItem('auth_redirect_destination', destination);
+      }
       await loginWithGoogle();
       addToast('Redirecting to Google secure authentication...', { type: 'info' });
     } catch (err: any) {
@@ -111,6 +129,7 @@ export const SignupPage: React.FC = () => {
             Already have an account?{' '}
             <Link
               to="/login"
+              state={{ from: destination }}
               className="font-bold text-[#7C3AED] hover:text-[#6D28D9] transition-colors"
             >
               Sign In

@@ -217,7 +217,7 @@ export const BetweenUsGame: React.FC<BetweenUsProps> = ({
       <PassDeviceScreen
         nextPlayerName={partner2.name}
         roundTitle="Between Us • Confidential Response"
-        instruction="Partner 1 has locked in their private reflection. Pass the screen to Partner 2 to share without previewing."
+        instruction={`${partner1.name} has locked in their private reflection. Pass the screen to ${partner2.name} to share without previewing.`}
         onReady={handlePassComplete}
       />
     );

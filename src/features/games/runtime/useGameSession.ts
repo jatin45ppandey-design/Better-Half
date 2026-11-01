@@ -22,6 +22,9 @@ export interface GameSessionContextType {
   scores: Record<string, number>;
   participants: GameParticipantInfo[];
   sendAction: (action: any) => Promise<{ success: boolean; error?: string }>;
+  actionError: string | null;
+  clearActionError: () => void;
+  isActionPending: boolean;
   togglePause: () => Promise<void>;
   requestRematch: () => Promise<{ success: boolean; error?: string }>;
   replacementSessionId: string | null;

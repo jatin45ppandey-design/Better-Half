@@ -22,7 +22,7 @@ export const DashboardRoomActions: React.FC<DashboardRoomActionsProps> = ({
   const handleJoinSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const clean = roomCodeInput.trim().toUpperCase();
-    if (clean.length !== 6) return;
+    if (clean.length < 4) return;
     soundService.playClick();
     setJoinModalOpen(true);
   };
@@ -67,32 +67,43 @@ export const DashboardRoomActions: React.FC<DashboardRoomActionsProps> = ({
                 setCreateModalOpen(true);
               }}
               leftIcon={<PlusCircle className="w-4 h-4" />}
-              className="rounded-2xl justify-center font-bold shadow-lg shadow-purple-900/40 text-sm py-3 px-5"
+              className="rounded-2xl justify-center font-bold shadow-lg shadow-purple-900/40 text-sm py-3 px-5 cursor-pointer"
             >
-              Create {activeMode === 'couple' ? 'Couple' : 'Friend'} Room
+              Create Room
             </Button>
 
-            {/* Quick 6-char inline code join */}
-            <form onSubmit={handleJoinSubmit} className="flex items-center gap-2">
+            <Button
+              variant="dark-outline"
+              size="md"
+              onClick={() => {
+                soundService.playClick();
+                setJoinModalOpen(true);
+              }}
+              leftIcon={<LogIn className="w-4 h-4" />}
+              className="rounded-2xl justify-center font-bold text-sm py-3 px-5 border-[#4A2E78] hover:bg-[#2F1B4E] cursor-pointer"
+            >
+              Join Room
+            </Button>
+
+            {/* Quick inline code join */}
+            <form onSubmit={handleJoinSubmit} className="hidden xl:flex items-center gap-2">
               <input
                 type="text"
-                placeholder="6-CHAR CODE"
-                aria-label="Room Code"
+                placeholder="CODE"
+                aria-label="Quick room code input"
                 value={roomCodeInput}
-                onChange={(e) => setRoomCodeInput(e.target.value.toUpperCase().slice(0, 6))}
-                className="w-32 sm:w-36 rounded-2xl border border-[#3C2462] bg-[#140B22] px-3.5 py-2.5 text-xs font-mono font-bold tracking-widest text-white placeholder-[#786694] uppercase focus:border-[#9333EA] focus:outline-none text-center"
-                maxLength={6}
-                minLength={6}
+                onChange={(e) => setRoomCodeInput(e.target.value.toUpperCase().slice(0, 8))}
+                className="w-24 rounded-2xl border border-[#3C2462] bg-[#140B22] px-2.5 py-2 text-xs font-mono font-bold tracking-widest text-white placeholder-[#786694] uppercase focus:border-[#9333EA] focus:outline-none text-center"
+                maxLength={8}
               />
               <Button
                 type="submit"
                 variant="dark-outline"
-                size="md"
-                disabled={roomCodeInput.trim().length !== 6}
-                leftIcon={<LogIn className="w-4 h-4" />}
-                className="rounded-2xl font-bold shrink-0 py-3"
+                size="sm"
+                disabled={roomCodeInput.trim().length < 4}
+                className="rounded-2xl font-bold shrink-0 text-xs py-2"
               >
-                Join
+                Go
               </Button>
             </form>
           </div>

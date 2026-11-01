@@ -44,6 +44,7 @@ export const RoomLobbyPage: React.FC = () => {
     currentRoom,
     allRooms,
     joinRoom,
+    leaveRoom,
     toggleReady,
     setRoomGame,
     voteForGame,
@@ -56,7 +57,8 @@ export const RoomLobbyPage: React.FC = () => {
   const [chatInput, setChatInput] = useState('');
   const [validationError, setValidationError] = useState<string | null>(null);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
-  const [isConnecting, setIsConnecting] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(() => !allRooms[roomCode?.toUpperCase() || '']);
+  const [isExiting, setIsExiting] = useState(false);
 
   // If URL has roomCode but currentRoom does not match, attempt to join on server
   useEffect(() => {
@@ -85,7 +87,11 @@ export const RoomLobbyPage: React.FC = () => {
     const unsubSession = socketService.on(
       'game:session:started',
       ({ sessionId, gameId, roomCode: startedRoomCode }: any) => {
-        navigate(`/game/${gameId}?room=${startedRoomCode || roomCode}&session=${sessionId}`);
+        if (!roomCode) return;
+        if (!startedRoomCode || startedRoomCode.toUpperCase() !== roomCode.toUpperCase()) {
+          return;
+        }
+        navigate(`/game/${gameId}?room=${roomCode}&session=${sessionId}`);
       }
     );
     return () => unsubSession();
@@ -101,7 +107,7 @@ export const RoomLobbyPage: React.FC = () => {
             <div className="w-12 h-12 rounded-full border-4 border-[#9670E8] border-t-transparent animate-spin" />
             <h2 className="text-xl font-bold text-[#211A2D]">Connecting to Lobby...</h2>
             <p className="text-xs text-[#756D82]">
-              Connecting to room <strong>#{roomCode}</strong> via real-time multiplayer server.
+              Connecting to room <strong>#{roomCode}</strong>...
             </p>
           </div>
         </main>
@@ -120,10 +126,16 @@ export const RoomLobbyPage: React.FC = () => {
             <div className="w-14 h-14 rounded-2xl bg-[#FDF0F2] text-[#D94C65] flex items-center justify-center">
               <AlertCircle className="w-8 h-8" />
             </div>
-            <h1 className="text-2xl font-bold text-[#211A2D]">Room Not Found</h1>
+            <h1 className="text-2xl font-bold text-[#211A2D]">
+              {validationError ? 'Unable to Join Room' : 'Room Not Found'}
+            </h1>
             <p className="text-sm text-[#756D82] leading-relaxed">
-              We couldn't connect to an active room with code <strong>{roomCode || 'UNKNOWN'}</strong>.
-              The room may have expired, reached maximum capacity, or been closed by the host.
+              {validationError || (
+                <>
+                  We couldn't connect to an active room with code <strong>{roomCode || 'UNKNOWN'}</strong>.
+                  The room may have expired, reached maximum capacity, or been closed by the host.
+                </>
+              )}
             </p>
             <div className="flex flex-col gap-2 w-full pt-2">
               <Button
@@ -180,10 +192,6 @@ export const RoomLobbyPage: React.FC = () => {
   const handleCopyCode = () => {
     navigator.clipboard?.writeText(room.code);
     setCopied(true);
-    addToast('Room Code Copied!', {
-      type: 'info',
-      message: `Share code ${room.code} with your ${isCouple ? 'partner' : 'friends'}!`,
-    });
     setTimeout(() => setCopied(false), 2000);
   };
 
@@ -231,8 +239,6 @@ export const RoomLobbyPage: React.FC = () => {
     const res = await setRoomGame(gameId);
     if (!res.success) {
       addToast(res.error || 'Failed to select game', { type: 'error' });
-    } else {
-      addToast(`Game set to ${getGameById(gameId)?.name}`, { type: 'info' });
     }
   };
 
@@ -683,19 +689,38 @@ export const RoomLobbyPage: React.FC = () => {
               <span>You will return to the dashboard. You can rejoin using room code <strong>{room.code}</strong>.</span>
             </div>
             <div className="flex items-center justify-end gap-2.5 pt-1">
-              <Button variant="outline" size="sm" onClick={() => setShowExitConfirm(false)}>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowExitConfirm(false)}
+                disabled={isExiting}
+              >
                 Stay in Lobby
               </Button>
               <Button
                 variant="danger"
                 size="sm"
-                onClick={() => {
+                isLoading={isExiting}
+                disabled={isExiting}
+                onClick={async () => {
                   soundService.playClick();
-                  setShowExitConfirm(false);
-                  navigate('/dashboard');
+                  setIsExiting(true);
+                  try {
+                    const res = await leaveRoom();
+                    if (res.success) {
+                      setShowExitConfirm(false);
+                      navigate('/dashboard');
+                    } else {
+                      addToast(res.error || 'Failed to leave room. Please try again.', { type: 'error' });
+                    }
+                  } catch (err: any) {
+                    addToast(err?.message || 'Failed to leave room.', { type: 'error' });
+                  } finally {
+                    setIsExiting(false);
+                  }
                 }}
               >
-                Confirm Exit
+                {isExiting ? 'Leaving Room...' : 'Confirm Exit'}
               </Button>
             </div>
           </div>

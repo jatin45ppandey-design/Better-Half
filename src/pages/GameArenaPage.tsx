@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, Suspense, lazy } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useRoom } from '../context/RoomContext';
 import { useAuth } from '../context/AuthContext';
@@ -13,18 +13,27 @@ import { GameSessionProvider } from '../features/games/runtime/GameSessionProvid
 import { useGameSession } from '../features/games/runtime/useGameSession';
 import { api } from '../services/api';
 
-// Game Module Imports
-import { TruthOrDareGame } from '../features/games/truth-or-dare/TruthOrDareGame';
-import { WouldYouRatherGame } from '../features/games/would-you-rather/WouldYouRatherGame';
-import { BlindRankingGame } from '../features/games/blind-ranking/BlindRankingGame';
-import { OriginalCardGame } from '../features/games/original-card-game/OriginalCardGame';
-import { TicTacToeGame } from '../features/games/tic-tac-toe/TicTacToeGame';
-import { PenFightGame } from '../features/games/pen-fight/PenFightGame';
-import { KabzaGame } from '../features/games/kabza/KabzaGame';
-import { BasketballRivalryGame } from '../features/games/basketball-rivalry/BasketballRivalryGame';
-import { SnatchTheFriesGame } from '../features/games/snatch-the-fries/SnatchTheFriesGame';
-import { AlooGolfGame } from '../features/games/aloo-golf/AlooGolfGame';
-import { BetweenUsGame } from '../features/games/between-us/BetweenUsGame';
+// Lazy loaded Game Modules for on-demand bundle splitting
+const TruthOrDareGame = lazy(() => import('../features/games/truth-or-dare/TruthOrDareGame').then((m) => ({ default: m.TruthOrDareGame })));
+const WouldYouRatherGame = lazy(() => import('../features/games/would-you-rather/WouldYouRatherGame').then((m) => ({ default: m.WouldYouRatherGame })));
+const BlindRankingGame = lazy(() => import('../features/games/blind-ranking/BlindRankingGame').then((m) => ({ default: m.BlindRankingGame })));
+const OriginalCardGame = lazy(() => import('../features/games/original-card-game/OriginalCardGame').then((m) => ({ default: m.OriginalCardGame })));
+const TicTacToeGame = lazy(() => import('../features/games/tic-tac-toe/TicTacToeGame').then((m) => ({ default: m.TicTacToeGame })));
+const PenFightGame = lazy(() => import('../features/games/pen-fight/PenFightGame').then((m) => ({ default: m.PenFightGame })));
+const KabzaGame = lazy(() => import('../features/games/kabza/KabzaGame').then((m) => ({ default: m.KabzaGame })));
+const BasketballRivalryGame = lazy(() => import('../features/games/basketball-rivalry/BasketballRivalryGame').then((m) => ({ default: m.BasketballRivalryGame })));
+const SnatchTheFriesGame = lazy(() => import('../features/games/snatch-the-fries/SnatchTheFriesGame').then((m) => ({ default: m.SnatchTheFriesGame })));
+const AlooGolfGame = lazy(() => import('../features/games/aloo-golf/AlooGolfGame').then((m) => ({ default: m.AlooGolfGame })));
+const BetweenUsGame = lazy(() => import('../features/games/between-us/BetweenUsGame').then((m) => ({ default: m.BetweenUsGame })));
+
+const GameModuleLoadingFallback: React.FC = () => (
+  <div className="flex flex-col items-center justify-center p-12 text-center min-h-[360px]">
+    <Loader2 className="w-8 h-8 text-[#9670E8] animate-spin mb-3" />
+    <span className="text-xs font-bold uppercase tracking-wider text-[#756D82]">
+      Loading game arena...
+    </span>
+  </div>
+);
 
 interface GameArenaContentProps {
   game: ReturnType<typeof getGameById>;
@@ -99,8 +108,8 @@ const GameArenaContent: React.FC<GameArenaContentProps> = ({
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6">
         <Loader2 className="w-10 h-10 text-[#9670E8] animate-spin mb-4" />
-        <h2 className="text-lg font-bold text-[#211A2D]">Connecting to Multiplayer Session</h2>
-        <p className="text-xs text-[#756D82] mt-1">Loading the latest server-authoritative game state</p>
+        <h2 className="text-lg font-bold text-[#211A2D]">Connecting to Match...</h2>
+        <p className="text-xs text-[#756D82] mt-1">Loading game state</p>
       </div>
     );
   }
@@ -110,9 +119,9 @@ const GameArenaContent: React.FC<GameArenaContentProps> = ({
       <div className="min-h-screen bg-[#FCFAFF] flex items-center justify-center p-4">
         <div className="max-w-md rounded-3xl border border-[#EAE3F3] bg-white p-8 text-center shadow-xl">
           <AlertCircle className="mx-auto h-10 w-10 text-amber-500" />
-          <h2 className="mt-4 text-xl font-bold text-[#211A2D]">Multiplayer Session Unavailable</h2>
+          <h2 className="mt-4 text-xl font-bold text-[#211A2D]">Match Unavailable</h2>
           <p className="mt-2 text-sm text-[#756D82]">
-            {session?.error || 'This room does not have an active game session connected to this arena.'}
+            {session?.error || 'This room does not have an active match connected to this arena.'}
           </p>
           <Button variant="primary" onClick={onReturnToLobby} className="mt-5">
             Return to Room Lobby
@@ -146,8 +155,12 @@ const GameArenaContent: React.FC<GameArenaContentProps> = ({
           avatarColor: p.avatarColor,
         }))
       : [
-          { id: user?.id || 'p1', name: user?.name || 'You', avatarInitials: 'ME', avatarColor: 'bg-[#9670E8]' },
-          { id: 'p2', name: 'Partner', avatarInitials: 'PT', avatarColor: 'bg-[#D94C65]' },
+          {
+            id: user?.id || 'p1',
+            name: user?.name || 'You',
+            avatarInitials: user?.avatarInitials || 'ME',
+            avatarColor: user?.avatarColor || 'bg-[#9670E8]',
+          },
         ];
 
   const handleFinishMatch = (results: {
@@ -219,8 +232,8 @@ const GameArenaContent: React.FC<GameArenaContentProps> = ({
         return <BetweenUsGame {...commonProps} />;
       default:
         return (
-          <div className="p-8 text-center text-gray-500">
-            Module under initialization...
+          <div className="p-8 text-center text-[#756D82] text-xs">
+            Loading game...
           </div>
         );
     }
@@ -230,15 +243,37 @@ const GameArenaContent: React.FC<GameArenaContentProps> = ({
     <div className="min-h-screen bg-slate-50/70 flex flex-col">
       <GameHeader
         game={game}
-        roomCode={roomCode || 'MATCH'}
+        roomCode={roomCode || undefined}
         mode={currentRoom?.mode || (game.modes.includes('friend') ? 'friend' : 'couple')}
         onPause={handleTogglePause}
         onOpenRules={() => setShowInstructions(true)}
       />
 
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">
-        {renderGameComponent()}
+        <Suspense fallback={<GameModuleLoadingFallback />}>
+          {renderGameComponent()}
+        </Suspense>
       </main>
+
+      {session?.actionError && (
+        <div
+          role="alert"
+          className="fixed top-18 left-1/2 z-50 w-[min(92vw,440px)] -translate-x-1/2 rounded-2xl border border-rose-200 bg-white/95 backdrop-blur-sm p-4 text-xs font-semibold text-rose-700 shadow-xl flex items-center justify-between gap-3 animate-in fade-in slide-in-from-top-2"
+        >
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
+            <span>{session.actionError}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => session.clearActionError()}
+            className="text-rose-400 hover:text-rose-700 p-1 rounded-md cursor-pointer"
+            aria-label="Dismiss notification"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {rematchError && (
         <div role="alert" className="fixed bottom-4 left-1/2 z-50 w-[min(92vw,420px)] -translate-x-1/2 rounded-xl border border-rose-200 bg-white px-4 py-3 text-sm text-rose-700 shadow-lg">
@@ -456,8 +491,8 @@ export const GameArenaPage: React.FC = () => {
     return (
       <div className="min-h-screen bg-[#FCFAFF] flex flex-col items-center justify-center p-6">
         <Loader2 className="w-10 h-10 text-[#9670E8] animate-spin mb-4" />
-        <h2 className="text-lg font-bold text-[#211A2D]">Initializing Game Session...</h2>
-        <p className="text-xs text-[#756D82] mt-1">Synchronizing live multiplayer arena</p>
+        <h2 className="text-lg font-bold text-[#211A2D]">Preparing Match...</h2>
+        <p className="text-xs text-[#756D82] mt-1">Connecting to game arena</p>
       </div>
     );
   }

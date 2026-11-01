@@ -97,7 +97,13 @@ export const AuthCallbackPage: React.FC = () => {
     // Wait for AuthContext to consume the SIGNED_IN event (or its explicit
     // getSession fallback) before entering a protected route.
     if (callbackComplete && isAuthenticated && !isLoading) {
-      navigate('/dashboard', { replace: true });
+      const savedDestination = sessionStorage.getItem('auth_redirect_destination');
+      sessionStorage.removeItem('auth_redirect_destination');
+      const target =
+        savedDestination && savedDestination !== '/login' && savedDestination !== '/signup'
+          ? savedDestination
+          : '/dashboard';
+      navigate(target, { replace: true });
     }
   }, [callbackComplete, isAuthenticated, isLoading, navigate]);
 

@@ -7,34 +7,21 @@ import {
   Heart,
   Users,
 } from 'lucide-react';
-import { CreateRoomModal } from '../modals/CreateRoomModal';
-import { JoinRoomModal } from '../modals/JoinRoomModal';
 import { soundService } from '../../services/soundService';
 
 export const BetterHalfHeroSection: React.FC = () => {
-  const [createModalOpen, setCreateModalOpen] = useState(false);
-  const [joinModalOpen, setJoinModalOpen] = useState(false);
   const [previewMode, setPreviewMode] = useState<'couple' | 'friend'>('couple');
 
   const { isAuthenticated } = useAuth();
   const navigate = useNavigate();
 
-  const handleCreateRoom = () => {
+  const handleGameClick = () => {
     soundService.playClick();
-    if (!isAuthenticated) {
-      navigate('/login');
-      return;
+    if (isAuthenticated) {
+      navigate('/dashboard');
+    } else {
+      navigate('/login', { state: { from: '/dashboard' } });
     }
-    setCreateModalOpen(true);
-  };
-
-  const handleJoinRoom = () => {
-    soundService.playClick();
-    if (!isAuthenticated) {
-      navigate('/login');
-      return;
-    }
-    setJoinModalOpen(true);
   };
 
   return (
@@ -81,23 +68,45 @@ export const BetterHalfHeroSection: React.FC = () => {
 
             {/* CTAs */}
             <div className="flex flex-wrap items-center gap-3.5 pt-1 sm:pt-2">
-              <button
-                type="button"
-                onClick={handleCreateRoom}
-                className="inline-flex items-center justify-center px-7 py-3.5 rounded-full text-base font-bold text-white bg-[#7C3AED] hover:bg-[#6D28D9] shadow-lg shadow-purple-900/25 active:scale-[0.98] transition-all cursor-pointer"
-              >
-                <span>Create Room</span>
-                <ArrowRight className="w-4 h-4 ml-2" />
-              </button>
+              {isAuthenticated ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    soundService.playClick();
+                    navigate('/dashboard');
+                  }}
+                  className="inline-flex items-center justify-center px-7 py-3.5 rounded-full text-base font-bold text-white bg-[#7C3AED] hover:bg-[#6D28D9] shadow-lg shadow-purple-900/25 active:scale-[0.98] transition-all cursor-pointer"
+                >
+                  <span>Open Dashboard</span>
+                  <ArrowRight className="w-4 h-4 ml-2" />
+                </button>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      soundService.playClick();
+                      navigate('/signup');
+                    }}
+                    className="inline-flex items-center justify-center px-7 py-3.5 rounded-full text-base font-bold text-white bg-[#7C3AED] hover:bg-[#6D28D9] shadow-lg shadow-purple-900/25 active:scale-[0.98] transition-all cursor-pointer"
+                  >
+                    <span>Get Started</span>
+                    <ArrowRight className="w-4 h-4 ml-2" />
+                  </button>
 
-              <button
-                type="button"
-                onClick={handleJoinRoom}
-                className="inline-flex items-center justify-center px-6 py-3.5 rounded-full text-base font-bold text-[#7C3AED] bg-white/90 hover:bg-white border-2 border-[#7C3AED]/30 hover:border-[#7C3AED] shadow-xs active:scale-[0.98] transition-all cursor-pointer"
-              >
-                <span>Join Room</span>
-                <ChevronRight className="w-4 h-4 ml-1.5" />
-              </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      soundService.playClick();
+                      navigate('/login');
+                    }}
+                    className="inline-flex items-center justify-center px-6 py-3.5 rounded-full text-base font-bold text-[#7C3AED] bg-white/90 hover:bg-white border-2 border-[#7C3AED]/30 hover:border-[#7C3AED] shadow-xs active:scale-[0.98] transition-all cursor-pointer"
+                  >
+                    <span>Sign In</span>
+                    <ChevronRight className="w-4 h-4 ml-1.5" />
+                  </button>
+                </>
+              )}
             </div>
           </div>
 
@@ -172,50 +181,35 @@ export const BetterHalfHeroSection: React.FC = () => {
                 <div className="absolute inset-0 grid grid-cols-5 pointer-events-auto">
                   <button
                     type="button"
-                    onClick={() => {
-                      soundService.playClick();
-                      navigate('/dashboard');
-                    }}
+                    onClick={handleGameClick}
                     className="w-full h-full cursor-pointer hover:bg-white/5 rounded-xl transition-colors"
                     title="Play UNO Card Game"
                     aria-label="Play UNO Card Game"
                   />
                   <button
                     type="button"
-                    onClick={() => {
-                      soundService.playClick();
-                      navigate('/dashboard');
-                    }}
+                    onClick={handleGameClick}
                     className="w-full h-full cursor-pointer hover:bg-white/5 rounded-xl transition-colors"
                     title="Play Tic-Tac-Toe Duel"
                     aria-label="Play Tic-Tac-Toe Duel"
                   />
                   <button
                     type="button"
-                    onClick={() => {
-                      soundService.playClick();
-                      navigate('/dashboard');
-                    }}
+                    onClick={handleGameClick}
                     className="w-full h-full cursor-pointer hover:bg-white/5 rounded-xl transition-colors"
                     title="Play Basketball Rivalry"
                     aria-label="Play Basketball Rivalry"
                   />
                   <button
                     type="button"
-                    onClick={() => {
-                      soundService.playClick();
-                      navigate('/dashboard');
-                    }}
+                    onClick={handleGameClick}
                     className="w-full h-full cursor-pointer hover:bg-white/5 rounded-xl transition-colors"
                     title="Play 8-Ball Pool & Arena"
                     aria-label="Play 8-Ball Pool & Arena"
                   />
                   <button
                     type="button"
-                    onClick={() => {
-                      soundService.playClick();
-                      navigate('/dashboard');
-                    }}
+                    onClick={handleGameClick}
                     className="w-full h-full cursor-pointer hover:bg-white/5 rounded-xl transition-colors"
                     title={previewMode === 'couple' ? 'Play Between Us Questions' : 'Play Trivia Cards'}
                     aria-label={previewMode === 'couple' ? 'Play Between Us Questions' : 'Play Trivia Cards'}
@@ -226,15 +220,6 @@ export const BetterHalfHeroSection: React.FC = () => {
           </div>
         </div>
       </div>
-
-      <CreateRoomModal
-        isOpen={createModalOpen}
-        onClose={() => setCreateModalOpen(false)}
-      />
-      <JoinRoomModal
-        isOpen={joinModalOpen}
-        onClose={() => setJoinModalOpen(false)}
-      />
     </section>
   );
 };

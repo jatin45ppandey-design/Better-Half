@@ -31,8 +31,8 @@ export const BlindRankingGame: React.FC<BlindRankingGameProps> = ({
   currentUserId,
 }) => {
   const activePlayers = players.length >= 2 ? players : [
-    { id: 'p1', name: 'Alex', avatarInitials: 'AR', avatarColor: 'bg-[#9670E8]' },
-    { id: 'p2', name: 'Sam', avatarInitials: 'SP', avatarColor: 'bg-[#D94C65]' },
+    { id: 'p1', name: 'Player 1', avatarInitials: 'P1', avatarColor: 'bg-[#9670E8]' },
+    { id: 'p2', name: 'Player 2', avatarInitials: 'P2', avatarColor: 'bg-[#D94C65]' },
   ];
 
   const [categoryIndex, setCategoryIndex] = useState(0);

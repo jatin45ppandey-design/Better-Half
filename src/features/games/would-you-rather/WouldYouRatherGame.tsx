@@ -31,8 +31,8 @@ export const WouldYouRatherGame: React.FC<WouldYouRatherGameProps> = ({
   onSendAction,
   currentUserId,
 }) => {
-  const p1 = players[0] || { id: 'p1', name: 'Alex', avatarInitials: 'AR', avatarColor: 'bg-[#9670E8]' };
-  const p2 = players[1] || { id: 'p2', name: 'Sam', avatarInitials: 'SP', avatarColor: 'bg-[#D94C65]' };
+  const p1 = players[0] || { id: 'p1', name: 'Player 1', avatarInitials: 'P1', avatarColor: 'bg-[#9670E8]' };
+  const p2 = players[1] || { id: 'p2', name: 'Player 2', avatarInitials: 'P2', avatarColor: 'bg-[#D94C65]' };
 
   const [questionIndex, setQuestionIndex] = useState(0);
   const [localPhase, setPhase] = useState<'p1-answering' | 'pass-to-p2' | 'p2-answering' | 'reveal'>('p1-answering');
@@ -165,7 +165,7 @@ export const WouldYouRatherGame: React.FC<WouldYouRatherGameProps> = ({
         targetPlayerInitials={p2.avatarInitials}
         targetPlayerColor={p2.avatarColor}
         onReady={() => setPhase('p2-answering')}
-        message="Alex has locked in their secret pick. Pass the screen to Sam!"
+        message={`${p1.name} has locked in their secret pick. Pass the screen to ${p2.name}!`}
       />
     );
   }

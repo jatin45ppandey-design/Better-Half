@@ -1,4 +1,4 @@
-import type { GameItem, ModeDetail, GameCategory, RecentMatch } from '../../types/game';
+import type { GameItem, ModeDetail, GameCategory } from '../../types/game';
 
 export const MODES_DATA: ModeDetail[] = [
   {
@@ -458,41 +458,7 @@ export const GAME_CATEGORIES: GameCategory[] = [
   'Arcade & Physics'
 ];
 
-export const RECENT_MOCK_MATCHES: RecentMatch[] = [
-  {
-    id: 'match-101',
-    gameId: 'between-us',
-    gameName: 'BETWEEN US',
-    mode: 'couple',
-    playedAgo: 'Yesterday',
-    players: ['Alex', 'Sam'],
-    outcome: 'Session Finished',
-    scoreOrRounds: '12 Prompts Shared',
-    isMockData: true,
-  },
-  {
-    id: 'match-102',
-    gameId: 'uno-style',
-    gameName: 'Original UNO-style Card Game',
-    mode: 'friend',
-    playedAgo: '2 days ago',
-    players: ['Alex', 'Leo', 'Zara', 'Kai'],
-    outcome: 'Leo Won',
-    scoreOrRounds: '3 Rounds • +4 Carnage',
-    isMockData: true,
-  },
-  {
-    id: 'match-103',
-    gameId: 'pen-fight',
-    gameName: 'Pen Fight',
-    mode: 'couple',
-    playedAgo: '3 days ago',
-    players: ['Alex', 'Jordan'],
-    outcome: 'Alex Won 3-2',
-    scoreOrRounds: '5 Rounds Played',
-    isMockData: true,
-  },
-];
+
 
 // Single source of truth helper functions
 export function getGamesForMode(mode: 'couple' | 'friend'): GameItem[] {
