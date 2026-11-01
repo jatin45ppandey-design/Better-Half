@@ -390,6 +390,12 @@ export const RoomLobbyPage: React.FC = () => {
           </div>
         )}
 
+        {!catalogLoading && !catalogError && eligibleGames.length > 0 && !selectedGameAvailable && (
+          <div className="mb-4 p-4 rounded-2xl bg-[#FDF0F2] border border-[#F8D2D9] text-xs text-[#D94C65]">
+            The selected game is no longer enabled for this mode. Choose an available game below before starting.
+          </div>
+        )}
+
         {/* Validation Error Banner */}
         {validationError && (
           <div className="mb-6 p-4 rounded-2xl bg-[#FDF0F2] border border-[#F8D2D9] flex items-center gap-3 text-xs sm:text-sm text-[#D94C65]">
