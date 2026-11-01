@@ -31,6 +31,7 @@ jobs:
       DATABASE_URL: postgresql://test_user:test_password@localhost:5432/playspace_test?schema=public
       DIRECT_URL: postgresql://test_user:test_password@localhost:5432/playspace_test?schema=public
       RESTORE_TEST_DATABASE_URL: postgresql://test_user:test_password@localhost:5432/playspace_restore_test?schema=public
+      RETENTION_TEST_DATABASE_URL: postgresql://test_user:test_password@localhost:5432/playspace_retention_test?schema=public
       SUPABASE_URL: https://ci-isolated-test.supabase.co
       SUPABASE_PUBLISHABLE_KEY: sb_publishable_ci_mock_key_test_12345
       FRONTEND_URL: http://localhost:5173
@@ -92,6 +93,17 @@ jobs:
         run: |
           cd server && npx prisma migrate deploy
 
+      - name: Create isolated retention test database
+        run: |
+          docker exec ${{ job.services.postgres.id }} psql -U test_user -d postgres -v ON_ERROR_STOP=1 -c "CREATE DATABASE playspace_retention_test;"
+
+      - name: Deploy Migrations to Isolated Retention Database
+        env:
+          DATABASE_URL: ${{ env.RETENTION_TEST_DATABASE_URL }}
+          DIRECT_URL: ${{ env.RETENTION_TEST_DATABASE_URL }}
+        run: |
+          cd server && npx prisma migrate deploy
+
       - name: Security & Dependency Vulnerability Audit
         run: |
           npm audit --audit-level=high || true
@@ -105,6 +117,14 @@ jobs:
 
       - name: Run Backend Automated Test Suite
         run: npm test --prefix server
+
+      - name: Run retention integration against isolated PostgreSQL
+        env:
+          DATABASE_URL: ${{ env.RETENTION_TEST_DATABASE_URL }}
+          DIRECT_URL: ${{ env.RETENTION_TEST_DATABASE_URL }}
+          RUN_DATABASE_RETENTION_INTEGRATION: 'true'
+        run: |
+          cd server && npx vitest run tests/db_retention_integration.test.ts
 
       - name: Backend Production Build
         run: npm run build --prefix server
