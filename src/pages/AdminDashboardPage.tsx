@@ -13,6 +13,7 @@ import {
   ShieldAlert,
   Plus,
   Trash2,
+  Edit3,
   ToggleLeft,
   ToggleRight,
   Loader2,
@@ -93,6 +94,7 @@ export const AdminDashboardPage: React.FC = () => {
 
   // Question modal state
   const [isAddQuestionOpen, setIsAddQuestionOpen] = useState(false);
+  const [editingQuestionId, setEditingQuestionId] = useState<string | null>(null);
   const [questionGameType, setQuestionGameType] = useState<string>('truth-or-dare');
   const [questionCategory, setQuestionCategory] = useState('Romantic & Flirty');
   const [questionIntensity, setQuestionIntensity] = useState<number>(2);
@@ -179,6 +181,30 @@ export const AdminDashboardPage: React.FC = () => {
     }
   };
 
+  const resetQuestionEditor = () => {
+    setIsAddQuestionOpen(false);
+    setEditingQuestionId(null);
+    setQuestionGameType('truth-or-dare');
+    setQuestionCategory('Romantic & Flirty');
+    setQuestionIntensity(2);
+    setQuestionPrompt('');
+    setQuestionType('TRUTH');
+    setOptionA('');
+    setOptionB('');
+  };
+
+  const handleEditQuestion = (question: QuestionItem) => {
+    setEditingQuestionId(question.id);
+    setQuestionGameType(question.gameId);
+    setQuestionCategory(question.category || '');
+    setQuestionIntensity(question.intensity || 2);
+    setQuestionPrompt(question.prompt);
+    setQuestionType((question.questionType as 'TRUTH' | 'DARE') || 'TRUTH');
+    setOptionA(question.optionA || '');
+    setOptionB(question.optionB || '');
+    setIsAddQuestionOpen(true);
+  };
+
   const handleAddQuestion = async () => {
     if (!questionPrompt.trim()) {
       addToast('Please enter a question prompt', { type: 'error' });
@@ -190,26 +216,33 @@ export const AdminDashboardPage: React.FC = () => {
       return;
     }
 
+    const questionData = {
+      prompt: questionPrompt.trim(),
+      ...(questionGameType === 'truth-or-dare' ? { questionType } : {}),
+      category: questionCategory.trim(),
+      intensity: questionIntensity,
+      ...(questionGameType === 'would-you-rather'
+        ? { optionA: optionA.trim(), optionB: optionB.trim() }
+        : {}),
+    };
+
     soundService.playSuccess();
     try {
-      await api.admin.createQuestion({
-        gameId: questionGameType,
-        prompt: questionPrompt.trim(),
-        questionType: questionGameType === 'truth-or-dare' ? questionType : undefined,
-        category: questionCategory.trim(),
-        intensity: questionIntensity,
-        optionA: questionGameType === 'would-you-rather' ? optionA.trim() : undefined,
-        optionB: questionGameType === 'would-you-rather' ? optionB.trim() : undefined,
-      });
+      if (editingQuestionId) {
+        await api.admin.updateQuestion(editingQuestionId, questionData);
+        addToast('Question updated in the live database library', { type: 'success' });
+      } else {
+        await api.admin.createQuestion({
+          gameId: questionGameType,
+          ...questionData,
+        });
+        addToast('Question added to live database library', { type: 'success' });
+      }
 
-      addToast('Question added to live database library', { type: 'success' });
-      setIsAddQuestionOpen(false);
-      setQuestionPrompt('');
-      setOptionA('');
-      setOptionB('');
-      loadData();
+      resetQuestionEditor();
+      await loadData();
     } catch (err: any) {
-      addToast(err?.message || 'Failed to create question.', { type: 'error' });
+      addToast(err?.message || 'Failed to save question.', { type: 'error' });
     }
   };
 
@@ -563,6 +596,7 @@ export const AdminDashboardPage: React.FC = () => {
                 leftIcon={<Plus className="w-4 h-4" />}
                 onClick={() => {
                   soundService.playClick();
+                  resetQuestionEditor();
                   setIsAddQuestionOpen(true);
                 }}
               >
@@ -604,14 +638,25 @@ export const AdminDashboardPage: React.FC = () => {
                   </div>
 
                   {q.isActive && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="self-end sm:self-auto text-[#D94C65] hover:bg-[#FDF2F4]"
-                      onClick={() => handleDeleteQuestion(q.id)}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
+                    <div className="flex items-center gap-1 self-end sm:self-auto">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        title="Edit question"
+                        onClick={() => handleEditQuestion(q)}
+                      >
+                        <Edit3 className="w-4 h-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        title="Disable question"
+                        className="text-[#D94C65] hover:bg-[#FDF2F4]"
+                        onClick={() => handleDeleteQuestion(q.id)}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
                   )}
                 </div>
               ))}
@@ -665,9 +710,9 @@ export const AdminDashboardPage: React.FC = () => {
       {/* Add Question Modal */}
       <Modal
         isOpen={isAddQuestionOpen}
-        onClose={() => setIsAddQuestionOpen(false)}
-        title="Add Question to Library"
-        description="Expand the official question library with new conversational prompts."
+        onClose={resetQuestionEditor}
+        title={editingQuestionId ? "Edit Question" : "Add Question to Library"}
+        description={editingQuestionId ? "Update the saved prompt used by future game sessions." : "Expand the official question library with new conversational prompts."}
       >
         <div className="space-y-4 pt-2">
           <div>
@@ -675,7 +720,8 @@ export const AdminDashboardPage: React.FC = () => {
             <select
               value={questionGameType}
               onChange={(e) => setQuestionGameType(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl border border-[#EAE3F3] text-xs font-semibold text-[#211A2D] outline-none"
+              disabled={Boolean(editingQuestionId)}
+              className="w-full px-3 py-2 rounded-xl border border-[#EAE3F3] text-xs font-semibold text-[#211A2D] outline-none disabled:opacity-60"
             >
               <option value="truth-or-dare">Truth or Dare</option>
               <option value="would-you-rather">Would You Rather</option>
@@ -757,11 +803,11 @@ export const AdminDashboardPage: React.FC = () => {
           )}
 
           <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-[#EAE3F3]">
-            <Button variant="ghost" size="sm" onClick={() => setIsAddQuestionOpen(false)}>
+            <Button variant="ghost" size="sm" onClick={resetQuestionEditor}>
               Cancel
             </Button>
             <Button variant="primary" size="sm" onClick={handleAddQuestion}>
-              Save Question
+              {editingQuestionId ? 'Save Changes' : 'Save Question'}
             </Button>
           </div>
         </div>
