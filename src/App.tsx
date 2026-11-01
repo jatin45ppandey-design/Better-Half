@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
 import { RoomProvider } from './context/RoomContext';
+import { GameCatalogProvider } from './context/GameCatalogContext';
 import { ToastContainer } from './components/ui/Toast';
 import { ProtectedRoute } from './components/auth/ProtectedRoute';
 
@@ -41,8 +42,9 @@ export function App() {
     <BrowserRouter>
       <AuthProvider>
         <ToastProvider>
-          <RoomProvider>
-            <Suspense fallback={<RouteLoadingFallback />}>
+          <GameCatalogProvider>
+            <RoomProvider>
+              <Suspense fallback={<RouteLoadingFallback />}>
               <Routes>
                 {/* Public Routes */}
                 <Route path="/" element={<LandingPage />} />
@@ -134,9 +136,10 @@ export function App() {
 
                 <Route path="*" element={<NotFoundPage />} />
               </Routes>
-            </Suspense>
-            <ToastContainer />
-          </RoomProvider>
+              </Suspense>
+              <ToastContainer />
+            </RoomProvider>
+          </GameCatalogProvider>
         </ToastProvider>
       </AuthProvider>
     </BrowserRouter>

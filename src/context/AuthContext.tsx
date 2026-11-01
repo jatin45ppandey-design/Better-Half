@@ -8,6 +8,7 @@ interface AuthContextType extends AuthState {
   loginWithGoogle: () => Promise<void>;
   logout: () => Promise<void>;
   refreshProfile: () => Promise<void>;
+  isProfileHydrating: boolean;
   // Backward compatibility signatures for existing consumers during transition
   login: (email?: string, password?: string) => Promise<{ success: boolean; error?: string }>;
   signup: (name?: string, email?: string, password?: string) => Promise<{ success: boolean; error?: string }>;
@@ -54,6 +55,7 @@ function createSessionFallbackUser(supabaseUser: SupabaseUserLike): User {
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isProfileHydrating, setIsProfileHydrating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const mountedRef = useRef(false);
@@ -110,6 +112,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       activeUserIdRef.current = null;
       if (effectActive && mountedRef.current) {
         setUser(null);
+        setIsProfileHydrating(false);
         setError(null);
         setIsLoading(false);
       }
@@ -134,6 +137,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Establish authentication immediately from the verified Supabase session.
       // Do not make route access depend on a separate profile API request.
       setUser(createSessionFallbackUser(supabaseUser));
+      setIsProfileHydrating(true);
       setError(null);
       setIsLoading(false);
 
@@ -154,6 +158,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }
 
             setUser(profileUser);
+            setIsProfileHydrating(false);
             setError(null);
           })
           .catch((err: unknown) => {
@@ -164,6 +169,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               activeUserIdRef.current === supabaseUser.id
             ) {
               console.error('[Auth] Unexpected profile hydration failure:', err);
+              setIsProfileHydrating(false);
               setError('Your account is signed in, but your player profile could not be refreshed.');
             }
           });
@@ -310,6 +316,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     if (mountedRef.current) {
       setUser(null);
+      setIsProfileHydrating(false);
       setIsLoading(false);
       setError(null);
     }
@@ -355,6 +362,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         loginWithGoogle,
         logout,
         refreshProfile,
+        isProfileHydrating,
         login,
         signup,
       }}

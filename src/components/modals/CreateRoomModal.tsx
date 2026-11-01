@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Heart,
@@ -13,6 +13,7 @@ import { Badge } from '../ui/Badge';
 import { GAMES_DATA } from '../../data/games';
 import { useAuth } from '../../context/AuthContext';
 import { useRoom } from '../../context/RoomContext';
+import { useGameCatalog } from '../../context/GameCatalogContext';
 import type { GameItem } from '../../types/game';
 
 interface CreateRoomModalProps {
@@ -30,6 +31,7 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
 }) => {
   const { user } = useAuth();
   const { createRoom } = useRoom();
+  const { isLoading: catalogLoading, error: catalogError, refreshCatalog, isAvailable } = useGameCatalog();
   const navigate = useNavigate();
 
   const [selectedMode, setSelectedMode] = useState<'couple' | 'friend'>(initialMode);
@@ -66,9 +68,17 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
     onClose();
   };
 
-  const availableGames = GAMES_DATA.filter((g) =>
-    g.modes.includes(selectedMode)
+  const availableGames = useMemo(
+    () => GAMES_DATA.filter((game) => game.modes.includes(selectedMode) && isAvailable(game.id, selectedMode)),
+    [selectedMode, isAvailable]
   );
+
+  useEffect(() => {
+    if (!isOpen || catalogLoading || catalogError) return;
+    if (!availableGames.some((game) => game.id === selectedGameId)) {
+      setSelectedGameId(availableGames[0]?.id || '');
+    }
+  }, [isOpen, catalogLoading, catalogError, availableGames, selectedGameId]);
 
   const handleCreateRoom = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -76,6 +86,12 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
 
     setIsSubmitting(true);
     setErrorMessage(null);
+
+    if (catalogLoading || catalogError || !isAvailable(selectedGameId, selectedMode)) {
+      setErrorMessage(catalogError || 'This game is not currently available in the selected mode. Refresh availability and choose another game.');
+      setIsSubmitting(false);
+      return;
+    }
 
     try {
       const created = await createRoom({
@@ -120,9 +136,10 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
               type="button"
               onClick={() => {
                 setSelectedMode('couple');
-                const g = GAMES_DATA.find((item) => item.id === selectedGameId);
-                if (g && !g.modes.includes('couple')) {
-                  setSelectedGameId('between-us');
+                const currentGame = GAMES_DATA.find((item) => item.id === selectedGameId);
+                if (!currentGame || !isAvailable(currentGame.id, 'couple')) {
+                  const fallback = GAMES_DATA.find((item) => item.modes.includes('couple') && isAvailable(item.id, 'couple'));
+                  setSelectedGameId(fallback?.id || '');
                 }
               }}
               className={`p-3.5 rounded-2xl border-2 text-left flex flex-col justify-between transition-all cursor-pointer ${
@@ -147,9 +164,10 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
               type="button"
               onClick={() => {
                 setSelectedMode('friend');
-                const g = GAMES_DATA.find((item) => item.id === selectedGameId);
-                if (g && !g.modes.includes('friend')) {
-                  setSelectedGameId('uno-style');
+                const currentGame = GAMES_DATA.find((item) => item.id === selectedGameId);
+                if (!currentGame || !isAvailable(currentGame.id, 'friend')) {
+                  const fallback = GAMES_DATA.find((item) => item.modes.includes('friend') && isAvailable(item.id, 'friend'));
+                  setSelectedGameId(fallback?.id || '');
                 }
               }}
               className={`p-3.5 rounded-2xl border-2 text-left flex flex-col justify-between transition-all cursor-pointer ${
@@ -196,6 +214,16 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
             </span>
           </div>
 
+          {catalogLoading ? (
+            <p className="text-xs text-[#756D82] py-4">Checking live game availability…</p>
+          ) : catalogError ? (
+            <div className="rounded-xl border border-[#F8D2D9] bg-[#FDF0F2] p-3 flex items-center justify-between gap-3">
+              <p className="text-xs text-[#A52E45]">{catalogError}</p>
+              <button type="button" onClick={() => void refreshCatalog()} className="text-xs font-bold text-[#593B91] underline">Retry</button>
+            </div>
+          ) : availableGames.length === 0 ? (
+            <p className="text-xs text-[#A52E45] py-4">No games are enabled for this mode right now.</p>
+          ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto p-1 border border-[#EAE3F3] rounded-2xl bg-[#FCFAFF]">
             {availableGames.map((game) => {
               const isSelected = selectedGameId === game.id;
@@ -220,6 +248,7 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
               );
             })}
           </div>
+          )}
         </div>
 
         {/* Actions */}
@@ -232,7 +261,7 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
             variant="primary"
             size="sm"
             isLoading={isSubmitting}
-            disabled={isSubmitting}
+            disabled={isSubmitting || catalogLoading || Boolean(catalogError) || !availableGames.some((game) => game.id === selectedGameId)}
             rightIcon={<ArrowRight className="w-4 h-4" />}
           >
             {isSubmitting ? 'Creating Room...' : 'Create Room'}
