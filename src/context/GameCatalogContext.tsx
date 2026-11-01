@@ -37,7 +37,7 @@ function normalizeGameId(gameId: string): string {
 }
 
 export const GameCatalogProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isProfileHydrating } = useAuth();
   const [catalog, setCatalog] = useState<Record<string, GameAvailability>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -47,6 +47,13 @@ export const GameCatalogProvider: React.FC<{ children: React.ReactNode }> = ({ c
       setCatalog({});
       setError(null);
       setIsLoading(false);
+      return;
+    }
+
+    // /games/catalog uses the regular authenticated middleware, which expects
+    // the user's profile bootstrap to be complete. Wait for AuthContext's
+    // dedicated /profiles/me bootstrap endpoint before making catalog calls.
+    if (isProfileHydrating) {
       return;
     }
 
@@ -73,7 +80,7 @@ export const GameCatalogProvider: React.FC<{ children: React.ReactNode }> = ({ c
     } finally {
       setIsLoading(false);
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, isProfileHydrating]);
 
   useEffect(() => {
     void refreshCatalog();
