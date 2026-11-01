@@ -59,7 +59,7 @@ export function validateDisposableDatabase(url: string): { isValid: boolean; rea
   const hostname = parsed.hostname.toLowerCase().replace(/\.$/, '');
   let database: string;
   try {
-    database = decodeURIComponent(parsed.pathname.replace(/^\/+/, '')).toLowerCase();
+    database = decodeURIComponent(parsed.pathname.replace(/^\/+/, ''));
   } catch {
     return { isValid: false, reason: 'Database name in target URL is not valid URL encoding.' };
   }
@@ -98,7 +98,7 @@ export function validateDisposableDatabase(url: string): { isValid: boolean; rea
     hostname === '[::1]';
 
   if (isLocalHost) {
-    if (database === 'postgres' || database === 'template0' || database === 'template1') {
+    if (['postgres', 'template0', 'template1'].includes(database.toLowerCase())) {
       return {
         isValid: false,
         reason: `Target database "${database}" is a default system database. Use a dedicated disposable database.`,
@@ -114,7 +114,7 @@ export function validateDisposableDatabase(url: string): { isValid: boolean; rea
   // Host-only and substring entries are not accepted.
   const allowedEntries = (process.env.DISPOSABLE_DATABASE_ALLOWLIST || '')
     .split(',')
-    .map((entry) => entry.trim().toLowerCase())
+    .map((entry) => entry.trim())
     .filter(Boolean);
   const targetIdentity = `${hostname}:${port}/${database}`;
 
