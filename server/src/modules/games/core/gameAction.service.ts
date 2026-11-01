@@ -62,6 +62,18 @@ export class GameActionService {
       return { success: false, error: 'Session not found.', version: 0 };
     }
 
+    // Authorization must precede idempotency. A known actionId is not a
+    // capability: only original session participants may receive retry ACKs
+    // or a public-state projection for that session.
+    const participant = session.participants.find((p) => p.userId === actorUserId);
+    if (!participant) {
+      return {
+        success: false,
+        error: 'You are not a participant in this game session.',
+        version: session.version,
+      };
+    }
+
     // 1. Enforce Action ID idempotency across process restarts
     if (gameStateService.isActionProcessed(sessionId, actionId)) {
       const publicState = gameStateService.getPublicProjection(sessionId) || {};
@@ -122,17 +134,7 @@ export class GameActionService {
       };
     }
 
-    // 3. Check membership first
-    const participant = session.participants.find((p) => p.userId === actorUserId);
-    if (!participant) {
-      return {
-        success: false,
-        error: 'You are not a participant in this game session.',
-        version: session.version,
-      };
-    }
-
-    // 4. Verify room state and room host authority for all sessions associated with a room.
+    // 3. Verify room state and room host authority for all sessions associated with a room.
     // Ensure game actions cannot continue inside invalid, expired or closed rooms (fail-closed).
     if (session.roomId) {
       try {
