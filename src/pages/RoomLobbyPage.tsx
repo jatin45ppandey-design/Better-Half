@@ -28,6 +28,7 @@ import { api } from '../services/api';
 import { useRoom } from '../context/RoomContext';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
+import { useGameCatalog } from '../context/GameCatalogContext';
 import {
   getGamesForMode,
   getGameById,
@@ -39,6 +40,12 @@ export const RoomLobbyPage: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { addToast } = useToast();
+  const {
+    isLoading: catalogLoading,
+    error: catalogError,
+    refreshCatalog,
+    isAvailable,
+  } = useGameCatalog();
 
   const {
     currentRoom,
@@ -160,8 +167,15 @@ export const RoomLobbyPage: React.FC = () => {
 
   const room = allRooms[roomCode.toUpperCase()];
   const isCouple = room.mode === 'couple';
-  const eligibleGames = getGamesForMode(room.mode);
-  const selectedGame = getGameById(room.selectedGameId) || eligibleGames[0];
+  const eligibleGames = getGamesForMode(room.mode).filter((game) =>
+    isAvailable(game.id, room.mode)
+  );
+  const selectedGame =
+    getGameById(room.selectedGameId) ||
+    eligibleGames[0] ||
+    getGamesForMode(room.mode)[0];
+  const selectedGameAvailable =
+    !catalogLoading && !catalogError && isAvailable(selectedGame.id, room.mode);
 
   const currentUserParticipant = room.participants.find(
     (participant: RoomParticipant) => participant.id === user?.id
@@ -203,6 +217,17 @@ export const RoomLobbyPage: React.FC = () => {
   };
 
   const handleStartGame = async () => {
+    if (catalogLoading || catalogError || !selectedGameAvailable) {
+      const message =
+        catalogError ||
+        (catalogLoading
+          ? 'Checking current game availability. Please try again in a moment.'
+          : 'The selected game is no longer available in this room mode. Choose an enabled game.');
+      setValidationError(message);
+      addToast('Game availability needs attention', { type: 'error', message });
+      return;
+    }
+
     const check = canStartGame();
     if (!check.canStart) {
       setValidationError(check.reason || 'Cannot start match.');
@@ -236,6 +261,10 @@ export const RoomLobbyPage: React.FC = () => {
   };
 
   const handleGameSelect = async (gameId: string) => {
+    if (!isAvailable(gameId, room.mode)) {
+      addToast('This game is not enabled for the current room mode.', { type: 'error' });
+      return;
+    }
     const res = await setRoomGame(gameId);
     if (!res.success) {
       addToast(res.error || 'Failed to select game', { type: 'error' });
@@ -333,6 +362,7 @@ export const RoomLobbyPage: React.FC = () => {
               variant="primary"
               size="md"
               onClick={handleStartGame}
+              disabled={!isHost || catalogLoading || Boolean(catalogError) || !selectedGameAvailable}
               leftIcon={<Play className="w-4 h-4 fill-current" />}
               className="font-bold shadow-md shadow-[#593B91]/15 text-sm"
             >
@@ -340,6 +370,25 @@ export const RoomLobbyPage: React.FC = () => {
             </Button>
           </div>
         </div>
+
+        {catalogError && (
+          <div className="mb-4 p-4 rounded-2xl bg-[#FDF0F2] border border-[#F8D2D9] flex items-center justify-between gap-3 text-xs text-[#D94C65]">
+            <span>{catalogError}</span>
+            <button
+              type="button"
+              onClick={() => void refreshCatalog()}
+              className="shrink-0 font-bold underline underline-offset-2"
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
+        {!catalogLoading && !catalogError && eligibleGames.length === 0 && (
+          <div className="mb-4 p-4 rounded-2xl bg-[#FDF0F2] border border-[#F8D2D9] text-xs text-[#D94C65]">
+            No games are currently enabled for {isCouple ? 'Couple' : 'Friend'} Mode. The host cannot launch a match until one is enabled by an administrator.
+          </div>
+        )}
 
         {/* Validation Error Banner */}
         {validationError && (
@@ -491,8 +540,14 @@ export const RoomLobbyPage: React.FC = () => {
                     variant="primary"
                     size="sm"
                     onClick={handleStartGame}
-                    disabled={!isHost}
-                    title={isHost ? 'Launch Match' : 'Only the room host can launch the match'}
+                    disabled={!isHost || catalogLoading || Boolean(catalogError) || !selectedGameAvailable}
+                    title={
+                      !isHost
+                        ? 'Only the room host can launch the match'
+                        : selectedGameAvailable
+                        ? 'Launch Match'
+                        : catalogError || 'The selected game is not currently available.'
+                    }
                     leftIcon={<Play className="w-3.5 h-3.5 fill-current" />}
                     className="font-bold text-xs"
                   >
@@ -507,6 +562,11 @@ export const RoomLobbyPage: React.FC = () => {
                   Available Games ({eligibleGames.length} for {isCouple ? 'Couple Mode' : 'Friend Mode'})
                 </span>
 
+                {catalogLoading ? (
+                  <p className="text-xs text-[#756D82] py-4">Loading live game availability…</p>
+                ) : eligibleGames.length === 0 ? (
+                  <p className="text-xs text-[#756D82] py-4">No enabled games are available for this mode.</p>
+                ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   {eligibleGames.map((game: GameItem) => {
                     const isSelected = room.selectedGameId === game.id;
@@ -566,6 +626,7 @@ export const RoomLobbyPage: React.FC = () => {
                     );
                   })}
                 </div>
+                )}
               </div>
             </div>
           </div>
