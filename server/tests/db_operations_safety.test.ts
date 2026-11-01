@@ -12,7 +12,9 @@ vi.mock('pg', () => ({
   default: { Client: pgMocks.Client },
 }));
 
-import { BACKUP_TABLES, type BackupPayload } from '../src/scripts/dbBackup.js';
+import { BACKUP_TABLES, createDatabaseBackup, type BackupPayload } from '../src/scripts/dbBackup.js';
+import { PrismaClient } from '@prisma/client';
+import { prisma } from '../src/config/prisma.js';
 import { restoreDatabaseSnapshot, validateDisposableDatabase } from '../src/scripts/dbRestore.js';
 import { tryAcquireDedicatedAdvisoryLock } from '../src/scripts/advisoryLock.js';
 
@@ -329,4 +331,96 @@ describe('Database operations safety validation', () => {
       expect(client.end).toHaveBeenCalledOnce();
     });
   });
+
+  describe('isolated PostgreSQL backup/restore integration', () => {
+    const integrationTest = process.env.RESTORE_TEST_DATABASE_URL ? it : it.skip;
+
+    integrationTest('round-trips real rows and proves failed restores leave the target empty', async () => {
+      const targetUrl = process.env.RESTORE_TEST_DATABASE_URL as string;
+      const gameId = 'db-restore-it-' + crypto.randomUUID();
+      const snapshotPath = path.join(tempDirectory, 'postgres-backup.json');
+      const duplicateSnapshotPath = path.join(tempDirectory, 'duplicate-backup.json');
+      const targetPrisma = new PrismaClient({ datasources: { db: { url: targetUrl } } });
+
+      try {
+        for (const table of BACKUP_TABLES) {
+          const delegateName = table.charAt(0).toLowerCase() + table.slice(1);
+          const delegate = (targetPrisma as any)[delegateName];
+          expect(await delegate.count()).toBe(0);
+        }
+
+        await prisma.gameConfiguration.create({
+          data: { gameId, isEnabled: true },
+        });
+
+        const backup = await createDatabaseBackup({ outputFile: snapshotPath });
+        const backedUpConfiguration = backup.data.GameConfiguration.find(
+          (record) => record.gameId === gameId
+        );
+        expect(backedUpConfiguration).toBeDefined();
+
+        const duplicateBackup = structuredClone(backup);
+        duplicateBackup.data.GameConfiguration.push({
+          ...backedUpConfiguration,
+          id: crypto.randomUUID(),
+        });
+        duplicateBackup.metadata.tableCounts.GameConfiguration += 1;
+        duplicateBackup.metadata.totalRecords += 1;
+        duplicateBackup.metadata.checksum = crypto
+          .createHash('sha256')
+          .update(JSON.stringify(duplicateBackup.data))
+          .digest('hex');
+        fs.writeFileSync(duplicateSnapshotPath, JSON.stringify(duplicateBackup), {
+          encoding: 'utf8',
+          mode: 0o600,
+        });
+
+        await expect(
+          restoreDatabaseSnapshot({
+            inputFile: duplicateSnapshotPath,
+            targetUrl,
+            confirmed: true,
+          })
+        ).rejects.toThrow();
+
+        // A duplicate-key failure must roll the entire serializable transaction back.
+        for (const table of BACKUP_TABLES) {
+          const delegateName = table.charAt(0).toLowerCase() + table.slice(1);
+          const delegate = (targetPrisma as any)[delegateName];
+          expect(await delegate.count()).toBe(0);
+        }
+
+        const restored = await restoreDatabaseSnapshot({
+          inputFile: snapshotPath,
+          targetUrl,
+          confirmed: true,
+        });
+        expect(restored.success).toBe(true);
+        expect(restored.restoredRecords).toBe(backup.metadata.totalRecords);
+
+        const restoredConfiguration = await targetPrisma.gameConfiguration.findUnique({
+          where: { gameId },
+        });
+        expect(restoredConfiguration).not.toBeNull();
+
+        for (const table of BACKUP_TABLES) {
+          const delegateName = table.charAt(0).toLowerCase() + table.slice(1);
+          const delegate = (targetPrisma as any)[delegateName];
+          expect(await delegate.count()).toBe(backup.metadata.tableCounts[table]);
+        }
+
+        await expect(
+          restoreDatabaseSnapshot({
+            inputFile: snapshotPath,
+            targetUrl,
+            confirmed: true,
+          })
+        ).rejects.toThrow('Restore target is not empty');
+      } finally {
+        await prisma.gameConfiguration.deleteMany({ where: { gameId } });
+        await targetPrisma.$disconnect();
+      }
+    });
+  });
+
 });
