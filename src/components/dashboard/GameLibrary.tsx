@@ -3,6 +3,7 @@ import { Search, Users, Play, Sparkles, Filter, X } from 'lucide-react';
 import { GAMES_DATA, GAME_CATEGORIES } from '../../data/games';
 import { GameIcon } from '../ui/GameIcon';
 import { soundService } from '../../services/soundService';
+import { useGameCatalog } from '../../context/GameCatalogContext';
 import type { GameItem, GameCategory } from '../../types/game';
 
 interface GameLibraryProps {
@@ -17,11 +18,19 @@ export const GameLibrary: React.FC<GameLibraryProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<GameCategory>('All');
   const [filterByActiveModeOnly, setFilterByActiveModeOnly] = useState(false);
+  const {
+    isLoading: catalogLoading,
+    error: catalogError,
+    refreshCatalog,
+    isAvailable,
+    isAvailableInAnyMode,
+    getAvailability,
+  } = useGameCatalog();
 
-  // Filter games based on search, category, and mode
+  // Filter games against server-authoritative mode availability, then search/category.
   const filteredGames = GAMES_DATA.filter((game) => {
     // Mode filter
-    if (filterByActiveModeOnly && !game.modes.includes(activeMode)) {
+    if (filterByActiveModeOnly && !isAvailable(game.id, activeMode)) {
       return false;
     }
 
@@ -44,12 +53,26 @@ export const GameLibrary: React.FC<GameLibraryProps> = ({
   });
 
   const handleCardClick = (game: GameItem) => {
+    if (catalogLoading || catalogError || !isAvailableInAnyMode(game.id)) return;
     soundService.playClick();
     onSelectGame(game);
   };
 
   return (
     <div id="game-library" className="flex flex-col gap-6">
+      {catalogError && (
+        <div className="rounded-2xl border border-[#7F1D1D] bg-[#1C0F17] px-4 py-3 flex items-center justify-between gap-3">
+          <p className="text-xs text-[#FCA5A5]">{catalogError}</p>
+          <button
+            type="button"
+            onClick={() => void refreshCatalog()}
+            className="shrink-0 text-xs font-bold text-white underline underline-offset-2"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
       {/* Library Title & Search Controls */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
@@ -142,7 +165,7 @@ export const GameLibrary: React.FC<GameLibraryProps> = ({
             }`}
           >
             <Filter className="w-3 h-3" />
-            <span>{activeMode === 'couple' ? 'Couple Permitted' : 'Friend Permitted'}</span>
+            <span>{activeMode === 'couple' ? 'Couple Available' : 'Friend Available'}</span>
           </button>
         </div>
       </div>
@@ -153,12 +176,26 @@ export const GameLibrary: React.FC<GameLibraryProps> = ({
           {filteredGames.map((game) => {
             const isCoupleExclusive = game.modes.length === 1 && game.modes[0] === 'couple';
             const isBothModes = game.modes.includes('couple') && game.modes.includes('friend');
+            const isEnabledSomewhere = isAvailableInAnyMode(game.id);
+            const isEnabledForActiveMode = isAvailable(game.id, activeMode);
+            const availability = getAvailability(game.id);
+            const availabilityLabel = !isEnabledSomewhere
+              ? 'Disabled by admin'
+              : !isEnabledForActiveMode
+              ? `Available in ${activeMode === 'couple' ? 'Friend' : 'Couple'} Mode`
+              : null;
 
             return (
               <div
                 key={game.id}
                 onClick={() => handleCardClick(game)}
-                className="group relative flex flex-col justify-between bg-[#160E25] rounded-3xl border border-[#2D1B48] p-5 shadow-lg shadow-black/25 hover:border-[#5B339A] hover:bg-[#1D1231] hover:-translate-y-1.5 transition-all duration-200 cursor-pointer select-none"
+                aria-disabled={catalogLoading || Boolean(catalogError) || !isEnabledSomewhere}
+                title={availability?.maintenanceMessage || availabilityLabel || undefined}
+                className={`group relative flex flex-col justify-between bg-[#160E25] rounded-3xl border border-[#2D1B48] p-5 shadow-lg shadow-black/25 transition-all duration-200 select-none ${
+                  catalogLoading || catalogError || !isEnabledSomewhere
+                    ? 'opacity-55 cursor-not-allowed'
+                    : 'hover:border-[#5B339A] hover:bg-[#1D1231] hover:-translate-y-1.5 cursor-pointer'
+                }`}
               >
                 <div>
                   {/* Card Header: Icon + Eligibility Badge */}
@@ -170,6 +207,11 @@ export const GameLibrary: React.FC<GameLibraryProps> = ({
                     </div>
 
                     <div className="flex flex-col items-end gap-1">
+                      {availabilityLabel && (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#27272A] text-[#D4D4D8] border border-[#52525B]">
+                          {availabilityLabel}
+                        </span>
+                      )}
                       {isCoupleExclusive ? (
                         <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#3E142F] text-[#F472B6] border border-[#6E2254]">
                           Couple Exclusive
