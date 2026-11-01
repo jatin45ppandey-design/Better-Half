@@ -30,6 +30,7 @@ import { createSocketServer } from './socket/index.js';
 import { gameSessionService } from './modules/games/core/gameSession.service.js';
 import { roomsService } from './modules/rooms/rooms.service.js';
 import { adminService } from './modules/admin/admin.service.js';
+import { seedPlatformDefaults } from './lifecycle/bootstrapData.js';
 import { createShutdownHandler, registerShutdownSignals } from './lifecycle/shutdown.js';
 import { acquireInstanceLock, type InstanceLockHandle } from './lifecycle/instanceLock.js';
 import { presenceManager } from './socket/presence.js';
@@ -60,6 +61,19 @@ async function bootstrap() {
     instanceLockHandle = await acquireInstanceLock(env.DIRECT_URL);
   }
 
+  // Seed the catalog before accepting API traffic. The upserts are idempotent
+  // and preserve administrator edits; production fails closed if the required
+  // content/configuration cannot be initialized.
+  try {
+    await seedPlatformDefaults();
+    console.log('🎮 Platform game configuration and question library are ready.');
+  } catch (err) {
+    console.warn('Could not initialize platform game configuration/content:', err);
+    if (env.NODE_ENV === 'production') {
+      throw err;
+    }
+  }
+
   httpServer.listen(PORT, HOST, () => {
     console.log(`===============================================`);
     console.log(`🎮 PlaySpace API + Socket.IO Server running in ${env.NODE_ENV} mode`);
@@ -76,19 +90,6 @@ async function bootstrap() {
       }
     }).catch((err) => {
       console.warn('Could not restore sessions on startup:', err);
-    });
-
-    // Seed default game configurations if unseeded
-    prisma.gameConfiguration.count().then((count) => {
-      if (count === 0) {
-        adminService.seedInitialGameConfigs().then(() => {
-          console.log('🎮 Seeded initial game configurations.');
-        }).catch((err) => {
-          console.warn('Could not seed game configurations on startup:', err);
-        });
-      }
-    }).catch((err) => {
-      console.warn('Could not check game configuration count on startup:', err);
     });
 
     // Periodic idempotent cleanup of expired rooms and invitations (every 5 minutes)
