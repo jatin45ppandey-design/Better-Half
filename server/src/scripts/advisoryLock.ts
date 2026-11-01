@@ -56,7 +56,7 @@ export async function tryAcquireDedicatedAdvisoryLock(
 
   client.on('error', (error) => {
     // Avoid logging the driver error object, which may include connection details.
-    failClosedOnConnectionLoss(error?.message || 'PostgreSQL client error');
+    failClosedOnConnectionLoss('PostgreSQL client error');
   });
   client.on('end', () => failClosedOnConnectionLoss('connection ended unexpectedly'));
 
