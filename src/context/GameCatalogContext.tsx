@@ -54,6 +54,8 @@ export const GameCatalogProvider: React.FC<{ children: React.ReactNode }> = ({ c
     // the user's profile bootstrap to be complete. Wait for AuthContext's
     // dedicated /profiles/me bootstrap endpoint before making catalog calls.
     if (isProfileHydrating) {
+      setIsLoading(true);
+      setError(null);
       return;
     }
 
