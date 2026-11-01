@@ -16,6 +16,8 @@
  */
 
 import { prisma } from '../config/prisma.js';
+import { env } from '../config/env.js';
+import { tryAcquireDedicatedAdvisoryLock } from './advisoryLock.js';
 
 export interface RetentionOptions {
   execute: boolean;
@@ -153,15 +155,21 @@ export async function runRetention(options: RetentionOptions) {
 
   console.log(`\n🚀 Executing bounded retention operations in batches of ${batchSize}...`);
 
-  // Advisory lock to prevent multiple concurrent retention executions
-  if (typeof prisma.$queryRaw === 'function') {
-    try {
-      const lockRes: any = await prisma.$queryRaw`SELECT pg_try_advisory_lock(847291048) as acquired`;
-      if (lockRes?.[0]?.acquired === false) {
-        console.warn('⚠️ Another retention job is currently running. Exiting.');
-        return { executed: false, locked: true };
-      }
-    } catch {}
+  // Use a dedicated session-affine connection for the session-level advisory lock.
+  // Prisma may use a transaction pooler and cannot safely own this lock.
+  if (!env.DIRECT_URL) {
+    throw new Error('DIRECT_URL is required for retention execution. Refusing to run without a session-affine lock.');
+  }
+
+  const retentionLock = await tryAcquireDedicatedAdvisoryLock({
+    connectionString: env.DIRECT_URL,
+    lockId: 847291048,
+    taskName: 'Database retention',
+  });
+
+  if (!retentionLock) {
+    console.warn('⚠️ Another retention job is already running. No records were modified.');
+    return { executed: false, locked: true };
   }
 
   try {
@@ -299,11 +307,8 @@ export async function runRetention(options: RetentionOptions) {
       executed: true,
     };
   } finally {
-    if (typeof prisma.$queryRaw === 'function') {
-      try {
-        await prisma.$queryRaw`SELECT pg_advisory_unlock(847291048)`;
-      } catch {}
-    }
+    // Release through the same physical PostgreSQL session that acquired the lock.
+    await retentionLock.release();
   }
 }
 

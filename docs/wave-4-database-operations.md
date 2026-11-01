@@ -119,6 +119,18 @@ PlaySpace operates non-destructive automated retention via `server/src/scripts/d
 - **Match History Preservation**:
   - `Match`, `MatchParticipant`, `UserGameStats`, and `RivalryStats` are permanent and **never pruned**.
   - Any `Room` or `GameSession` linked to historical matches is preserved to prevent cascade deletion.
-- **Concurrency Protection**: Uses PostgreSQL session-level advisory lock (`847291048`) to ensure only one retention process runs at a time.
+- **Concurrency Protection**: Acquires advisory lock `847291048` through a dedicated `pg.Client` session using `DIRECT_URL` (never through Prisma's transaction pool). The same physical connection holds and releases the lock. Missing/invalid direct configuration, connection errors, lock loss, or release errors abort the operation; it never silently continues without the lease.
   - The backend server enforces application-level RBAC and tenant authorization at every API endpoint (`authenticateToken`, `requireActiveAccount`, `requireRole`).
   - Staging RLS verification execution is documented as **pending live staging database migration execution** prior to production deployment cutover.
+
+
+## 6. Disposable Restore Target Allowlist
+
+The logical restore script is restricted to isolated disposable databases:
+
+- Local loopback targets are accepted only when the database name is not a PostgreSQL system database.
+- Remote targets require an exact `DISPOSABLE_DATABASE_ALLOWLIST` entry in the format `hostname:port/database` (for example, `restore-db.example.test:5432/playspace_restore_test`). Use the canonical lowercase hostname and preserve the database name's exact case. Host-only and substring entries are rejected.
+- Known hosted application database providers remain blocked as restore targets.
+- The destination must be empty across every application table before the transaction begins.
+- Restore uses a serializable transaction and does not skip duplicates. Any uniqueness, schema, or record-count mismatch rolls back the entire restore.
+- The allowlist is an operator safety boundary, not a production deployment setting. Never add a production or shared staging database.

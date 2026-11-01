@@ -20,7 +20,7 @@
 
 import fs from 'node:fs';
 import crypto from 'node:crypto';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { BACKUP_TABLES, type BackupPayload } from './dbBackup.js';
 
 export interface ParsedTargetInfo {
@@ -29,6 +29,15 @@ export interface ParsedTargetInfo {
   port: string;
   database: string;
   sanitizedUrl: string;
+}
+
+function redactDatabaseUrl(value: string): string {
+  try {
+    const parsed = new URL(value);
+    return `${parsed.protocol}//${parsed.hostname}${parsed.port ? `:${parsed.port}` : ''}${parsed.pathname}`;
+  } catch {
+    return '[REDACTED DATABASE URL]';
+  }
 }
 
 export function validateDisposableDatabase(url: string): { isValid: boolean; reason?: string; info?: ParsedTargetInfo } {
@@ -44,85 +53,83 @@ export function validateDisposableDatabase(url: string): { isValid: boolean; rea
   }
 
   if (parsed.protocol !== 'postgresql:' && parsed.protocol !== 'postgres:') {
-    return { isValid: false, reason: `Invalid protocol "${parsed.protocol}". Expected "postgresql:" or "postgres:".` };
+    return { isValid: false, reason: 'Invalid database URL protocol. Expected postgres: or postgresql:.' };
   }
 
-  const hostname = parsed.hostname.toLowerCase();
-  const dbName = parsed.pathname.replace(/^\//, '').toLowerCase();
-
-  if (!dbName) {
-    return { isValid: false, reason: 'Target database name is missing from the connection URL.' };
+  const hostname = parsed.hostname.toLowerCase().replace(/\.$/, '');
+  let database: string;
+  try {
+    database = decodeURIComponent(parsed.pathname.replace(/^\/+/, ''));
+  } catch {
+    return { isValid: false, reason: 'Database name in target URL is not valid URL encoding.' };
   }
 
-  const sanitizedUrl = `${parsed.protocol}//${parsed.username ? `${parsed.username}:***@` : ''}${parsed.hostname}${parsed.port ? `:${parsed.port}` : ''}/${dbName}`;
+  if (!hostname || !database || database.includes('/')) {
+    return { isValid: false, reason: 'Target URL must contain exactly one database name and a hostname.' };
+  }
 
-  // Reject known cloud/hosted databases immediately
-  if (
-    hostname.includes('supabase.co') ||
-    hostname.includes('render.com') ||
-    hostname.includes('pooler.') ||
-    hostname.includes('amazonaws.com') ||
-    hostname.includes('azure.com') ||
-    hostname.includes('neon.tech') ||
-    hostname.includes('cockroachlabs.cloud')
-  ) {
+  const port = parsed.port || '5432';
+  const sanitizedUrl = `${parsed.protocol}//${hostname}:${port}/${database}`;
+
+  // Block known hosted application database providers even if an allowlist entry is supplied.
+  const hasDomainSuffix = (host: string, domain: string) => host === domain || host.endsWith(`.${domain}`);
+  const isHostedDatabase =
+    hasDomainSuffix(hostname, 'supabase.co') ||
+    hasDomainSuffix(hostname, 'supabase.com') ||
+    hasDomainSuffix(hostname, 'render.com') ||
+    hasDomainSuffix(hostname, 'onrender.com') ||
+    hasDomainSuffix(hostname, 'amazonaws.com') ||
+    hasDomainSuffix(hostname, 'azure.com') ||
+    hasDomainSuffix(hostname, 'neon.tech') ||
+    hasDomainSuffix(hostname, 'cockroachlabs.cloud') ||
+    hostname.includes('.pooler.');
+
+  if (isHostedDatabase) {
     return {
       isValid: false,
-      reason: `Host "${hostname}" is a cloud/hosted provider and is strictly forbidden for restore operations.`,
+      reason: `Host "${hostname}" is a hosted-provider database and is forbidden for disposable restores.`,
     };
   }
 
-  // Local isolated databases (localhost, 127.0.0.1, [::1])
-  const isLocalHost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1' || hostname === '[::1]';
+  const isLocalHost =
+    hostname === 'localhost' ||
+    hostname === '127.0.0.1' ||
+    hostname === '::1' ||
+    hostname === '[::1]';
+
   if (isLocalHost) {
-    if (dbName === 'postgres' || dbName === 'template1') {
+    if (['postgres', 'template0', 'template1'].includes(database.toLowerCase())) {
       return {
         isValid: false,
-        reason: `Target database "${dbName}" is a default system database. Dedicated isolated test DB required.`,
+        reason: `Target database "${database}" is a default system database. Use a dedicated disposable database.`,
       };
     }
     return {
       isValid: true,
-      info: {
-        protocol: parsed.protocol,
-        hostname,
-        port: parsed.port || '5432',
-        database: dbName,
-        sanitizedUrl,
-      },
+      info: { protocol: parsed.protocol, hostname, port, database, sanitizedUrl },
     };
   }
 
-  // Remote targets: Strictly allowlisted only. Substring matches like 'test' or 'dev' are NOT accepted.
-  const allowlistEnv = process.env.DISPOSABLE_DATABASE_ALLOWLIST || '';
-  const allowedEntries = allowlistEnv
+  // Remote allowlist entries must match the complete destination identity.
+  // Host-only and substring entries are not accepted.
+  const allowedEntries = (process.env.DISPOSABLE_DATABASE_ALLOWLIST || '')
     .split(',')
-    .map((e) => e.trim().toLowerCase())
+    .map((entry) => entry.trim())
     .filter(Boolean);
+  const targetIdentity = `${hostname}:${port}/${database}`;
 
-  const targetIdentifier = `${hostname}:${parsed.port || '5432'}/${dbName}`;
-  const targetHostAndDb = `${hostname}/${dbName}`;
-
-  const isExplicitlyAllowlisted = allowedEntries.some(
-    (entry) => entry === targetIdentifier || entry === targetHostAndDb || entry === hostname
-  );
-
-  if (isExplicitlyAllowlisted) {
+  if (!allowedEntries.includes(targetIdentity)) {
     return {
-      isValid: true,
-      info: {
-        protocol: parsed.protocol,
-        hostname,
-        port: parsed.port || '5432',
-        database: dbName,
-        sanitizedUrl,
-      },
+      isValid: false,
+      reason:
+        `Remote target "${targetIdentity}" is not explicitly allowlisted. ` +
+        'Use an exact hostname:port/database entry in DISPOSABLE_DATABASE_ALLOWLIST.',
     };
   }
 
   return {
-    isValid: false,
-    reason: `Remote database host "${hostname}" is not in DISPOSABLE_DATABASE_ALLOWLIST. Remote restores are blocked by default.`,
+    isValid: true,
+    info: { protocol: parsed.protocol, hostname, port, database, sanitizedUrl },
   };
 }
 
@@ -159,16 +166,49 @@ export async function restoreDatabaseSnapshot(options: {
     throw new Error(`Malformed backup snapshot. Missing metadata or data sections.`);
   }
 
-  // 1. Verify Checksum
-  if (payload.metadata.checksum) {
-    const dataStr = JSON.stringify(payload.data);
-    const calculatedChecksum = crypto.createHash('sha256').update(dataStr).digest('hex');
-    if (calculatedChecksum !== payload.metadata.checksum) {
+  // Validate snapshot integrity and exact schema contents before contacting the target database.
+  if (typeof payload.metadata.checksum !== 'string' || !/^[a-f0-9]{64}$/i.test(payload.metadata.checksum)) {
+    throw new Error('Backup snapshot is missing a valid SHA-256 checksum.');
+  }
+
+  const dataStr = JSON.stringify(payload.data);
+  const calculatedChecksum = crypto.createHash('sha256').update(dataStr).digest('hex');
+  if (calculatedChecksum !== payload.metadata.checksum) {
+    throw new Error(
+      `CHECKSUM INTEGRITY MISMATCH! Expected: ${payload.metadata.checksum}; computed: ${calculatedChecksum}`
+    );
+  }
+  console.log(`🔒 Checksum verified successfully (SHA256: ${payload.metadata.checksum.slice(0, 16)}...)`);
+
+  const expectedTables = new Set<string>(BACKUP_TABLES);
+  const suppliedTables = Object.keys(payload.data);
+  const unknownTables = suppliedTables.filter((table) => !expectedTables.has(table));
+  if (unknownTables.length > 0) {
+    throw new Error(`Compatibility Error: Backup contains unrecognized tables: ${unknownTables.join(', ')}.`);
+  }
+
+  let validatedRecordTotal = 0;
+  for (const table of BACKUP_TABLES) {
+    if (!Object.prototype.hasOwnProperty.call(payload.data, table)) {
+      throw new Error(`Compatibility Error: Backup snapshot is missing expected table "${table}".`);
+    }
+    const records = payload.data[table];
+    if (!Array.isArray(records)) {
+      throw new Error(`Malformed backup data for table "${table}": expected an array.`);
+    }
+    const declaredCount = payload.metadata.tableCounts?.[table];
+    if (!Number.isSafeInteger(declaredCount) || declaredCount !== records.length) {
       throw new Error(
-        `CHECKSUM INTEGRITY MISMATCH!\nExpected: ${payload.metadata.checksum}\nComputed: ${calculatedChecksum}`
+        `Backup metadata mismatch for "${table}": declared ${String(declaredCount)} record(s), found ${records.length}.`
       );
     }
-    console.log(`🔒 Checksum verified successfully (SHA256: ${payload.metadata.checksum.slice(0, 16)}...)`);
+    validatedRecordTotal += records.length;
+  }
+
+  if (!Number.isSafeInteger(payload.metadata.totalRecords) || payload.metadata.totalRecords !== validatedRecordTotal) {
+    throw new Error(
+      `Backup metadata total mismatch: declared ${String(payload.metadata.totalRecords)}, found ${validatedRecordTotal}.`
+    );
   }
 
   console.log(`📋 Backup Timestamp : ${payload.metadata.timestamp}`);
@@ -199,7 +239,7 @@ export async function restoreDatabaseSnapshot(options: {
     throw new Error(
       `CRITICAL SAFETY VIOLATION:\nTarget database validation rejected!\n` +
       `Reason: ${validation.reason}\n` +
-      `Target URL: ${targetUrl.replace(/:[^:@]+@/, ':***@')}`
+      `Target URL: ${redactDatabaseUrl(targetUrl)}`
     );
   }
 
@@ -223,37 +263,61 @@ export async function restoreDatabaseSnapshot(options: {
   let restoredRecords = 0;
 
   try {
-    // 3. Execute all restorations inside a single atomic transaction.
-    // If any table fails, the entire transaction rolls back cleanly without partial state.
+    // 3. Verify the target is empty and restore atomically. Serializable isolation
+    // protects the preflight against concurrent writes; duplicates are never skipped.
     await disposablePrisma.$transaction(
       async (tx) => {
-        for (const [table, records] of Object.entries(payload.data)) {
-          if (!Array.isArray(records)) {
-            throw new Error(`Malformed data for table "${table}": expected array of records.`);
-          }
-          if (records.length === 0) continue;
+        const delegates = new Map<string, any>();
 
+        // Validate every expected model and reject non-empty targets before inserting.
+        for (const table of BACKUP_TABLES) {
           const delegateName = table.charAt(0).toLowerCase() + table.slice(1);
           const delegate = (tx as any)[delegateName];
-
-          if (!delegate || typeof delegate.createMany !== 'function') {
+          if (!delegate || typeof delegate.count !== 'function' || typeof delegate.createMany !== 'function') {
             throw new Error(
-              `Schema compatibility error: Table "${table}" from backup snapshot is not recognized in target schema.`
+              `Schema compatibility error: Required table "${table}" is unavailable in the target Prisma schema.`
             );
           }
 
-          const res = await delegate.createMany({
+          const existingCount = await delegate.count();
+          if (existingCount !== 0) {
+            throw new Error(
+              `Restore target is not empty: table "${table}" already contains ${existingCount} record(s). Use a fresh disposable database.`
+            );
+          }
+          delegates.set(table, delegate);
+        }
+
+        for (const table of BACKUP_TABLES) {
+          const records = payload.data[table];
+          if (records.length === 0) continue;
+
+          const delegate = delegates.get(table);
+          const result = await delegate.createMany({
             data: records,
-            skipDuplicates: true,
+            skipDuplicates: false,
           });
 
-          restoredRecords += res.count || 0;
-          console.log(`  ✅ Restored ${res.count} record(s) into ${table}`);
+          if (result.count !== records.length) {
+            throw new Error(
+              `Restore count mismatch for "${table}": inserted ${result.count} of ${records.length} record(s).`
+            );
+          }
+
+          restoredRecords += result.count;
+          console.log(`  ✅ Restored ${result.count} record(s) into ${table}`);
+        }
+
+        if (restoredRecords !== payload.metadata.totalRecords) {
+          throw new Error(
+            `Restore total mismatch: inserted ${restoredRecords}, expected ${payload.metadata.totalRecords}.`
+          );
         }
       },
       {
         maxWait: 10000,
         timeout: 120000,
+        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
       }
     );
 
