@@ -107,7 +107,9 @@ describe('PlaySpace Backend API — Phase 1 Test Suite', () => {
         },
       };
 
-      vi.spyOn(prisma.userProfile, 'findUnique').mockResolvedValueOnce(mockProfile as any);
+      // /profiles/me checks authorization and then reloads the full canonical
+      // profile. Keep the fixture available for both legitimate database reads.
+      vi.spyOn(prisma.userProfile, 'findUnique').mockResolvedValue(mockProfile as any);
 
       const res = await request(app)
         .get('/api/v1/profiles/me')
