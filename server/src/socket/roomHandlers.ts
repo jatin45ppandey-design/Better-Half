@@ -191,7 +191,7 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
       const roomChannel = `room:${roomId}`;
       const onlineUserIds = await revokeRoomMembership(io, roomId, userId, 'LEFT');
 
-      if (result) {
+      if (result && 'room' in result && result.room) {
         io.to(roomChannel).emit('room:player:left', {
           userId,
           newHostId: result.newHostId ?? undefined,
@@ -205,7 +205,7 @@ export function registerRoomHandlers(io: AppServer, socket: AppSocket): void {
         io.to(roomChannel).emit('room:presence:update', { onlineUserIds });
       }
 
-      callback?.({ success: true });
+      callback?.({ success: true, ...(result && 'code' in result ? { code: (result as any).code } : {}) });
     } catch (err: any) {
       callback?.({ success: false, error: safeSocketError(err, 'Failed to leave room') });
     }

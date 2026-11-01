@@ -125,7 +125,8 @@ export class RoomsService {
   }
 
   /** Enforce admin game availability on every server mutation path. Missing
-   * config rows retain the existing default-enabled behavior used by admin service. */
+   * config rows retain the existing default-enabled behavior used by admin service.
+   * Fails closed with 503 if the database query fails. */
   private async assertGameEnabledForMode(
     gameId: string,
     mode: RoomMode,
@@ -135,8 +136,9 @@ export class RoomsService {
     let config = null;
     try {
       config = await db.gameConfiguration.findUnique({ where: { gameId } });
-    } catch (err) {
-      return;
+    } catch (err: any) {
+      if (err instanceof AppError) throw err;
+      throw new AppError('Game configuration service is temporarily unavailable. Please retry.', 503);
     }
     if (!config) return;
     if (!config.isEnabled) {
@@ -172,7 +174,7 @@ export class RoomsService {
     });
 
     if (!room) {
-      throw new NotFoundError('Room not found');
+      throw new NotFoundError('Room not found', { code: 'ROOM_NOT_FOUND' });
     }
 
     return room.id;
@@ -761,7 +763,9 @@ export class RoomsService {
       },
     });
 
-    if (!room) return null;
+    if (!room) {
+      return { success: true, code: 'ROOM_NOT_FOUND', message: 'Room not found or already closed.' };
+    }
 
     const participant = await prisma.roomParticipant.findUnique({
       where: {
@@ -773,8 +777,12 @@ export class RoomsService {
       include: { user: true },
     });
 
-    if (!participant || participant.leftAt) {
-      return null;
+    if (!participant) {
+      return { success: true, code: 'NOT_A_MEMBER', message: 'User is not an active participant in this room.' };
+    }
+
+    if (participant.leftAt) {
+      return { success: true, code: 'ALREADY_LEFT', message: 'User has already left this room.' };
     }
 
     const transactionResult = await prisma.$transaction(
@@ -880,12 +888,15 @@ export class RoomsService {
       }
     );
 
-    if (!transactionResult) return null;
+    if (!transactionResult) {
+      return { success: true, code: 'ALREADY_LEFT', message: 'Room departure completed.' };
+    }
 
     const fullRoom = await this.findRoomWithRelations({ id: room.id });
     if (!fullRoom) throw new NotFoundError('Room not found after leaving');
 
     return {
+      success: true,
       room: this.formatRoomSnapshot(fullRoom),
       ...transactionResult,
     };

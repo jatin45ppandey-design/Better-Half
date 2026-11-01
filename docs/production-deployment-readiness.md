@@ -108,12 +108,14 @@ curl https://playspace-backend.onrender.com/api/v1/health
 
 ## 5. Security & Reliability Checklist
 
-1. **Strict Single-Instance Deployment Enforcement**:
+1. **Strict Single-Instance Deployment Enforcement & Dedicated Advisory Lock**:
    - The PlaySpace backend runs as a single-instance container (Render Web Service `instances = 1`).
    - **Enforcement Mechanisms**:
-     - At startup, Node.js checks `cluster.isPrimary` and worker forks; if clustering is detected in production without Redis, it immediately terminates (`process.exit(1)`).
-     - At startup, the server acquires a PostgreSQL lease using `SELECT pg_try_advisory_lock(583920192)`. If another container instance is already running, the new instance immediately logs `CRITICAL MULTI-INSTANCE CONFLICT` and terminates (`process.exit(1)`).
-     - Upon graceful shutdown, the lease is released (`SELECT pg_advisory_unlock(583920192)`).
+     - At startup, Node.js checks `CLUSTER_MODE`, `NODE_APP_INSTANCE`, and `WEB_CONCURRENCY`; if clustering or multi-instance concurrency is detected, it terminates (`process.exit(1)`).
+     - Prior to opening HTTP/Socket.IO traffic, the server establishes a dedicated, session-affine PostgreSQL connection using `DIRECT_URL` (port 5432, completely bypassing transaction poolers).
+     - It acquires an authoritative advisory lock: `SELECT pg_try_advisory_lock(583920192)`. If another container or instance holds the lock, startup immediately fails with a fatal error and terminates (`process.exit(1)`).
+     - The dedicated database connection is kept alive for the entire process lifetime. If the connection drops or errors unexpectedly, the server fails closed (`process.exit(1)`) to guarantee single-instance invariants.
+     - Upon graceful shutdown, the lease is released through the same PostgreSQL session (`SELECT pg_advisory_unlock(583920192)`) and the connection is cleanly closed.
    - **Horizontal Scaling Prerequisites**: Scaling beyond 1 container requires:
      - Redis-backed Socket.IO adapter (`@socket.io/redis-adapter`) for cross-instance WebSocket broadcasting.
      - Centralized distributed rate limiting.

@@ -103,7 +103,16 @@ export async function leaveRoom(req: Request, res: Response, next: NextFunction)
   try {
     const userId = req.user!.id;
     const roomIdentifier = getParam(req.params.id);
-    const canonicalRoomId = await roomsService.getCanonicalRoomId(roomIdentifier);
+    let canonicalRoomId: string;
+    try {
+      canonicalRoomId = await roomsService.getCanonicalRoomId(roomIdentifier);
+    } catch (err: any) {
+      if (err instanceof NotFoundError) {
+        res.status(200).json({ success: true, code: 'ROOM_NOT_FOUND', message: 'Room not found or already closed.' });
+        return;
+      }
+      throw err;
+    }
     const result = await roomsService.leaveRoom(canonicalRoomId, userId);
     const realtimeServer = getRealtimeServer();
 
@@ -116,7 +125,7 @@ export async function leaveRoom(req: Request, res: Response, next: NextFunction)
         'LEFT'
       );
 
-      if (result?.room) {
+      if (result && 'room' in result && result.room) {
         realtimeServer.to(roomChannel).emit('room:player:left', {
           userId,
           ...(result.newHostId ? { newHostId: result.newHostId } : {}),

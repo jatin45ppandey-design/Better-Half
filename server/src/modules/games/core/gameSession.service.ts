@@ -92,9 +92,15 @@ export class GameSessionService {
       throw new AppError(`Game "${gameId}" is not allowed in ${room.mode} Mode`, 400);
     }
 
-    const gameConfig = await prisma.gameConfiguration.findUnique({
-      where: { gameId },
-    });
+    let gameConfig = null;
+    try {
+      gameConfig = await prisma.gameConfiguration.findUnique({
+        where: { gameId },
+      });
+    } catch (err: any) {
+      if (err instanceof AppError) throw err;
+      throw new AppError('Game configuration service is temporarily unavailable. Please retry.', 503);
+    }
     if (gameConfig) {
       if (!gameConfig.isEnabled) {
         throw new AppError(`Game "${gameId}" is currently disabled by administrators.`, 400);
@@ -225,9 +231,15 @@ export class GameSessionService {
           throw new AppError('The selected game changed while the session was starting. Please retry.', 409);
         }
 
-        const lockedGameConfig = await tx.gameConfiguration.findUnique({
-          where: { gameId },
-        });
+        let lockedGameConfig = null;
+        try {
+          lockedGameConfig = await tx.gameConfiguration.findUnique({
+            where: { gameId },
+          });
+        } catch (err: any) {
+          if (err instanceof AppError) throw err;
+          throw new AppError('Game configuration service is temporarily unavailable. Please retry.', 503);
+        }
         if (lockedGameConfig) {
           if (!lockedGameConfig.isEnabled) {
             throw new AppError(`Game "${gameId}" is currently disabled by administrators.`, 400);
@@ -572,7 +584,13 @@ export class GameSessionService {
       throw new AppError('All active players must be ready before starting a rematch.', 400);
     }
 
-    const gameConfig = await prisma.gameConfiguration.findUnique({ where: { gameId } });
+    let gameConfig = null;
+    try {
+      gameConfig = await prisma.gameConfiguration.findUnique({ where: { gameId } });
+    } catch (err: any) {
+      if (err instanceof AppError) throw err;
+      throw new AppError('Game configuration service is temporarily unavailable. Please retry.', 503);
+    }
     if (gameConfig) {
       if (!gameConfig.isEnabled) {
         throw new AppError(`Game "${gameId}" is currently disabled by administrators.`, 400);

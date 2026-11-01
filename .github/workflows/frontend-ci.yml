@@ -2,9 +2,9 @@ name: Frontend CI & Release Gate
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, 'phase-*', 'release/*', 'project/**' ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, 'phase-*', 'release/*', 'project/**' ]
 
 jobs:
   frontend-test-and-build:
@@ -14,7 +14,8 @@ jobs:
     env:
       VITE_API_BASE_URL: http://localhost:4000
       VITE_SUPABASE_URL: https://ci-isolated-test.supabase.co
-      VITE_SUPABASE_ANON_KEY: mock-ci-anon-key-1234567890
+      VITE_SUPABASE_PUBLISHABLE_KEY: sb_publishable_ci_mock_key_test_12345
+      VITE_SUPABASE_ANON_KEY: sb_publishable_ci_mock_key_test_12345
 
     steps:
       - name: Check out repository

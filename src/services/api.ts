@@ -6,12 +6,14 @@ const API_V1 = `${API_BASE_URL}/api/v1`;
 export class ApiError extends Error {
   public status: number;
   public details?: any;
+  public code?: string;
 
-  constructor(message: string, status: number, details?: any) {
+  constructor(message: string, status: number, details?: any, code?: string) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.details = details;
+    this.code = code;
   }
 }
 
@@ -64,7 +66,8 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
       void supabase.auth.signOut().catch(() => {});
     }
     const message = (isJson && (data.message || data.error)) || `HTTP ${response.status}: ${response.statusText}`;
-    throw new ApiError(message, response.status, isJson ? data.details : undefined);
+    const code = isJson ? (data.code || data.details?.code || (data.error === 'NotFoundError' ? 'ROOM_NOT_FOUND' : undefined)) : undefined;
+    throw new ApiError(message, response.status, isJson ? data.details : undefined, code);
   }
 
   return data as T;

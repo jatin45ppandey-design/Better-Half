@@ -601,8 +601,15 @@ export const RoomProvider: React.FC<{ children: React.ReactNode }> = ({ children
         try {
           await api.rooms.leave(roomId);
         } catch (restErr: any) {
-          // If room already left / 404 / 400 (not member), consider it successfully cleared
-          if (restErr?.status !== 404 && restErr?.status !== 400) {
+          // Explicit, documented idempotent responses: ALREADY_LEFT, NOT_A_MEMBER, or ROOM_NOT_FOUND
+          const code = restErr?.code || restErr?.details?.code;
+          const isIdempotentLeave =
+            code === 'ALREADY_LEFT' ||
+            code === 'NOT_A_MEMBER' ||
+            code === 'ROOM_NOT_FOUND' ||
+            (restErr?.status === 404 && restErr?.message?.toLowerCase().includes('room not found'));
+
+          if (!isIdempotentLeave) {
             const errorMsg = restErr?.message || socketError || 'Failed to leave room. Please try again.';
             setRoomError(errorMsg);
             return { success: false, error: errorMsg };

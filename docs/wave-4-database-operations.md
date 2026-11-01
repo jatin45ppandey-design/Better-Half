@@ -98,5 +98,27 @@ pg_restore \
 
 - **Specification**: Complete Row-Level Security policies and privilege boundaries are specified in `docs/phase-1-rls-privilege-boundary.md` and database schema.
 - **Audit Status**:
+  - Live staging verification script: `server/src/scripts/verifyDbSecurity.ts`
+  - Automated CI deployment verification: `.github/workflows/backend-ci.yml`
+
+---
+
+## 5. Automated Data Retention & Archival Runbook
+
+### 5.1 Retention Policy Specification
+PlaySpace operates non-destructive automated retention via `server/src/scripts/dbRetention.ts`:
+- **Default Mode**: Simulation / dry-run (`npm run db:retention`).
+- **Execution Mode**: Live pruning with explicit flag (`npm run db:retention -- --execute`).
+- **Configurable Retention Periods**:
+  - Expired / cancelled room invitations: 14 days
+  - Abandoned / completed sessions (non-match): 30 days
+  - Ephemeral turn-by-turn game actions: 30 days
+  - Closed / expired rooms (non-match): 30 days
+  - Audit logs: 90 days
+- **Batch Processing**: Configurable batch size (default: 100 records per batch) to prevent table locks and transaction log spikes.
+- **Match History Preservation**:
+  - `Match`, `MatchParticipant`, `UserGameStats`, and `RivalryStats` are permanent and **never pruned**.
+  - Any `Room` or `GameSession` linked to historical matches is preserved to prevent cascade deletion.
+- **Concurrency Protection**: Uses PostgreSQL session-level advisory lock (`847291048`) to ensure only one retention process runs at a time.
   - The backend server enforces application-level RBAC and tenant authorization at every API endpoint (`authenticateToken`, `requireActiveAccount`, `requireRole`).
   - Staging RLS verification execution is documented as **pending live staging database migration execution** prior to production deployment cutover.

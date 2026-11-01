@@ -20,7 +20,7 @@ if (
     '   Horizontal multi-instance scaling requires Redis adapter for Socket.IO and distributed rate limiting.\n' +
     '   Aborting startup to prevent split-brain room state, desynced presence, and uncoordinated timers.';
   console.error(errMsg);
-  if (env.NODE_ENV === 'production' && process.env.ALLOW_MULTI_INSTANCE_UNSAFE !== 'true') {
+  if (env.NODE_ENV === 'production') {
     process.exit(1);
   }
 }
@@ -31,6 +31,7 @@ import { gameSessionService } from './modules/games/core/gameSession.service.js'
 import { roomsService } from './modules/rooms/rooms.service.js';
 import { adminService } from './modules/admin/admin.service.js';
 import { createShutdownHandler, registerShutdownSignals } from './lifecycle/shutdown.js';
+import { acquireInstanceLock, type InstanceLockHandle } from './lifecycle/instanceLock.js';
 import { presenceManager } from './socket/presence.js';
 import { cleanupSnatchTimers } from './socket/gameHandlers.js';
 import { gameStateService } from './modules/games/core/gameState.service.js';
@@ -47,102 +48,93 @@ const PORT = env.PORT;
 const HOST = '0.0.0.0';
 
 let cleanupTimer: NodeJS.Timeout | null = null;
+let instanceLockHandle: InstanceLockHandle | null = null;
 
-httpServer.listen(PORT, HOST, () => {
-  console.log(`===============================================`);
-  console.log(`🎮 PlaySpace API + Socket.IO Server running in ${env.NODE_ENV} mode`);
-  console.log(`📡 URL: http://${HOST}:${PORT}/api/v1`);
-  console.log(`🔌 Socket.IO: http://${HOST}:${PORT}`);
-  console.log(`🩺 Health: http://${HOST}:${PORT}/api/v1/health`);
-  console.log(`🗄️ Ready:  http://${HOST}:${PORT}/api/v1/ready`);
-  console.log(`===============================================`);
-
-  // Enforce authoritative single-instance database lease
-  if (env.NODE_ENV === 'production' && typeof prisma.$queryRaw === 'function') {
-    prisma.$queryRaw<Array<{ acquired: boolean }>>`SELECT pg_try_advisory_lock(583920192) as acquired`
-      .then((res) => {
-        const acquired = res?.[0]?.acquired;
-        if (acquired === false) {
-          console.error(
-            '❌ [FATAL DEPLOYMENT CONSTRAINT] Another PlaySpace server instance is already running against this database.\n' +
-            '   Single-instance mode is strictly enforced. Multiple instances cannot run concurrently\n' +
-            '   without a distributed Socket.IO Redis adapter.\n' +
-            '   Terminating this process to prevent split-brain room state and desynced presence.'
-          );
-          if (process.env.ALLOW_MULTI_INSTANCE_UNSAFE !== 'true') {
-            process.exit(1);
-          }
-        } else {
-          console.log('🔒 Authoritative single-instance database lease acquired.');
-        }
-      })
-      .catch((err) => {
-        console.warn('Could not verify database single-instance lease:', err?.message || err);
-      });
+async function bootstrap() {
+  // Acquire authoritative single-instance database lease BEFORE opening traffic
+  if (env.NODE_ENV === 'production') {
+    if (!env.DIRECT_URL) {
+      console.error('❌ [FATAL DEPLOYMENT CONSTRAINT] DIRECT_URL must be configured for session-affine advisory lock in production.');
+      process.exit(1);
+    }
+    instanceLockHandle = await acquireInstanceLock(env.DIRECT_URL);
   }
 
-  // Restore any active or paused sessions from DB on startup (bounded)
-  gameSessionService.restoreActiveSessions().then((count) => {
-    if (count > 0) {
-      console.log(`🔄 Restored ${count} active/paused game session(s) from database.`);
-    }
-  }).catch((err) => {
-    console.warn('Could not restore sessions on startup:', err);
+  httpServer.listen(PORT, HOST, () => {
+    console.log(`===============================================`);
+    console.log(`🎮 PlaySpace API + Socket.IO Server running in ${env.NODE_ENV} mode`);
+    console.log(`📡 URL: http://${HOST}:${PORT}/api/v1`);
+    console.log(`🔌 Socket.IO: http://${HOST}:${PORT}`);
+    console.log(`🩺 Health: http://${HOST}:${PORT}/api/v1/health`);
+    console.log(`🗄️ Ready:  http://${HOST}:${PORT}/api/v1/ready`);
+    console.log(`===============================================`);
+
+    // Restore any active or paused sessions from DB on startup (bounded)
+    gameSessionService.restoreActiveSessions().then((count) => {
+      if (count > 0) {
+        console.log(`🔄 Restored ${count} active/paused game session(s) from database.`);
+      }
+    }).catch((err) => {
+      console.warn('Could not restore sessions on startup:', err);
+    });
+
+    // Seed default game configurations if unseeded
+    prisma.gameConfiguration.count().then((count) => {
+      if (count === 0) {
+        adminService.seedInitialGameConfigs().then(() => {
+          console.log('🎮 Seeded initial game configurations.');
+        }).catch((err) => {
+          console.warn('Could not seed game configurations on startup:', err);
+        });
+      }
+    }).catch((err) => {
+      console.warn('Could not check game configuration count on startup:', err);
+    });
+
+    // Periodic idempotent cleanup of expired rooms and invitations (every 5 minutes)
+    const EXPIRY_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
+    const runCleanup = async () => {
+      try {
+        const { expiredCount } = await roomsService.cleanupExpiredRooms();
+        if (expiredCount > 0) {
+          console.log(`🧹 Cleaned up ${expiredCount} expired room(s).`);
+        }
+      } catch (err) {
+        console.warn('Expired rooms cleanup task error:', err);
+      }
+    };
+
+    runCleanup();
+    cleanupTimer = setInterval(runCleanup, EXPIRY_CLEANUP_INTERVAL_MS);
+    cleanupTimer.unref();
   });
 
-  // Seed default game configurations if unseeded
-  prisma.gameConfiguration.count().then((count) => {
-    if (count === 0) {
-      adminService.seedInitialGameConfigs().then(() => {
-        console.log('🎮 Seeded initial game configurations.');
-      }).catch((err) => {
-        console.warn('Could not seed game configurations on startup:', err);
-      });
-    }
-  }).catch((err) => {
-    console.warn('Could not check game configuration count on startup:', err);
+  // Robust graceful shutdown handling with domain cleanup lifecycle
+  const shutdownHandler = createShutdownHandler({
+    httpServer,
+    io,
+    prisma,
+    getCleanupTimers: () => [cleanupTimer],
+    cleanupCallbacks: [
+      () => markServerShuttingDown(),
+      () => presenceManager.shutdown(),
+      () => cleanupSnatchTimers(),
+      () => gameStateService.shutdown(),
+      () => resetSocketRateLimits(),
+      () => resetRoomLookupTracker(),
+      async () => {
+        if (instanceLockHandle) {
+          await instanceLockHandle.release();
+        }
+      },
+    ],
+    forceTimeoutMs: 10000,
   });
 
-  // Periodic idempotent cleanup of expired rooms and invitations (every 5 minutes)
-  const EXPIRY_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
-  const runCleanup = async () => {
-    try {
-      const { expiredCount } = await roomsService.cleanupExpiredRooms();
-      if (expiredCount > 0) {
-        console.log(`🧹 Cleaned up ${expiredCount} expired room(s).`);
-      }
-    } catch (err) {
-      console.warn('Expired rooms cleanup task error:', err);
-    }
-  };
+  registerShutdownSignals(shutdownHandler);
+}
 
-  runCleanup();
-  cleanupTimer = setInterval(runCleanup, EXPIRY_CLEANUP_INTERVAL_MS);
-  cleanupTimer.unref();
+bootstrap().catch((err) => {
+  console.error('❌ [FATAL] Server bootstrap failed:', err);
+  process.exit(1);
 });
-
-// Robust graceful shutdown handling with domain cleanup lifecycle
-const shutdownHandler = createShutdownHandler({
-  httpServer,
-  io,
-  prisma,
-  getCleanupTimers: () => [cleanupTimer],
-  cleanupCallbacks: [
-    () => markServerShuttingDown(),
-    () => presenceManager.shutdown(),
-    () => cleanupSnatchTimers(),
-    () => gameStateService.shutdown(),
-    () => resetSocketRateLimits(),
-    () => resetRoomLookupTracker(),
-    async () => {
-      if (typeof prisma.$queryRaw === 'function') {
-        try {
-          await prisma.$queryRaw`SELECT pg_advisory_unlock(583920192)`;
-        } catch {}
-      }
-    },
-  ],
-  forceTimeoutMs: 10000,
-});
-
-registerShutdownSignals(shutdownHandler);

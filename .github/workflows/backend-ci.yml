@@ -2,9 +2,9 @@ name: Backend CI & Release Gate
 
 on:
   push:
-    branches: [ main, 'phase-*', 'release/*' ]
+    branches: [ main, 'phase-*', 'release/*', 'project/**' ]
   pull_request:
-    branches: [ main, 'phase-*', 'release/*' ]
+    branches: [ main, 'phase-*', 'release/*', 'project/**' ]
 
 jobs:
   backend-test-and-build:
