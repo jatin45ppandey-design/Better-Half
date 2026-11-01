@@ -6,6 +6,7 @@ import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
 import { api } from '../services/api';
 import { useToast } from '../context/ToastContext';
+import { useGameCatalog } from '../context/GameCatalogContext';
 import { soundService } from '../services/soundService';
 import {
   ShieldCheck,
@@ -101,6 +102,7 @@ export const AdminDashboardPage: React.FC = () => {
   const [optionB, setOptionB] = useState('');
 
   const { addToast } = useToast();
+  const { refreshCatalog } = useGameCatalog();
 
   const loadData = useCallback(async () => {
     setIsLoading(true);
@@ -167,6 +169,7 @@ export const AdminDashboardPage: React.FC = () => {
       await api.admin.updateGame(gameItem.gameId, {
         isEnabled: nextEnabled,
       });
+      await refreshCatalog();
       addToast(`Game ${gameItem.gameId} is now ${nextEnabled ? 'enabled' : 'disabled'}`, {
         type: 'info',
       });
