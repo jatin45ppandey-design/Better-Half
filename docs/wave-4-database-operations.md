@@ -129,7 +129,7 @@ PlaySpace operates non-destructive automated retention via `server/src/scripts/d
 The logical restore script is restricted to isolated disposable databases:
 
 - Local loopback targets are accepted only when the database name is not a PostgreSQL system database.
-- Remote targets require an exact `DISPOSABLE_DATABASE_ALLOWLIST` entry in the format `hostname:port/database` (for example, `restore-db.example.test:5432/playspace_restore_test`). Host-only and substring entries are rejected.
+- Remote targets require an exact `DISPOSABLE_DATABASE_ALLOWLIST` entry in the format `hostname:port/database` (for example, `restore-db.example.test:5432/playspace_restore_test`). Use the canonical lowercase hostname and preserve the database name's exact case. Host-only and substring entries are rejected.
 - Known hosted application database providers remain blocked as restore targets.
 - The destination must be empty across every application table before the transaction begins.
 - Restore uses a serializable transaction and does not skip duplicates. Any uniqueness, schema, or record-count mismatch rolls back the entire restore.
