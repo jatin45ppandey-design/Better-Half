@@ -53,7 +53,7 @@ export const GameLibrary: React.FC<GameLibraryProps> = ({
   });
 
   const handleCardClick = (game: GameItem) => {
-    if (catalogLoading || catalogError || !isAvailableInAnyMode(game.id)) return;
+    if (catalogLoading || catalogError || !isAvailable(game.id, activeMode)) return;
     soundService.playClick();
     onSelectGame(game);
   };
@@ -179,20 +179,24 @@ export const GameLibrary: React.FC<GameLibraryProps> = ({
             const isEnabledSomewhere = isAvailableInAnyMode(game.id);
             const isEnabledForActiveMode = isAvailable(game.id, activeMode);
             const availability = getAvailability(game.id);
-            const availabilityLabel = !isEnabledSomewhere
+            const availabilityLabel = catalogLoading
+              ? 'Checking availability…'
+              : catalogError
+              ? 'Availability unavailable'
+              : !isEnabledSomewhere
               ? 'Disabled by admin'
               : !isEnabledForActiveMode
-              ? `Available in ${activeMode === 'couple' ? 'Friend' : 'Couple'} Mode`
+              ? `Only available in ${activeMode === 'couple' ? 'Friend' : 'Couple'} Mode`
               : null;
 
             return (
               <div
                 key={game.id}
                 onClick={() => handleCardClick(game)}
-                aria-disabled={catalogLoading || Boolean(catalogError) || !isEnabledSomewhere}
+                aria-disabled={catalogLoading || Boolean(catalogError) || !isEnabledForActiveMode}
                 title={availability?.maintenanceMessage || availabilityLabel || undefined}
                 className={`group relative flex flex-col justify-between bg-[#160E25] rounded-3xl border border-[#2D1B48] p-5 shadow-lg shadow-black/25 transition-all duration-200 select-none ${
-                  catalogLoading || catalogError || !isEnabledSomewhere
+                  catalogLoading || catalogError || !isEnabledForActiveMode
                     ? 'opacity-55 cursor-not-allowed'
                     : 'hover:border-[#5B339A] hover:bg-[#1D1231] hover:-translate-y-1.5 cursor-pointer'
                 }`}
